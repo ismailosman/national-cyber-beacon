@@ -1,84 +1,83 @@
 
-# Logo Replacement + Add Banks & Telecoms + Organization Edit Button
+# Three Changes in One Pass
 
-## Overview
+## Summary of Work
 
-Three changes will be made simultaneously:
-
-1. Replace the text logo in the sidebar with the uploaded image
-2. Insert 15 new organizations (8 banks + 7 telecoms) into the database with their assets
-3. Add an Edit Organization modal/dialog to the OrgDetail page
+1. **Replace the logo** — copy the newly uploaded image to `src/assets/logo.png` (replaces the existing one, both Sidebar and AppLayout automatically pick it up since they already import from that path)
+2. **Delete Organization** — add a red "Delete" button on the OrgDetail page, visible only to SuperAdmin, that opens an `AlertDialog` confirmation before calling `supabase.from('organizations').delete()` and navigating back
+3. **Add Organization** — add an "Add Organization" button on the Organizations page header (visible to SuperAdmin only) that opens a `Dialog` modal with a full creation form
 
 ---
 
 ## 1. Logo Replacement
 
-**Files to change:** `src/components/layout/Sidebar.tsx` and `src/components/layout/AppLayout.tsx`
+**File operation:** `lov-copy user-uploads://D0473B6E-F138-4642-839B-4104AE36A62A.png src/assets/logo.png`
 
-The uploaded logo (`user-uploads://image.png`) will be copied to `src/assets/logo.png`.
-
-- **Sidebar**: Remove the `Shield` icon + "Somalia / Cyber Defense" text block. Replace with `<img src={logoImg} />` — sized `w-36` to show the full logo in the sidebar header area.
-- **Mobile header (AppLayout)**: Replace the text `"Somalia Cyber Defense"` with the same logo image.
+No code changes needed — both `src/components/layout/Sidebar.tsx` and `src/components/layout/AppLayout.tsx` already import `logoImg from '@/assets/logo.png'`. Replacing the file is sufficient.
 
 ---
 
-## 2. Add Banks & Telecoms to Database
+## 2. Delete Organization — `src/pages/OrgDetail.tsx`
 
-**Method:** Database insert (data operation, no schema change needed)
+**Visibility:** Only `userRole?.role === 'SuperAdmin'`
 
-The following new organizations will be inserted. All existing banks (Premier Bank, Salaam Bank, Central Bank) are kept — only missing ones are added:
+**UI:** A red "Delete" button next to the Edit button in the header action row.
 
-**Banks (8 new):**
+**Behavior:**
+- Clicking opens a `AlertDialog` confirmation ("This will permanently delete the organization and all associated data. This cannot be undone.")
+- On confirm: calls `supabase.from('organizations').delete().eq('id', id)`
+- On success: shows a toast, navigates to `/organizations`
+- On error: shows error toast
 
-| Name | Domain | Region |
+**Imports to add:** `AlertDialog`, `AlertDialogContent`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogCancel`, `AlertDialogAction` from `@/components/ui/alert-dialog`, and `Trash2` from `lucide-react`
+
+**New state:** `const [deleteOpen, setDeleteOpen] = useState(false);`
+
+**DB call:**
+```ts
+const { error } = await supabase.from('organizations').delete().eq('id', id);
+```
+RLS already grants SuperAdmin `ALL` access on `organizations`, so no migration needed.
+
+---
+
+## 3. Add Organization — `src/pages/Organizations.tsx`
+
+**Visibility:** SuperAdmin only (requires reading `userRole` from `useAuth()`)
+
+**UI:** A "Add Organization" button with a `+` icon in the top-right of the page header.
+
+**Modal form fields:**
+| Field | Input type | Required |
 |---|---|---|
-| International Bank of Somalia (IBS) | ibsbank.so | Banaadir |
-| Dahabshiil International Bank | dahabshilbank.com | Banaadir |
-| Amal Bank | amalbankso.so | Banaadir |
-| Amana Bank | amanabank.so | Banaadir |
-| Daryeel Bank | daryeelbank.com | Banaadir |
-| MyBank Limited | mybank.so | Banaadir |
-| SomBank | sombank.so | Banaadir |
-| Agro Africa Bank | agrobank.so | Banaadir |
+| Name | text | Yes |
+| Domain | text | Yes |
+| Sector | select (government/bank/telecom/health/education/other) | Yes |
+| Region | text | Yes |
+| Contact Email | email | No |
 
-**Telecoms (7 new):**
+**Behavior:**
+- On submit: calls `supabase.from('organizations').insert(...)` with default `risk_score: 50`, `status: 'Warning'`
+- On success: shows toast, invalidates `organizations` query to refresh the list
+- On error: shows error toast
 
-| Name | Domain | Region |
-|---|---|---|
-| Hormuud Telecom | hormuud.com | Banaadir |
-| Somtel | somtel.com | Puntland |
-| NationLink Telecom | nationlinktelecom.net | Banaadir |
-| Golis Telecom | golistelecom.com | Puntland |
-| Telesom | telesom.com | Somaliland |
-| Telcom Somalia | telcom-somalia.com | Banaadir |
-| SomLink | somlink.so | Banaadir |
+**Imports to add:** `Dialog`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogFooter` from `@/components/ui/dialog`; `Button` from `@/components/ui/button`; `Input` from `@/components/ui/input`; `Label` from `@/components/ui/label`; `Plus` from `lucide-react`; `useQueryClient` from `@tanstack/react-query`; `useAuth` from `@/contexts/AuthContext`; `toast` from `sonner`
 
-Each organization will also get one website asset inserted into the `assets` table.
-
-**Also fix:** The `Organizations` page filter currently only shows `All | Government | Bank` — it will be updated to include `Telecom` as a filter tab since we're adding telecom organizations.
+**New state:**
+```ts
+const [addOpen, setAddOpen] = useState(false);
+const [addForm, setAddForm] = useState({ name: '', domain: '', sector: 'government', region: 'Banaadir', contact_email: '' });
+const [addSaving, setAddSaving] = useState(false);
+```
 
 ---
 
-## 3. Edit Organization Button
+## Files Changed
 
-**File to change:** `src/pages/OrgDetail.tsx`
+| File | Change |
+|---|---|
+| `src/assets/logo.png` | Replace with new uploaded logo |
+| `src/pages/OrgDetail.tsx` | Add delete state + AlertDialog + Trash2 button |
+| `src/pages/Organizations.tsx` | Add add-org state + Dialog + Plus button + form |
 
-An **Edit** button will be added next to the "Run Scan Now" button in the org detail header. Clicking it opens a modal dialog (using the existing `Dialog` component from `src/components/ui/dialog.tsx`) with a form to edit:
-
-- Organization name
-- Domain
-- Region
-- Contact email
-- Sector
-- Status
-
-On save, the form calls `supabase.from('organizations').update(...)` and refreshes the page data. A success toast is shown. The edit button will only be visible based on role — SuperAdmin and OrgAdmin can edit.
-
----
-
-## Technical Notes
-
-- The `sector` column in `organizations` uses a Postgres enum `sector_type` which already includes `'telecom'` — no migration needed.
-- The filter tabs on the Organizations page will be extended from `['All', 'Government', 'Bank']` to `['All', 'Government', 'Bank', 'Telecom']` and the type updated accordingly.
-- The edit form will match on `sector` values that map to the existing enum values (`government`, `bank`, `telecom`, `health`, `education`, `other`).
-- RLS policies already allow SuperAdmin full access and OrgAdmin update on own org — the edit functionality is already protected at the database level.
+No database migrations required — all operations are covered by existing RLS policies.
