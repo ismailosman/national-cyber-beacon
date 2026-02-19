@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Filter, Globe, ChevronRight } from 'lucide-react';
+import { Search, Filter, Globe, ChevronRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
-type Sector = 'All' | 'Government' | 'Bank' | 'Telecom';
+type Sector = 'All' | 'Government' | 'Bank' | 'Telecom' | 'Health' | 'Education' | 'Other';
 
 const statusConfig = {
   Secure: { border: 'border-l-neon-green', badge: 'bg-neon-green/10 text-neon-green border-neon-green/30', dot: 'bg-neon-green' },
@@ -16,8 +22,14 @@ const statusConfig = {
 
 const Organizations: React.FC = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { userRole } = useAuth();
+  const isSuperAdmin = userRole?.role === 'SuperAdmin';
   const [sector, setSector] = useState<Sector>('All');
   const [search, setSearch] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', domain: '', sector: 'government', region: 'Banaadir', contact_email: '' });
+  const [addSaving, setAddSaving] = useState(false);
 
   const { data: orgs = [], isLoading } = useQuery({
     queryKey: ['organizations'],
@@ -40,7 +52,86 @@ const Organizations: React.FC = () => {
           <h1 className="text-2xl font-bold text-foreground">Organizations</h1>
           <p className="text-muted-foreground text-sm mt-0.5">{orgs.length} monitored entities</p>
         </div>
+        {isSuperAdmin && (
+          <Button onClick={() => setAddOpen(true)} className="flex items-center gap-2">
+            <Plus className="w-4 h-4" />
+            Add Organization
+          </Button>
+        )}
       </div>
+
+      {/* Add Organization Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Organization</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-name">Name *</Label>
+              <Input id="add-name" value={addForm.name} onChange={e => setAddForm({ ...addForm, name: e.target.value })} placeholder="e.g. Hormuud Telecom" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-domain">Domain *</Label>
+              <Input id="add-domain" value={addForm.domain} onChange={e => setAddForm({ ...addForm, domain: e.target.value })} placeholder="e.g. hormuud.com" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="add-sector">Sector *</Label>
+                <select
+                  id="add-sector"
+                  value={addForm.sector}
+                  onChange={e => setAddForm({ ...addForm, sector: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {['government', 'bank', 'telecom', 'health', 'education', 'other'].map(s => (
+                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="add-region">Region *</Label>
+                <Input id="add-region" value={addForm.region} onChange={e => setAddForm({ ...addForm, region: e.target.value })} placeholder="e.g. Banaadir" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-email">Contact Email</Label>
+              <Input id="add-email" type="email" value={addForm.contact_email} onChange={e => setAddForm({ ...addForm, contact_email: e.target.value })} placeholder="admin@example.so" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
+            <Button
+              disabled={addSaving || !addForm.name || !addForm.domain || !addForm.region}
+              onClick={async () => {
+                setAddSaving(true);
+                try {
+                  const { error } = await supabase.from('organizations').insert({
+                    name: addForm.name,
+                    domain: addForm.domain,
+                    sector: addForm.sector as any,
+                    region: addForm.region,
+                    contact_email: addForm.contact_email || null,
+                    risk_score: 50,
+                    status: 'Warning',
+                  });
+                  if (error) throw error;
+                  toast.success('Organization created successfully');
+                  queryClient.invalidateQueries({ queryKey: ['organizations'] });
+                  setAddOpen(false);
+                  setAddForm({ name: '', domain: '', sector: 'government', region: 'Banaadir', contact_email: '' });
+                } catch (err: any) {
+                  toast.error('Failed to create: ' + (err.message || 'Unknown error'));
+                } finally {
+                  setAddSaving(false);
+                }
+              }}
+            >
+              {addSaving ? 'Creating...' : 'Create Organization'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -53,8 +144,8 @@ const Organizations: React.FC = () => {
             className="w-full pl-9 pr-4 py-2.5 bg-input border border-border rounded-lg text-sm focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 transition-all"
           />
         </div>
-        <div className="flex gap-2">
-          {(['All', 'Government', 'Bank', 'Telecom'] as Sector[]).map(s => (
+        <div className="flex gap-2 flex-wrap">
+          {(['All', 'Government', 'Bank', 'Telecom', 'Health', 'Education', 'Other'] as Sector[]).map(s => (
             <button
               key={s}
               onClick={() => setSector(s)}

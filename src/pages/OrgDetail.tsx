@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2 } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -41,8 +42,11 @@ const OrgDetail: React.FC = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const canEdit = userRole?.role === 'SuperAdmin' || userRole?.role === 'OrgAdmin';
+  const isSuperAdmin = userRole?.role === 'SuperAdmin';
 
   const { data: org } = useQuery({
     queryKey: ['org', id],
@@ -165,6 +169,20 @@ const OrgDetail: React.FC = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('organizations').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Organization deleted successfully');
+      navigate('/organizations');
+    } catch (err: any) {
+      toast.error('Failed to delete: ' + (err.message || 'Unknown error'));
+      setDeleting(false);
+    }
+  };
+
   const radarData = [
     { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'tls')?.score ?? 50 },
     { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.score ?? 50 },
@@ -211,6 +229,15 @@ const OrgDetail: React.FC = () => {
             Edit
           </button>
         )}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setDeleteOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-neon-red/10 text-neon-red font-bold text-sm rounded-lg border border-neon-red/30 hover:bg-neon-red/20 transition-all"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </button>
+        )}
         <button
           onClick={handleRunScan}
           disabled={scanning}
@@ -220,6 +247,28 @@ const OrgDetail: React.FC = () => {
           {scanning ? 'Scanning...' : 'Run Scan Now'}
         </button>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{org.name}</strong> and all associated data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? 'Deleting...' : 'Delete Organization'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit Organization Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
