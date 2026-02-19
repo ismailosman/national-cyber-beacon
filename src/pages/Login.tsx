@@ -1,40 +1,26 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Shield, Eye, EyeOff, Lock, Mail, AlertTriangle } from 'lucide-react';
 
 const Login: React.FC = () => {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setSuccess('');
     setLoading(true);
-
-    if (mode === 'signin') {
-      const { error } = await signIn(email, password);
-      if (error) {
-        setError(error.message);
-      } else {
-        navigate('/');
-      }
+    const { error } = await signIn(email, password);
+    if (error) {
+      setError(error.message);
     } else {
-      const { error } = await signUp(email, password);
-      if (error) {
-        setError(error.message);
-      } else {
-        setSuccess('Account created. Check your email to confirm, or sign in if email confirmation is disabled.');
-        setMode('signin');
-      }
+      navigate('/');
     }
     setLoading(false);
   };
@@ -70,21 +56,9 @@ const Login: React.FC = () => {
 
         {/* Card */}
         <div className="glass-card rounded-xl p-8 border border-neon-cyan/20">
-          <div className="flex gap-2 mb-6 p-1 bg-muted rounded-lg">
-            {(['signin', 'signup'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setError(''); setSuccess(''); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                  mode === m
-                    ? 'bg-neon-cyan text-background font-bold shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {m === 'signin' ? 'Sign In' : 'Sign Up'}
-              </button>
-            ))}
-          </div>
+          <h2 className="text-center text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-6">
+            Operator Sign In
+          </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="relative">
@@ -122,24 +96,26 @@ const Login: React.FC = () => {
               </div>
             )}
 
-            {success && (
-              <div className="flex items-center gap-2 text-sm text-neon-green bg-neon-green/10 border border-neon-green/30 rounded-lg px-3 py-2">
-                {success}
-              </div>
-            )}
-
             <button
               type="submit"
               disabled={loading}
               className="w-full py-3 bg-neon-cyan text-background font-bold rounded-lg hover:brightness-110 transition-all glow-cyan disabled:opacity-50 disabled:cursor-not-allowed tracking-wider uppercase text-sm"
             >
-              {loading ? 'Authenticating...' : mode === 'signin' ? 'Access System' : 'Create Account'}
+              {loading ? 'Authenticating...' : 'Access System'}
             </button>
           </form>
 
-          <p className="text-center text-xs text-muted-foreground mt-6">
-            🔒 Authorized Personnel Only — All access is monitored and logged
-          </p>
+          <div className="mt-6 space-y-3 text-center">
+            <p className="text-xs text-muted-foreground">
+              🔒 Authorized Personnel Only — All access is monitored and logged
+            </p>
+            <Link
+              to="/public"
+              className="block text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
+              View public threat dashboard →
+            </Link>
+          </div>
         </div>
       </div>
     </div>

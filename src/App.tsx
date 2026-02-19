@@ -6,10 +6,12 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
+import Landing from "@/pages/Landing";
 import Dashboard from "@/pages/Dashboard";
 import Organizations from "@/pages/Organizations";
 import OrgDetail from "@/pages/OrgDetail";
 import AlertsPage from "@/pages/Alerts";
+import AlertDetail from "@/pages/AlertDetail";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
@@ -43,6 +45,7 @@ const ProtectedRoutes = () => {
         <Route path="/organizations" element={<Organizations />} />
         <Route path="/organizations/:id" element={<OrgDetail />} />
         <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/cert" element={<CertAdvisories />} />
@@ -64,6 +67,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/public" element={<Landing />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </AuthProvider>
