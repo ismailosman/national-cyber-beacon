@@ -575,6 +575,44 @@ function buildRingsGeoJSON(states: Map<string, ArcState>, now: number): GeoJSON.
   return { type: 'FeatureCollection', features };
 }
 
+// ── Canvas arc types ──────────────────────────────────────────────────────────
+
+interface CanvasArc {
+  id:           string;
+  srcLng:       number;
+  srcLat:       number;
+  dstLng:       number;
+  dstLat:       number;
+  color:        string;
+  progress:     number;      // 0→1 while animating
+  phase:        'animating' | 'fading';
+  fadeOpacity:  number;      // 1→0 while fading
+  lastFrame:    number;      // timestamp of last RAF tick (ms)
+}
+
+// ── Canvas drawing helpers ────────────────────────────────────────────────────
+
+function bezierPt(
+  sx: number, sy: number,
+  cx: number, cy: number,
+  ex: number, ey: number,
+  t: number,
+): { x: number; y: number } {
+  const tm = 1 - t;
+  return {
+    x: tm * tm * sx + 2 * tm * t * cx + t * t * ex,
+    y: tm * tm * sy + 2 * tm * t * cy + t * t * ey,
+  };
+}
+
+function hexA(opacity: number): string {
+  return Math.round(Math.max(0, Math.min(1, opacity)) * 255)
+    .toString(16).padStart(2, '0');
+}
+
+const CANVAS_SEGMENTS = 80;
+const CANVAS_TAIL     = 0.22;  // tail length as fraction of progress
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 const CyberMap: React.FC = () => {
@@ -595,7 +633,278 @@ const CyberMap: React.FC = () => {
   const isDirtyRef     = useRef(false);
   const seenIdsRef     = useRef<Set<string>>(new Set());
 
+  // Canvas overlay refs
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const canvasArcsRef = useRef<CanvasArc[]>([]);
+  const canvasRafRef  = useRef<number>(0);
+  const canvasSeenRef = useRef<Set<string>>(new Set());
+
   const { threats, todayCount } = useLiveAttacks(liveOn);
+
+  // ── Resize canvas to match its container ────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = mapContainer.current;
+    if (!canvas || !container) return;
+
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      canvas.width  = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width  = w + 'px';
+      canvas.style.height = h + 'px';
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.scale(dpr, dpr);
+    };
+
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── Spawn canvas arcs from new threats ─────────────────────────────────
+  useEffect(() => {
+    if (!liveOn) {
+      canvasArcsRef.current = [];
+      canvasSeenRef.current.clear();
+      return;
+    }
+    for (const threat of threats) {
+      if (canvasSeenRef.current.has(threat.id)) continue;
+      canvasSeenRef.current.add(threat.id);
+
+      // Cap at 60 concurrent arcs
+      if (canvasArcsRef.current.length >= 60) {
+        canvasArcsRef.current.splice(0, canvasArcsRef.current.length - 59);
+      }
+
+      canvasArcsRef.current.push({
+        id:          threat.id,
+        srcLng:      threat.source.lng,
+        srcLat:      threat.source.lat,
+        dstLng:      threat.target.lng,
+        dstLat:      threat.target.lat,
+        color:       ATTACK_COLORS[threat.attack_type],
+        progress:    0,
+        phase:       'animating',
+        fadeOpacity: 1,
+        lastFrame:   performance.now(),
+      });
+    }
+  }, [threats, liveOn]);
+
+  // ── Canvas draw loop ────────────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Helper: project lat/lng → canvas pixel coords
+    const project = (lng: number, lat: number): { x: number; y: number } => {
+      const map = mapRef.current;
+      if (map) {
+        try {
+          const pt = map.project([lng, lat]);
+          return { x: pt.x, y: pt.y };
+        } catch (_) { /* fall through */ }
+      }
+      // Fallback mercator projection (used before map loads or on error)
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      const x = ((lng + 180) / 360) * w;
+      const latRad = (lat * Math.PI) / 180;
+      const mercN  = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+      const y      = (h / 2) - (w * mercN) / (2 * Math.PI);
+      return { x, y };
+    };
+
+    const SPEED = 0.012; // progress per frame at 60fps (≈1.4s travel)
+    const FADE_FRAMES = 60;
+
+    const draw = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { canvasRafRef.current = requestAnimationFrame(draw); return; }
+
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      const now = performance.now();
+      const arcs = canvasArcsRef.current;
+
+      for (let i = arcs.length - 1; i >= 0; i--) {
+        const arc = arcs[i];
+        const dt = Math.min((now - arc.lastFrame) / (1000 / 60), 3); // frame delta (capped at 3x)
+        arc.lastFrame = now;
+
+        // Advance progress / fade
+        if (arc.phase === 'animating') {
+          arc.progress = Math.min(arc.progress + SPEED * dt, 1);
+          if (arc.progress >= 1) {
+            arc.phase       = 'fading';
+            arc.fadeOpacity = 1;
+          }
+        } else {
+          arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
+          if (arc.fadeOpacity <= 0) {
+            arcs.splice(i, 1);
+            continue;
+          }
+        }
+
+        const baseOpacity = arc.phase === 'fading' ? arc.fadeOpacity : 1;
+
+        // ── Project coordinates ──────────────────────────────────────────
+        const src = project(arc.srcLng, arc.srcLat);
+        const dst = project(arc.dstLng, arc.dstLat);
+
+        // Control point: raised midpoint, higher for distant pairs
+        const dx   = dst.x - src.x;
+        const dy   = dst.y - src.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const ctrl = {
+          x: (src.x + dst.x) / 2,
+          y: (src.y + dst.y) / 2 - dist * 0.35,
+        };
+
+        const prog = arc.progress;
+        const currentSeg = Math.floor(prog * CANVAS_SEGMENTS);
+        const tailSeg    = Math.max(0, currentSeg - Math.ceil(CANVAS_SEGMENTS * CANVAS_TAIL));
+
+        // ── Full solid arc line (guide rail, dim) ───────────────────────
+        {
+          ctx.save();
+          ctx.globalAlpha = baseOpacity * (arc.phase === 'fading' ? 0.6 : 0.18);
+          ctx.strokeStyle = arc.color;
+          ctx.lineWidth   = 1;
+          ctx.beginPath();
+          for (let s = 0; s <= CANVAS_SEGMENTS; s++) {
+            const t  = s / CANVAS_SEGMENTS;
+            const pt = bezierPt(src.x, src.y, ctrl.x, ctrl.y, dst.x, dst.y, t);
+            s === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // ── Glowing tail arc (bright head → fading tail) ─────────────────
+        if (arc.phase === 'animating' && currentSeg > 0) {
+          for (let s = tailSeg; s <= currentSeg; s++) {
+            const t0 = s / CANVAS_SEGMENTS;
+            const t1 = (s + 1) / CANVAS_SEGMENTS;
+            const p0 = bezierPt(src.x, src.y, ctrl.x, ctrl.y, dst.x, dst.y, t0);
+            const p1 = bezierPt(src.x, src.y, ctrl.x, ctrl.y, dst.x, dst.y, t1);
+
+            const segFrac = (s - tailSeg) / Math.max(1, currentSeg - tailSeg);
+
+            // Glow layer
+            ctx.save();
+            ctx.globalAlpha = segFrac * baseOpacity * 0.25;
+            ctx.strokeStyle = arc.color;
+            ctx.lineWidth   = 8;
+            ctx.lineCap     = 'round';
+            ctx.shadowBlur  = 12;
+            ctx.shadowColor = arc.color;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Sharp bright line
+            ctx.save();
+            ctx.globalAlpha = segFrac * baseOpacity * 0.9;
+            ctx.strokeStyle = arc.color;
+            ctx.lineWidth   = 1.8;
+            ctx.lineCap     = 'round';
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // ── Glowing head dot ──────────────────────────────────────────
+          const headT  = currentSeg / CANVAS_SEGMENTS;
+          const headPt = bezierPt(src.x, src.y, ctrl.x, ctrl.y, dst.x, dst.y, headT);
+          ctx.save();
+          ctx.globalAlpha  = baseOpacity;
+          ctx.shadowBlur   = 15;
+          ctx.shadowColor  = arc.color;
+          ctx.fillStyle    = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(headPt.x, headPt.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // ── Source origin dot ─────────────────────────────────────────────
+        if (arc.phase === 'animating') {
+          ctx.save();
+          ctx.globalAlpha = baseOpacity * 0.9;
+          ctx.fillStyle   = arc.color;
+          ctx.shadowBlur  = 8;
+          ctx.shadowColor = arc.color;
+          ctx.beginPath();
+          ctx.arc(src.x, src.y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // ── Destination pulse ring (at 80%+ progress) ────────────────────
+        if (arc.progress >= 0.8) {
+          const pulseT = (arc.progress - 0.8) / 0.2; // 0→1 as progress 0.8→1
+          const ringR  = 4 + pulseT * 18;
+          const ringOpacity = (1 - pulseT) * baseOpacity * 0.85;
+          ctx.save();
+          ctx.globalAlpha    = ringOpacity;
+          ctx.strokeStyle    = arc.color;
+          ctx.lineWidth      = 1.5;
+          ctx.shadowBlur     = 10;
+          ctx.shadowColor    = arc.color;
+          ctx.beginPath();
+          ctx.arc(dst.x, dst.y, ringR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // ── Impact flash rings (on first hit, for 60 frames) ─────────────
+        if (arc.phase === 'fading' && arc.fadeOpacity > 0.8) {
+          const flashT = 1 - (arc.fadeOpacity - 0.8) / 0.2; // 0→1 quickly
+          const eased  = 1 - Math.pow(1 - flashT, 3);
+          // Inner burst ring
+          ctx.save();
+          ctx.globalAlpha = (1 - flashT) * 0.9;
+          ctx.strokeStyle = arc.color;
+          ctx.lineWidth   = 2.5;
+          ctx.shadowBlur  = 20;
+          ctx.shadowColor = arc.color;
+          ctx.beginPath();
+          ctx.arc(dst.x, dst.y, eased * 28, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          // Outer burst ring (delayed)
+          const flashT2 = Math.max(0, flashT - 0.15);
+          const eased2  = 1 - Math.pow(1 - flashT2, 3);
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, 1 - flashT2) * 0.5;
+          ctx.strokeStyle = arc.color;
+          ctx.lineWidth   = 1.5;
+          ctx.beginPath();
+          ctx.arc(dst.x, dst.y, eased2 * 52, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      canvasRafRef.current = requestAnimationFrame(draw);
+    };
+
+    canvasRafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(canvasRafRef.current);
+  }, []);
 
   const prefersReducedMotion = typeof window !== 'undefined'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1104,6 +1413,13 @@ const CyberMap: React.FC = () => {
 
           {/* ── Mapbox canvas ─────────────────────────────────────────────── */}
           <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+
+          {/* ── Canvas arc overlay (drawn on top of Mapbox, pointer-events-none) ── */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 pointer-events-none"
+            style={{ mixBlendMode: 'screen', zIndex: 5 }}
+          />
 
           {/* ── Somalia Panel Overlay ─────────────────────────────────────── */}
           {somaliaPanel && !selectedCountry && (
