@@ -1,9 +1,25 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { AlertTriangle, Loader2, Activity, RefreshCw, Zap } from 'lucide-react';
+import { AlertTriangle, Loader2, Activity, RefreshCw, Zap, X } from 'lucide-react';
 import { useLiveAttacks, LiveThreat, AttackType } from '@/hooks/useLiveAttacks';
+import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from 'recharts';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
+
+const COUNTRY_ISO: Record<string, string> = {
+  'China': 'cn', 'Russia': 'ru', 'Iran': 'ir', 'North Korea': 'kp',
+  'USA': 'us', 'Netherlands': 'nl', 'Germany': 'de', 'Ukraine': 'ua',
+  'Brazil': 'br', 'India': 'in', 'Nigeria': 'ng', 'Pakistan': 'pk',
+  'Vietnam': 'vn', 'Romania': 'ro', 'Turkey': 'tr', 'South Korea': 'kr',
+  'Indonesia': 'id', 'France': 'fr', 'UK': 'gb', 'Saudi Arabia': 'sa',
+  'Egypt': 'eg', 'Singapore': 'sg', 'Canada': 'ca', 'Japan': 'jp',
+  'Israel': 'il', 'Somalia': 'so',
+};
+
+const ATTACK_LABELS: Record<AttackType, string> = {
+  malware: 'Malware', phishing: 'Phishing', exploit: 'Exploit',
+  ddos: 'DDoS', intrusion: 'Intrusion',
+};
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -256,6 +272,161 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+// ── Seeded PRNG helpers ────────────────────────────────────────────────────────
+
+function seededRand(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    return (s >>> 0) / 0xffffffff;
+  };
+}
+
+function genCountry30DayData(country: string) {
+  let seed = 0;
+  for (let i = 0; i < country.length; i++) seed = (seed * 31 + country.charCodeAt(i)) | 0;
+  const rand = seededRand(Math.abs(seed) || 0xabcdef);
+  return Array.from({ length: 30 }, (_, i) => ({
+    day: i + 1,
+    value: Math.round(200 + Math.sin(i / 3.5) * 400 + rand() * 600 + (i > 15 ? rand() * 900 : 0)),
+  }));
+}
+
+function genSparklineForCountry(country: string, type: string): { i: number; v: number }[] {
+  let seed = 0;
+  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  for (const c of type)    seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  const rand = seededRand(Math.abs(seed) || 0x9e3779b9);
+  return Array.from({ length: 15 }, (_, i) => ({
+    i,
+    v: Math.round(20 + rand() * 80 + Math.sin(i / 2.5) * 25),
+  }));
+}
+
+function genCountrySparklines(country: string): Record<AttackType, { i: number; v: number }[]> {
+  return {
+    malware:   genSparklineForCountry(country, 'malware'),
+    phishing:  genSparklineForCountry(country, 'phishing'),
+    exploit:   genSparklineForCountry(country, 'exploit'),
+    ddos:      genSparklineForCountry(country, 'ddos'),
+    intrusion: genSparklineForCountry(country, 'intrusion'),
+  };
+}
+
+function genCountryDefaultPercentages(country: string): Record<AttackType, number> {
+  let seed = 0;
+  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  const rand = seededRand(Math.abs(seed) ^ 0xc0ffee);
+  const types: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
+  const weights = types.map(() => 5 + rand() * 40);
+  const total = weights.reduce((a, b) => a + b, 0);
+  const result = {} as Record<AttackType, number>;
+  types.forEach((t, i) => { result[t] = Math.round((weights[i] / total) * 1000) / 10; });
+  return result;
+}
+
+const ATTACK_COLORS_MAP: Record<AttackType, string> = {
+  malware: '#ef4444', phishing: '#a855f7', exploit: '#f97316', ddos: '#facc15', intrusion: '#22d3ee',
+};
+
+// ── Country Panel ──────────────────────────────────────────────────────────────
+
+interface CountryPanelProps {
+  country: string;
+  threats: LiveThreat[];
+  onClose: () => void;
+}
+
+const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }) => {
+  const iso = COUNTRY_ISO[country] ?? 'un';
+  const trendData = React.useMemo(() => genCountry30DayData(country), [country]);
+  const sparklines = React.useMemo(() => genCountrySparklines(country), [country]);
+  const defaultPercentages = React.useMemo(() => genCountryDefaultPercentages(country), [country]);
+
+  const countryThreats = threats.filter(t => t.source.country === country);
+
+  const percentages = React.useMemo<Record<AttackType, number>>(() => {
+    if (countryThreats.length < 5) return defaultPercentages;
+    const counts: Record<string, number> = {};
+    for (const t of countryThreats) counts[t.attack_type] = (counts[t.attack_type] || 0) + 1;
+    const total = countryThreats.length;
+    const result = {} as Record<AttackType, number>;
+    for (const type of Object.keys(ATTACK_LABELS) as AttackType[]) {
+      result[type] = Math.round(((counts[type] || 0) / total) * 100 * 10) / 10;
+    }
+    return result;
+  }, [countryThreats, defaultPercentages]);
+
+  return (
+    <div
+      className="absolute z-30 flex flex-col overflow-y-auto"
+      style={{
+        right: 16, top: 16, width: 300, maxHeight: 'calc(90vh)',
+        background: 'rgba(10,10,20,0.96)',
+        backdropFilter: 'blur(14px)',
+        borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderLeft: '3px solid #f97316',
+      }}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        <div className="flex items-center gap-2">
+          <img src={`https://flagcdn.com/w40/${iso}.png`} alt={`${country} flag`} className="w-6 h-4 object-cover rounded-sm" />
+          <div>
+            <span className="text-white font-bold text-sm tracking-wide">{country}</span>
+            <p className="text-[10px] text-slate-500 leading-none mt-0.5">Source of Attacks</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1 rounded">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="px-4 pt-4 pb-3">
+        <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-0.5" style={{ color: '#f97316' }}>ATTACK VOLUME</p>
+        <p className="text-[10px] text-slate-500 mb-3">Last 30 days</p>
+        <div style={{ height: 100, width: '100%' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={trendData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id={`tmGrad-${iso}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f97316" stopOpacity={0.55} />
+                  <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Area type="monotone" dataKey="value" stroke="#f97316" strokeWidth={1.5} fill={`url(#tmGrad-${iso})`} dot={false} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '0 16px' }} />
+
+      <div className="px-4 pt-3 pb-4">
+        <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-0.5" style={{ color: '#f97316' }}>ATTACK TYPES</p>
+        <p className="text-[10px] text-slate-500 mb-3">From this source</p>
+        <div className="flex flex-col gap-3">
+          {(Object.keys(ATTACK_LABELS) as AttackType[]).map((type) => (
+            <div key={type} className="flex items-center gap-2">
+              <span className="text-xs text-slate-300 w-20 flex-shrink-0">{ATTACK_LABELS[type]}</span>
+              <div style={{ width: 60, height: 28, flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={sparklines[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
+                    <Line type="monotone" dataKey="v" stroke={ATTACK_COLORS_MAP[type]} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <span className="text-xs font-mono font-bold ml-auto flex-shrink-0" style={{ color: ATTACK_COLORS_MAP[type] }}>
+                {percentages[type].toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 const ThreatMap: React.FC = () => {
@@ -270,6 +441,7 @@ const ThreatMap: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const [feedEntries, setFeedEntries] = useState<FeedEntry[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -332,9 +504,14 @@ const ThreatMap: React.FC = () => {
         center: [46, 5.5],
         zoom: 3.5,
         projection: 'mercator',
-        interactive: false,
-        pitchWithRotate: false,
+        interactive: true,
+        scrollZoom: false,
+        boxZoom: false,
+        dragPan: false,
         dragRotate: false,
+        doubleClickZoom: false,
+        touchZoomRotate: false,
+        pitchWithRotate: false,
         attributionControl: false,
       });
 
@@ -608,6 +785,21 @@ const ThreatMap: React.FC = () => {
           },
         });
 
+        // ── Click handler on source dots ─────────────────────────────────
+        map.on('click', 'attack-sources-dot', (e: any) => {
+          const feature = e.features?.[0];
+          if (feature?.properties?.country) {
+            setSelectedCountry(feature.properties.country);
+          }
+        });
+
+        map.on('mouseenter', 'attack-sources-dot', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'attack-sources-dot', () => {
+          map.getCanvas().style.cursor = '';
+        });
+
         setMapLoaded(true);
       });
 
@@ -826,6 +1018,15 @@ const ThreatMap: React.FC = () => {
           )}
 
           <div ref={mapContainer} className="w-full h-full" />
+
+          {/* Country Panel overlay */}
+          {selectedCountry && (
+            <CountryPanel
+              country={selectedCountry}
+              threats={threats}
+              onClose={() => setSelectedCountry(null)}
+            />
+          )}
 
           {/* Live attacks badge */}
           {mapLoaded && (
