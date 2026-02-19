@@ -70,6 +70,7 @@ const WEIGHTED_SOURCES: { country: string; lat: number; lng: number }[] = [
   ...Array(3).fill({ country: 'Iran', lat: 32.43, lng: 53.68 }),
   ...Array(3).fill({ country: 'USA', lat: 39.38, lng: -100.44 }),
   ...Array(2).fill({ country: 'North Korea', lat: 40.33, lng: 127.51 }),
+  ...Array(2).fill({ country: 'Israel', lat: 31.04, lng: 34.85 }),
   ...Array(2).fill({ country: 'Ukraine', lat: 48.37, lng: 31.17 }),
   ...Array(2).fill({ country: 'Kenya', lat: -1.29, lng: 36.82 }),
   ...Array(2).fill({ country: 'Ethiopia', lat: 9.14, lng: 40.49 }),
