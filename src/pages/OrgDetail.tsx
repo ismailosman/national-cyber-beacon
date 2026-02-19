@@ -1,25 +1,27 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Activity } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  ResponsiveContainer, Tooltip
+  ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 const checkTypeLabels: Record<string, string> = {
-  ssl: 'SSL Certificate',
+  tls: 'TLS Certificate',
   https: 'HTTPS Enforcement',
   headers: 'Security Headers',
   dns: 'DNS Resolution',
   uptime: 'Uptime Check',
+  cert_expiry: 'Cert Expiry',
+  waf_activity: 'WAF Activity',
 };
 
-const resultConfig = {
+const statusConfig = {
   pass: { icon: CheckCircle, color: 'text-neon-green', bg: 'bg-neon-green/10 border-neon-green/30' },
   warn: { icon: AlertTriangle, color: 'text-neon-amber', bg: 'bg-neon-amber/10 border-neon-amber/30' },
   fail: { icon: XCircle, color: 'text-neon-red', bg: 'bg-neon-red/10 border-neon-red/30' },
@@ -40,18 +42,29 @@ const OrgDetail: React.FC = () => {
     enabled: !!id,
   });
 
-  const { data: checks = [] } = useQuery({
-    queryKey: ['security-checks', id],
+  const { data: assets = [] } = useQuery({
+    queryKey: ['org-assets', id],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('security_checks')
-        .select('*')
-        .eq('org_id', id!)
-        .order('checked_at', { ascending: false })
-        .limit(20);
+      const { data } = await supabase.from('assets').select('*').eq('organization_id', id!);
       return data || [];
     },
     enabled: !!id,
+  });
+
+  const { data: checks = [] } = useQuery({
+    queryKey: ['security-checks', id],
+    queryFn: async () => {
+      const assetIds = assets.map((a: any) => a.id);
+      if (!assetIds.length) return [];
+      const { data } = await supabase
+        .from('security_checks')
+        .select('*')
+        .in('asset_id', assetIds)
+        .order('checked_at', { ascending: false })
+        .limit(30);
+      return data || [];
+    },
+    enabled: assets.length > 0,
   });
 
   const { data: orgAlerts = [] } = useQuery({
@@ -60,7 +73,7 @@ const OrgDetail: React.FC = () => {
       const { data } = await supabase
         .from('alerts')
         .select('*')
-        .eq('org_id', id!)
+        .eq('organization_id', id!)
         .order('created_at', { ascending: false })
         .limit(10);
       return data || [];
@@ -72,12 +85,15 @@ const OrgDetail: React.FC = () => {
     queryKey: ['org-score-history', id],
     queryFn: async () => {
       const { data } = await supabase
-        .from('risk_score_history')
-        .select('score, recorded_at')
-        .eq('org_id', id!)
-        .order('recorded_at', { ascending: false })
-        .limit(6);
-      return (data || []).reverse();
+        .from('risk_history')
+        .select('score, created_at')
+        .eq('organization_id', id!)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      return (data || []).reverse().map((r: any) => ({
+        day: format(new Date(r.created_at), 'MMM dd'),
+        score: r.score,
+      }));
     },
     enabled: !!id,
   });
@@ -101,13 +117,12 @@ const OrgDetail: React.FC = () => {
     }
   };
 
-  // Radar data from score history or current score
   const radarData = [
-    { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'ssl')?.result === 'pass' ? 85 : checks.find((c: any) => c.check_type === 'ssl')?.result === 'warn' ? 50 : 20 },
-    { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.result === 'pass' ? 85 : checks.find((c: any) => c.check_type === 'headers')?.result === 'warn' ? 50 : 20 },
-    { subject: 'Uptime', value: checks.find((c: any) => c.check_type === 'uptime')?.result === 'pass' ? 90 : 20 },
-    { subject: 'HTTPS', value: checks.find((c: any) => c.check_type === 'https')?.result === 'pass' ? 80 : 15 },
-    { subject: 'DNS', value: checks.find((c: any) => c.check_type === 'dns')?.result === 'pass' ? 88 : 20 },
+    { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'tls')?.score ?? 50 },
+    { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.score ?? 50 },
+    { subject: 'Uptime', value: checks.find((c: any) => c.check_type === 'uptime')?.score ?? 50 },
+    { subject: 'DNS', value: checks.find((c: any) => c.check_type === 'dns')?.score ?? 50 },
+    { subject: 'WAF', value: checks.find((c: any) => c.check_type === 'waf_activity')?.score ?? 50 },
     { subject: 'Overall', value: org?.risk_score || 50 },
   ];
 
@@ -123,15 +138,20 @@ const OrgDetail: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Back + Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <button onClick={() => navigate('/organizations')} className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="flex-1">
           <h1 className="text-xl font-bold text-foreground">{org.name}</h1>
-          <div className="flex items-center gap-2 mt-0.5">
-            <Globe className="w-3 h-3 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground font-mono">{org.domain}</span>
+          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
+              <Globe className="w-3 h-3" />{org.domain}
+            </span>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <MapPin className="w-3 h-3" />{org.region}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded font-mono border text-neon-cyan border-neon-cyan/30 bg-neon-cyan/5 capitalize">{org.sector}</span>
           </div>
         </div>
         <button
@@ -144,11 +164,26 @@ const OrgDetail: React.FC = () => {
         </button>
       </div>
 
-      {/* Score + Radar */}
+      {/* Score Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Risk Score', value: org.risk_score, color: org.risk_score >= 75 ? 'text-neon-green' : org.risk_score >= 50 ? 'text-neon-amber' : 'text-neon-red' },
+          { label: 'Status', value: org.status, color: org.status === 'Secure' ? 'text-neon-green' : org.status === 'Warning' ? 'text-neon-amber' : 'text-neon-red' },
+          { label: 'Assets', value: assets.length, color: 'text-neon-cyan' },
+          { label: 'Open Alerts', value: orgAlerts.filter((a: any) => a.status === 'open').length, color: orgAlerts.filter((a: any) => a.status === 'open').length > 0 ? 'text-neon-red' : 'text-neon-green' },
+        ].map(c => (
+          <div key={c.label} className="glass-card rounded-xl p-4 border border-border text-center">
+            <p className={cn('text-2xl font-bold font-mono', c.color)}>{c.value}</p>
+            <p className="text-xs text-muted-foreground mt-1">{c.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Radar + Details */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass-card rounded-xl p-5 border border-border">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Security Score Breakdown</h3>
-          <ResponsiveContainer width="100%" height={250}>
+          <h3 className="text-sm font-semibold text-foreground mb-4">Security Domain Radar</h3>
+          <ResponsiveContainer width="100%" height={240}>
             <RadarChart data={radarData}>
               <PolarGrid stroke="hsl(216 28% 20%)" />
               <PolarAngleAxis dataKey="subject" tick={{ fill: 'hsl(215 20% 65%)', fontSize: 11 }} />
@@ -159,59 +194,70 @@ const OrgDetail: React.FC = () => {
           </ResponsiveContainer>
         </div>
 
-        <div className="glass-card rounded-xl p-5 border border-border space-y-3">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Organization Details</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="p-3 rounded-lg bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-1 font-mono uppercase">Sector</p>
-              <p className="font-medium">{org.sector}</p>
-            </div>
-            <div className="p-3 rounded-lg bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-1 font-mono uppercase">Status</p>
-              <span className={cn('text-xs px-2 py-1 rounded font-bold uppercase',
-                org.status === 'Secure' ? 'text-neon-green bg-neon-green/10' :
-                org.status === 'Warning' ? 'text-neon-amber bg-neon-amber/10' :
-                'text-neon-red bg-neon-red/10'
-              )}>{org.status}</span>
-            </div>
-            <div className="p-3 rounded-lg bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-1 font-mono uppercase">Risk Score</p>
-              <p className={cn('text-2xl font-bold font-mono',
-                org.risk_score >= 75 ? 'text-neon-green' :
-                org.risk_score >= 50 ? 'text-neon-amber' : 'text-neon-red'
-              )}>{org.risk_score}</p>
-            </div>
-            <div className="p-3 rounded-lg bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-1 font-mono uppercase">Last Scan</p>
-              <p className="text-xs font-mono text-foreground">
-                {org.last_scanned_at
-                  ? format(new Date(org.last_scanned_at), 'MMM dd, HH:mm')
-                  : 'Never'}
-              </p>
-            </div>
-          </div>
+        <div className="glass-card rounded-xl p-5 border border-border">
+          <h3 className="text-sm font-semibold text-foreground mb-4">Risk Score Trend</h3>
+          {scoreHistory.length > 0 ? (
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={scoreHistory} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="orgScoreGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(186 100% 50%)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="hsl(186 100% 50%)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(216 28% 16%)" />
+                <XAxis dataKey="day" tick={{ fill: 'hsl(215 20% 55%)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fill: 'hsl(215 20% 55%)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: 'hsl(216 28% 10%)', border: '1px solid hsl(186 100% 50% / 0.3)', borderRadius: 8 }} />
+                <Area type="monotone" dataKey="score" stroke="hsl(186 100% 50%)" strokeWidth={2} fill="url(#orgScoreGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[240px] flex items-center justify-center text-muted-foreground text-sm">No history yet</div>
+          )}
         </div>
       </div>
 
-      {/* Security Checks Table */}
+      {/* Assets */}
+      <div className="glass-card rounded-xl border border-border overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center gap-2">
+          <Globe className="w-4 h-4 text-neon-cyan" />
+          <h3 className="text-sm font-semibold">Assets ({assets.length})</h3>
+        </div>
+        <div className="divide-y divide-border/50">
+          {assets.map((asset: any) => (
+            <div key={asset.id} className="p-4 flex items-center gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium font-mono text-neon-cyan">{asset.url}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 capitalize">{asset.asset_type} {asset.is_critical && '· Critical'}</p>
+              </div>
+              {asset.ip_address && <span className="text-xs text-muted-foreground font-mono">{asset.ip_address}</span>}
+            </div>
+          ))}
+          {assets.length === 0 && <div className="p-8 text-center text-muted-foreground text-sm">No assets registered.</div>}
+        </div>
+      </div>
+
+      {/* Security Checks */}
       <div className="glass-card rounded-xl border border-border overflow-hidden">
         <div className="p-4 border-b border-border flex items-center gap-2">
           <Shield className="w-4 h-4 text-neon-cyan" />
           <h3 className="text-sm font-semibold">Security Check Results</h3>
+          <span className="ml-auto text-xs text-muted-foreground font-mono">Last {checks.length} checks</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Check</th>
-                <th className="text-center p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Result</th>
-                <th className="text-left p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Details</th>
+                <th className="text-center p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Status</th>
+                <th className="text-center p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Score</th>
                 <th className="text-right p-3 text-xs text-muted-foreground font-mono uppercase tracking-wider">Time</th>
               </tr>
             </thead>
             <tbody>
               {checks.map((chk: any) => {
-                const cfg = resultConfig[chk.result as keyof typeof resultConfig] || resultConfig.warn;
+                const cfg = statusConfig[chk.status as keyof typeof statusConfig] || statusConfig.warn;
                 const Icon = cfg.icon;
                 return (
                   <tr key={chk.id} className="border-b border-border/50 hover:bg-accent/20 transition-colors">
@@ -219,12 +265,10 @@ const OrgDetail: React.FC = () => {
                     <td className="p-3 text-center">
                       <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border', cfg.bg, cfg.color)}>
                         <Icon className="w-3 h-3" />
-                        {chk.result.toUpperCase()}
+                        {chk.status?.toUpperCase()}
                       </span>
                     </td>
-                    <td className="p-3 text-muted-foreground text-xs font-mono max-w-xs truncate">
-                      {typeof chk.details === 'object' ? JSON.stringify(chk.details) : chk.details || '-'}
-                    </td>
+                    <td className="p-3 text-center font-mono font-bold text-neon-cyan">{chk.score}</td>
                     <td className="p-3 text-right text-xs text-muted-foreground font-mono">
                       {format(new Date(chk.checked_at), 'MMM dd HH:mm')}
                     </td>
@@ -243,30 +287,31 @@ const OrgDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* Alert history */}
+      {/* Alerts */}
       {orgAlerts.length > 0 && (
         <div className="glass-card rounded-xl border border-border overflow-hidden">
-          <div className="p-4 border-b border-border">
+          <div className="p-4 border-b border-border flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-neon-amber" />
             <h3 className="text-sm font-semibold">Alert History</h3>
           </div>
           <div className="p-4 space-y-2">
             {orgAlerts.map((alert: any) => (
               <div key={alert.id} className={cn('p-3 rounded-lg border text-sm flex items-start gap-3',
-                alert.severity === 'critical' || alert.severity === 'high' ? 'bg-neon-red/5 border-neon-red/20' :
+                alert.severity === 'critical' ? 'bg-neon-red/5 border-neon-red/20' :
+                alert.severity === 'high' ? 'bg-neon-red/5 border-neon-red/20' :
                 alert.severity === 'medium' ? 'bg-neon-amber/5 border-neon-amber/20' :
                 'bg-neon-cyan/5 border-neon-cyan/20'
               )}>
-                <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono',
+                <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono flex-shrink-0',
                   alert.severity === 'critical' || alert.severity === 'high' ? 'bg-neon-red/20 text-neon-red' :
                   alert.severity === 'medium' ? 'bg-neon-amber/20 text-neon-amber' :
                   'bg-neon-cyan/20 text-neon-cyan'
                 )}>{alert.severity}</span>
                 <div className="flex-1">
-                  <p className="text-foreground">{alert.message}</p>
-                  <p className="text-xs text-muted-foreground mt-1 font-mono flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {format(new Date(alert.created_at), 'MMM dd yyyy, HH:mm')}
-                    {alert.is_read && <span className="ml-2 text-neon-green">✓ Read</span>}
+                  <p className="text-foreground font-medium">{alert.title}</p>
+                  <p className="text-xs text-muted-foreground">{alert.description}</p>
+                  <p className="text-xs text-muted-foreground mt-1 font-mono">
+                    {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}
                   </p>
                 </div>
               </div>
@@ -274,6 +319,13 @@ const OrgDetail: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Last scan info */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+        <Clock className="w-3 h-3" />
+        Last scan: {org.last_scan ? formatDistanceToNow(new Date(org.last_scan), { addSuffix: true }) : 'Never'}
+        {org.contact_email && <span className="ml-4">Contact: {org.contact_email}</span>}
+      </div>
     </div>
   );
 };

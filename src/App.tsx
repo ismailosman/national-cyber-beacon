@@ -12,6 +12,9 @@ import OrgDetail from "@/pages/OrgDetail";
 import AlertsPage from "@/pages/Alerts";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import Incidents from "@/pages/Incidents";
+import Compliance from "@/pages/Compliance";
+import CertAdvisories from "@/pages/CertAdvisories";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -39,6 +42,9 @@ const ProtectedRoutes = () => {
         <Route path="/organizations" element={<Organizations />} />
         <Route path="/organizations/:id" element={<OrgDetail />} />
         <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/incidents" element={<Incidents />} />
+        <Route path="/compliance" element={<Compliance />} />
+        <Route path="/cert" element={<CertAdvisories />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
