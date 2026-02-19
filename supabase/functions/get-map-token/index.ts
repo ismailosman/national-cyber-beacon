@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const token = authHeader.replace('Bearer ', '');
+    const jwtToken = authHeader.replace('Bearer ', '');
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     );
 
     // Use getClaims() — validates JWT signature locally, no server-side session lookup
-    const { data, error } = await supabase.auth.getClaims(token);
+    const { data, error } = await supabase.auth.getClaims(jwtToken);
     if (error || !data?.claims?.sub) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
