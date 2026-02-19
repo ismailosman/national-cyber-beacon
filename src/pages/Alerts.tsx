@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Bell, Check, Trash2 } from 'lucide-react';
+import { Bell, Check, Trash2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
 type StatusFilter = 'all' | 'open' | 'ack' | 'closed';
@@ -16,11 +22,19 @@ const severityConfig: Record<string, string> = {
   low: 'bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30',
 };
 
+const defaultForm = { title: '', description: '', severity: 'medium', source: 'manual', organization_id: '' };
+
 const AlertsPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const { userRole } = useAuth();
   const [sevFilter, setSevFilter] = useState<SeverityFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selected, setSelected] = useState<string[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState(defaultForm);
+  const [saving, setSaving] = useState(false);
+
+  const canCreate = userRole?.role === 'SuperAdmin' || userRole?.role === 'Analyst';
 
   const { data: alerts = [], isLoading } = useQuery({
     queryKey: ['alerts', sevFilter, statusFilter],
@@ -31,6 +45,15 @@ const AlertsPage: React.FC = () => {
       const { data } = await q;
       return data || [];
     },
+  });
+
+  const { data: orgs = [] } = useQuery({
+    queryKey: ['orgs-list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('organizations').select('id, name').order('name');
+      return data || [];
+    },
+    enabled: canCreate,
   });
 
   const ackAlert = async (ids: string[]) => {
@@ -53,6 +76,35 @@ const AlertsPage: React.FC = () => {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
+  const handleCreate = async () => {
+    if (!form.title || !form.organization_id) {
+      toast.error('Title and organization are required');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('alerts').insert({
+        title: form.title,
+        description: form.description,
+        severity: form.severity as any,
+        source: form.source || 'manual',
+        organization_id: form.organization_id,
+        status: 'open',
+        is_read: false,
+      });
+      if (error) throw error;
+      toast.success('Alert created successfully');
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['active-alerts'] });
+      setCreateOpen(false);
+      setForm(defaultForm);
+    } catch (err: any) {
+      toast.error('Failed to create alert: ' + (err.message || 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openCount = (alerts as any[]).filter((a) => a.status === 'open').length;
 
   return (
@@ -62,19 +114,100 @@ const AlertsPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-foreground">Alert Center</h1>
           <p className="text-muted-foreground text-sm mt-0.5">{openCount} open · {alerts.length} total</p>
         </div>
-        {selected.length > 0 && (
-          <div className="flex gap-2">
-            <button onClick={() => ackAlert(selected)}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-neon-green/10 border border-neon-green/30 text-neon-green rounded-lg hover:bg-neon-green/20 transition-colors">
-              <Check className="w-4 h-4" /> Acknowledge ({selected.length})
-            </button>
-            <button onClick={() => dismissAlert(selected)}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-neon-red/10 border border-neon-red/30 text-neon-red rounded-lg hover:bg-neon-red/20 transition-colors">
-              <Trash2 className="w-4 h-4" /> Close ({selected.length})
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          {selected.length > 0 && (
+            <>
+              <button onClick={() => ackAlert(selected)}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-neon-green/10 border border-neon-green/30 text-neon-green rounded-lg hover:bg-neon-green/20 transition-colors">
+                <Check className="w-4 h-4" /> Acknowledge ({selected.length})
+              </button>
+              <button onClick={() => dismissAlert(selected)}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-neon-red/10 border border-neon-red/30 text-neon-red rounded-lg hover:bg-neon-red/20 transition-colors">
+                <Trash2 className="w-4 h-4" /> Close ({selected.length})
+              </button>
+            </>
+          )}
+          {canCreate && (
+            <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-2">
+              <Plus className="w-4 h-4" /> New Alert
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Create Alert Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Alert</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="alert-title">Title *</Label>
+              <Input
+                id="alert-title"
+                value={form.title}
+                onChange={e => setForm({ ...form, title: e.target.value })}
+                placeholder="e.g. Suspicious login attempts detected"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="alert-desc">Description</Label>
+              <Textarea
+                id="alert-desc"
+                value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder="Additional details..."
+                rows={3}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="alert-severity">Severity *</Label>
+                <select
+                  id="alert-severity"
+                  value={form.severity}
+                  onChange={e => setForm({ ...form, severity: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {['critical', 'high', 'medium', 'low'].map(s => (
+                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="alert-source">Source</Label>
+                <Input
+                  id="alert-source"
+                  value={form.source}
+                  onChange={e => setForm({ ...form, source: e.target.value })}
+                  placeholder="manual"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="alert-org">Organization *</Label>
+              <select
+                id="alert-org"
+                value={form.organization_id}
+                onChange={e => setForm({ ...form, organization_id: e.target.value })}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Select organization...</option>
+                {(orgs as any[]).map((o: any) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={saving}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={saving || !form.title || !form.organization_id}>
+              {saving ? 'Creating...' : 'Create Alert'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
