@@ -50,8 +50,7 @@ const ProtectedRoutes = () => {
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/cert" element={<CertAdvisories />} />
-        <Route path="/threat-map" element={<ThreatMap />} />
-        <Route path="/reports" element={<Reports />} />
+            <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<NotFound />} />
@@ -70,6 +69,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/public" element={<Landing />} />
             <Route path="/cyber-map" element={<CyberMap />} />
+            <Route path="/threat-map" element={<ThreatMap />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </AuthProvider>
