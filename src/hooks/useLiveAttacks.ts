@@ -41,6 +41,17 @@ const THREAT_SOURCES: { country: string; lat: number; lng: number }[] = [
   { country: 'Israel', lat: 31.04, lng: 34.85 },
 ];
 
+// Weighted sources — major threat actors appear more frequently for bundled arc effect
+const WEIGHTED_SOURCES: { country: string; lat: number; lng: number }[] = [
+  ...Array(4).fill({ country: 'China', lat: 35.86, lng: 104.19 }),
+  ...Array(4).fill({ country: 'Russia', lat: 61.52, lng: 105.31 }),
+  ...Array(3).fill({ country: 'Iran', lat: 32.43, lng: 53.68 }),
+  ...Array(3).fill({ country: 'USA', lat: 39.38, lng: -100.44 }),
+  ...Array(2).fill({ country: 'North Korea', lat: 40.33, lng: 127.51 }),
+  ...Array(2).fill({ country: 'Ukraine', lat: 48.37, lng: 31.17 }),
+  ...THREAT_SOURCES,
+];
+
 // Somalia target locations (Mogadishu area government buildings + real org coordinates)
 const SOMALIA_TARGETS = [
   { lat: 2.046, lng: 45.342, country: 'Somalia' },   // Mogadishu city center
@@ -59,7 +70,7 @@ function pickRandom<T>(arr: T[]): T {
 }
 
 function generateMockThreat(): LiveThreat {
-  const source = pickRandom(THREAT_SOURCES);
+  const source = pickRandom(WEIGHTED_SOURCES);
   const target = pickRandom(SOMALIA_TARGETS);
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -93,7 +104,7 @@ export function useLiveAttacks(enabled: boolean) {
     }
 
     const scheduleNext = () => {
-      const delay = 700 + Math.random() * 1300; // 0.7–2s
+      const delay = 300 + Math.random() * 700; // 0.3–1s for denser bundling
       return setTimeout(() => {
         // Pause mock if real events recently
         const realRecently = Date.now() - lastRealEventRef.current < 5000;
