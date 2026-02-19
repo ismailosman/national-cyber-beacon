@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { AlertTriangle, Loader2, Map, Activity, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Activity, RefreshCw, Zap } from 'lucide-react';
 import { useLiveAttacks, LiveThreat, AttackType } from '@/hooks/useLiveAttacks';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -26,18 +26,19 @@ const TRAVEL_DURATION  = 2.0;
 const VISIBLE_DURATION = 15;
 const FADE_DURATION    = 3;
 const ARC_STEPS        = 50;
-const RING_PERIOD      = 2000; // ms per ring cycle
+const RING_PERIOD      = 2000;
+const FLASH_DURATION   = 600; // ms
+const MAX_FEED_ENTRIES = 40;
 
-const POPUP_STYLE = `
-  background: hsl(216 28% 12% / 0.97);
-  border: 1px solid hsl(216 28% 22%);
-  color: hsl(210 40% 95%);
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-family: Inter, system-ui, sans-serif;
-  min-width: 200px;
-  max-width: 280px;
-`;
+const COUNTRY_FLAGS: Record<string, string> = {
+  'China': '🇨🇳', 'Russia': '🇷🇺', 'Iran': '🇮🇷', 'North Korea': '🇰🇵',
+  'USA': '🇺🇸', 'Netherlands': '🇳🇱', 'Germany': '🇩🇪', 'Ukraine': '🇺🇦',
+  'Brazil': '🇧🇷', 'India': '🇮🇳', 'Nigeria': '🇳🇬', 'Pakistan': '🇵🇰',
+  'Vietnam': '🇻🇳', 'Romania': '🇷🇴', 'Turkey': '🇹🇷', 'South Korea': '🇰🇷',
+  'Indonesia': '🇮🇩', 'France': '🇫🇷', 'UK': '🇬🇧', 'Saudi Arabia': '🇸🇦',
+  'Egypt': '🇪🇬', 'Singapore': '🇸🇬', 'Canada': '🇨🇦', 'Japan': '🇯🇵',
+  'Israel': '🇮🇱',
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,14 @@ interface MapPoint {
   sector?: string;
 }
 
+interface FeedEntry {
+  id: string;
+  timestamp: number;
+  country: string;
+  attack_type: AttackType;
+  severity: string;
+}
+
 // ── Arc State ──────────────────────────────────────────────────────────────────
 
 interface ArcState {
@@ -58,6 +67,13 @@ interface ArcState {
   startTime: number;
   progress:  number;
   opacity:   number;
+  flashed:   boolean;
+}
+
+interface FlashState {
+  lng: number;
+  lat: number;
+  startTime: number;
 }
 
 // ── Bezier arc math ────────────────────────────────────────────────────────────
@@ -172,6 +188,38 @@ function buildRingsGeoJSON(states: globalThis.Map<string, ArcState>, now: number
   return { type: 'FeatureCollection', features };
 }
 
+function buildProjectileGeoJSON(states: globalThis.Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.progress >= 1 || state.progress <= 0.01) continue;
+    const sliceEnd = Math.max(2, Math.ceil(state.progress * state.arcCoords.length));
+    const tip = state.arcCoords[sliceEnd - 1];
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: tip },
+      properties: { color: ATTACK_COLORS[state.threat.attack_type] },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildFlashGeoJSON(flashes: globalThis.Map<string, FlashState>, now: number): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const [, flash] of flashes) {
+    const t = (now - flash.startTime) / FLASH_DURATION;
+    if (t >= 1) continue;
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [flash.lng, flash.lat] },
+      properties: {
+        radius: 5 + t * 30,
+        flashOpacity: (1 - t) * 0.9,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 function mapPointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -188,6 +236,10 @@ function mapPointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   };
 }
 
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 const ThreatMap: React.FC = () => {
@@ -201,15 +253,18 @@ const ThreatMap: React.FC = () => {
   const [severityCounts, setSeverityCounts] = useState<Record<string, number>>({ critical: 0, high: 0, medium: 0, low: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
+  const [feedEntries, setFeedEntries] = useState<FeedEntry[]>([]);
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const mapboxglRef = useRef<any>(null);
 
   // Arc animation refs
-  const arcStatesRef = useRef<globalThis.Map<string, ArcState>>(new globalThis.Map());
-  const rafRef       = useRef<number>(0);
-  const isDirtyRef   = useRef(false);
-  const seenIdsRef   = useRef<globalThis.Set<string>>(new globalThis.Set());
+  const arcStatesRef   = useRef<globalThis.Map<string, ArcState>>(new globalThis.Map());
+  const flashStatesRef = useRef<globalThis.Map<string, FlashState>>(new globalThis.Map());
+  const rafRef         = useRef<number>(0);
+  const isDirtyRef     = useRef(false);
+  const seenIdsRef     = useRef<globalThis.Set<string>>(new globalThis.Set());
 
   const { threats, todayCount } = useLiveAttacks(true);
 
@@ -243,7 +298,7 @@ const ThreatMap: React.FC = () => {
     return () => { cancelled = true; };
   }, [retryKey]);
 
-  // ── 2. Initialize Mapbox (static, locked) ─────────────────────────────────
+  // ── 2. Initialize Mapbox ───────────────────────────────────────────────────
   useEffect(() => {
     if (!mapToken || !mapContainer.current || mapRef.current) return;
 
@@ -261,7 +316,7 @@ const ThreatMap: React.FC = () => {
         center: [46, 5.5],
         zoom: 3.5,
         projection: 'mercator',
-        interactive: false,       // ← static map, no pan/zoom
+        interactive: false,
         pitchWithRotate: false,
         dragRotate: false,
         attributionControl: false,
@@ -273,6 +328,35 @@ const ThreatMap: React.FC = () => {
         if (cancelled) return;
 
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+        // ── Somalia highlight (light blue) ────────────────────────────────
+        map.addSource('somalia-boundaries', {
+          type: 'vector',
+          url: 'mapbox://mapbox.country-boundaries-v1',
+        });
+        map.addLayer({
+          id: 'somalia-highlight',
+          type: 'fill',
+          source: 'somalia-boundaries',
+          'source-layer': 'country_boundaries',
+          filter: ['==', ['get', 'name_en'], 'Somalia'],
+          paint: {
+            'fill-color': '#38bdf8',
+            'fill-opacity': 0.25,
+          },
+        });
+        map.addLayer({
+          id: 'somalia-outline',
+          type: 'line',
+          source: 'somalia-boundaries',
+          'source-layer': 'country_boundaries',
+          filter: ['==', ['get', 'name_en'], 'Somalia'],
+          paint: {
+            'line-color': '#38bdf8',
+            'line-width': 1.5,
+            'line-opacity': 0.8,
+          },
+        });
 
         // ── Alert dot layers ──────────────────────────────────────────────
         map.addSource('alerts-source', {
@@ -331,7 +415,7 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // ── Attack arc layers (on top of alert dots) ──────────────────────
+        // ── Attack arc layers ─────────────────────────────────────────────
         map.addSource('attack-arcs-source',    { type: 'geojson', data: emptyFC });
         map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-impact-source',  { type: 'geojson', data: emptyFC });
@@ -349,7 +433,7 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // Sharp arc (semi-transparent for stacking density)
+        // Sharp arc
         map.addLayer({
           id: 'attack-arcs',
           type: 'line',
@@ -396,7 +480,7 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // ── Pulsing rings at source countries (radius driven by RAF) ──────
+        // ── Pulsing rings ─────────────────────────────────────────────────
         map.addSource('attack-ring-source', { type: 'geojson', data: emptyFC });
         map.addLayer({
           id: 'attack-ring',
@@ -411,9 +495,52 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // ── Somalia bullseye impact layers ───────────────────────────────
+        // ── Projectile dot + glow ─────────────────────────────────────────
+        map.addSource('attack-projectile-source', { type: 'geojson', data: emptyFC });
 
-        // Solid center dot
+        map.addLayer({
+          id: 'attack-projectile-glow',
+          type: 'circle',
+          source: 'attack-projectile-source',
+          paint: {
+            'circle-radius': 10,
+            'circle-color': 'transparent',
+            'circle-stroke-width': 3,
+            'circle-stroke-color': ['get', 'color'],
+            'circle-stroke-opacity': 0.4,
+          },
+        });
+
+        map.addLayer({
+          id: 'attack-projectile',
+          type: 'circle',
+          source: 'attack-projectile-source',
+          paint: {
+            'circle-radius': 4,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': 1,
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-opacity': 0.9,
+          },
+        });
+
+        // ── Impact flash ──────────────────────────────────────────────────
+        map.addSource('attack-flash-source', { type: 'geojson', data: emptyFC });
+        map.addLayer({
+          id: 'attack-flash',
+          type: 'circle',
+          source: 'attack-flash-source',
+          paint: {
+            'circle-radius': ['get', 'radius'],
+            'circle-color': 'transparent',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#f472b6',
+            'circle-stroke-opacity': ['get', 'flashOpacity'],
+          },
+        });
+
+        // ── Somalia bullseye impact layers ───────────────────────────────
         map.addLayer({
           id: 'attack-impact-solid',
           type: 'circle',
@@ -425,7 +552,6 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // Inner ring
         map.addLayer({
           id: 'attack-impact',
           type: 'circle',
@@ -439,7 +565,6 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // Outer ring (larger, more transparent)
         map.addLayer({
           id: 'attack-impact-outer',
           type: 'circle',
@@ -494,19 +619,27 @@ const ThreatMap: React.FC = () => {
   const updateMapSources = useCallback((nowMs?: number) => {
     const map = mapRef.current;
     if (!map) return;
-    const arcs    = map.getSource('attack-arcs-source');
-    const sources = map.getSource('attack-sources-source');
-    const impacts = map.getSource('attack-impact-source');
-    const rings   = map.getSource('attack-ring-source');
-    if (arcs)    (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
-    if (sources) (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
-    if (impacts) (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
-    if (rings)   (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
+    const now = nowMs ?? performance.now();
+
+    const arcs       = map.getSource('attack-arcs-source');
+    const sources    = map.getSource('attack-sources-source');
+    const impacts    = map.getSource('attack-impact-source');
+    const rings      = map.getSource('attack-ring-source');
+    const projectile = map.getSource('attack-projectile-source');
+    const flash      = map.getSource('attack-flash-source');
+
+    if (arcs)       (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
+    if (sources)    (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
+    if (impacts)    (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+    if (rings)      (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, now));
+    if (projectile) (projectile as any).setData(buildProjectileGeoJSON(arcStatesRef.current));
+    if (flash)      (flash as any).setData(buildFlashGeoJSON(flashStatesRef.current, now));
   }, []);
 
-  // ── 5. Sync new threats into arc state ────────────────────────────────────
+  // ── 5. Sync new threats into arc state + feed ─────────────────────────────
   useEffect(() => {
     if (!mapLoaded) return;
+    const newEntries: FeedEntry[] = [];
     for (const threat of threats) {
       if (seenIdsRef.current.has(threat.id)) continue;
       seenIdsRef.current.add(threat.id);
@@ -516,8 +649,19 @@ const ThreatMap: React.FC = () => {
         startTime: prefersReducedMotion ? Date.now() - TRAVEL_DURATION * 1000 : Date.now(),
         progress:  prefersReducedMotion ? 1 : 0,
         opacity:   1,
+        flashed:   false,
+      });
+      newEntries.push({
+        id: threat.id,
+        timestamp: threat.timestamp,
+        country: threat.source.country,
+        attack_type: threat.attack_type,
+        severity: threat.severity,
       });
       isDirtyRef.current = true;
+    }
+    if (newEntries.length > 0) {
+      setFeedEntries(prev => [...newEntries, ...prev].slice(0, MAX_FEED_ENTRIES));
     }
   }, [threats, mapLoaded, prefersReducedMotion]);
 
@@ -529,12 +673,31 @@ const ThreatMap: React.FC = () => {
       const now = performance.now();
       let changed = false;
 
+      // Clean up expired flashes
+      for (const [id, flash] of flashStatesRef.current) {
+        if ((now - flash.startTime) >= FLASH_DURATION) {
+          flashStatesRef.current.delete(id);
+          changed = true;
+        }
+      }
+
       for (const [id, state] of arcStatesRef.current) {
         const elapsed = (now - state.startTime) / 1000;
         const newProgress = Math.min(elapsed / TRAVEL_DURATION, 1);
         const newOpacity  = elapsed > (VISIBLE_DURATION - FADE_DURATION)
           ? Math.max(0, 1 - (elapsed - (VISIBLE_DURATION - FADE_DURATION)) / FADE_DURATION)
           : 1;
+
+        // Trigger impact flash when arc reaches target
+        if (newProgress >= 0.98 && !state.flashed) {
+          state.flashed = true;
+          flashStatesRef.current.set(id + '-flash', {
+            lng: state.threat.target.lng,
+            lat: state.threat.target.lat,
+            startTime: now,
+          });
+          changed = true;
+        }
 
         if (newOpacity <= 0) {
           arcStatesRef.current.delete(id);
@@ -552,12 +715,20 @@ const ThreatMap: React.FC = () => {
         isDirtyRef.current = false;
         updateMapSources(now);
       } else {
-        // Always update rings every frame for smooth pulsing
+        // Always update rings + projectile + flash every frame for smooth animation
         const map = mapRef.current;
         if (map) {
-          const rings = map.getSource('attack-ring-source');
+          const rings      = map.getSource('attack-ring-source');
+          const projectile = map.getSource('attack-projectile-source');
+          const flash      = map.getSource('attack-flash-source');
           if (rings && arcStatesRef.current.size > 0) {
             (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, now));
+          }
+          if (projectile) {
+            (projectile as any).setData(buildProjectileGeoJSON(arcStatesRef.current));
+          }
+          if (flash && flashStatesRef.current.size > 0) {
+            (flash as any).setData(buildFlashGeoJSON(flashStatesRef.current, now));
           }
         }
       }
@@ -594,7 +765,7 @@ const ThreatMap: React.FC = () => {
       </div>
 
       {/* Map + Sidebar */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_272px] gap-4 min-h-0">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4 min-h-0">
 
         {/* Map */}
         <div
@@ -602,7 +773,6 @@ const ThreatMap: React.FC = () => {
           role="application"
           aria-label="Live cyber threat map showing attacks targeting Somalia"
         >
-          {/* Loading */}
           {!mapToken && !mapError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/60">
               <Loader2 className="w-8 h-8 animate-spin text-primary opacity-70" />
@@ -610,7 +780,6 @@ const ThreatMap: React.FC = () => {
             </div>
           )}
 
-          {/* Error */}
           {mapError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background/80">
               <AlertTriangle className="w-10 h-10 text-destructive opacity-70" />
@@ -665,46 +834,71 @@ const ThreatMap: React.FC = () => {
 
         {/* Sidebar */}
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
-          {/* Alert hotspots feed */}
+
+          {/* ── Live Attack Feed ──────────────────────────────────────────── */}
           <div className="glass-card rounded-xl border border-border flex flex-col flex-1 min-h-0">
-            <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
-              <Activity className="w-4 h-4 text-destructive" />
-              <h3 className="text-sm font-semibold">Alert Hotspots</h3>
-              {isLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />}
-              {!isLoading && (
-                <span className="ml-auto text-xs font-mono text-muted-foreground">{totalAlerts} total</span>
-              )}
+            <div className="px-3 py-2.5 border-b border-border flex items-center gap-2 flex-shrink-0">
+              <Zap className="w-3.5 h-3.5 text-yellow-400" />
+              <span className="text-xs font-bold text-foreground tracking-wide">Live Attack Feed</span>
+              <span className="ml-auto flex items-center gap-1 text-[10px] font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-green-400">LIVE</span>
+              </span>
             </div>
-            <div className="overflow-y-auto flex-1 divide-y divide-border/50">
-              {mapPoints.length === 0 && !isLoading ? (
-                <div className="p-6 text-center text-muted-foreground text-xs">No alert data available</div>
+
+            <div className="overflow-y-auto flex-1 divide-y divide-border/40" style={{ scrollbarWidth: 'thin' }}>
+              {feedEntries.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground text-xs">
+                  <Activity className="w-5 h-5 mx-auto mb-2 opacity-40" />
+                  Waiting for attacks...
+                </div>
               ) : (
-                mapPoints.slice(0, 12).map((point, idx) => (
-                  <div key={idx} className="p-3">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                feedEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="px-3 py-2 hover:bg-muted/20 transition-colors animate-fade-in"
+                    style={{ borderLeft: `2px solid ${ATTACK_COLORS[entry.attack_type]}` }}
+                  >
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[9px] font-mono text-muted-foreground tabular-nums">
+                        {formatTime(entry.timestamp)}
+                      </span>
                       <span
-                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded font-mono border"
+                        className="ml-auto text-[9px] font-bold uppercase px-1 py-0.5 rounded font-mono"
                         style={{
-                          color: SEVERITY_COLORS[point.severity],
-                          borderColor: `${SEVERITY_COLORS[point.severity]}40`,
-                          background: `${SEVERITY_COLORS[point.severity]}18`,
+                          color: SEVERITY_COLORS[entry.severity],
+                          background: `${SEVERITY_COLORS[entry.severity]}18`,
+                          border: `1px solid ${SEVERITY_COLORS[entry.severity]}40`,
                         }}
                       >
-                        {point.severity}
-                      </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">
-                        {point.count} alert{point.count !== 1 ? 's' : ''}
+                        {entry.severity}
                       </span>
                     </div>
-                    <p className="text-xs font-medium text-foreground">{point.region ?? 'Somalia'}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">{point.sector ?? 'government'}</p>
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-foreground font-medium">
+                        {COUNTRY_FLAGS[entry.country] ?? '🌐'} {entry.country}
+                      </span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="text-foreground font-medium">🇸🇴 Somalia</span>
+                    </div>
+                    <div className="mt-0.5">
+                      <span
+                        className="text-[9px] px-1 py-0.5 rounded font-mono capitalize"
+                        style={{
+                          color: ATTACK_COLORS[entry.attack_type],
+                          background: `${ATTACK_COLORS[entry.attack_type]}15`,
+                        }}
+                      >
+                        {entry.attack_type}
+                      </span>
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
 
-          {/* Severity breakdown */}
+          {/* ── Severity breakdown ────────────────────────────────────────── */}
           <div className="glass-card rounded-xl border border-border p-3 flex-shrink-0">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Severity Breakdown</p>
             <div className="space-y-2">

@@ -42,6 +42,7 @@ const ProtectedRoutes = () => {
   return (
     <Routes>
       <Route element={<AppLayout />}>
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/" element={<Dashboard />} />
         <Route path="/organizations" element={<Organizations />} />
         <Route path="/organizations/:id" element={<OrgDetail />} />
@@ -67,9 +68,11 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/" element={<Landing />} />
             <Route path="/public" element={<Landing />} />
             <Route path="/cyber-map" element={<CyberMap />} />
             <Route path="/threat-map" element={<ThreatMap />} />
+            <Route path="/dashboard" element={<ProtectedRoutes />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </AuthProvider>
