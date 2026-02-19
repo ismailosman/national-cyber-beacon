@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus, Wifi, WifiOff, ShieldAlert } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -19,11 +19,16 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 const checkTypeLabels: Record<string, string> = {
+  ssl: 'SSL / TLS Certificate',
   tls: 'TLS Certificate',
   https: 'HTTPS Enforcement',
   headers: 'Security Headers',
   dns: 'DNS Resolution',
-  uptime: 'Uptime Check',
+  uptime: 'Availability Check',
+  ddos: 'DDoS Detection',
+  waf: 'WAF / CDN Protection',
+  http_methods: 'HTTP Methods',
+  cookie_security: 'Cookie Security',
   cert_expiry: 'Cert Expiry',
   waf_activity: 'WAF Activity',
 };
@@ -215,13 +220,32 @@ const OrgDetail: React.FC = () => {
     }
   };
 
+  // Helper: get the latest score for a given check type (most recent checked_at)
+  const latestCheck = (type: string): number => {
+    const found = [...checks]
+      .filter((c: any) => c.check_type === type)
+      .sort((a: any, b: any) => new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime())[0];
+    return found?.score ?? 50;
+  };
+
+  // Latest DDoS check result
+  const latestDDoS = [...checks]
+    .filter((c: any) => c.check_type === 'ddos')
+    .sort((a: any, b: any) => new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime())[0];
+
+  const rawDDoSStatus = latestDDoS?.status;
+  const ddosStatus: 'pass' | 'warn' | 'fail' | null = 
+    rawDDoSStatus === 'pass' || rawDDoSStatus === 'warn' || rawDDoSStatus === 'fail'
+      ? rawDDoSStatus
+      : null;
+
   const radarData = [
-    { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'tls')?.score ?? 50 },
-    { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.score ?? 50 },
-    { subject: 'Uptime', value: checks.find((c: any) => c.check_type === 'uptime')?.score ?? 50 },
-    { subject: 'DNS', value: checks.find((c: any) => c.check_type === 'dns')?.score ?? 50 },
-    { subject: 'WAF', value: checks.find((c: any) => c.check_type === 'waf_activity')?.score ?? 50 },
-    { subject: 'Overall', value: org?.risk_score || 50 },
+    { subject: 'SSL', value: latestCheck('ssl') || latestCheck('tls') },
+    { subject: 'Headers', value: latestCheck('headers') },
+    { subject: 'Uptime', value: latestCheck('uptime') },
+    { subject: 'DNS', value: latestCheck('dns') },
+    { subject: 'DDoS', value: latestCheck('ddos') },
+    { subject: 'WAF', value: latestCheck('waf') },
   ];
 
   if (!org) return (
@@ -235,6 +259,36 @@ const OrgDetail: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* DDoS Attack Banner */}
+      {ddosStatus === 'fail' && (
+        <div className="rounded-xl border border-neon-red/60 bg-neon-red/10 p-4 flex items-start gap-3 animate-pulse">
+          <ShieldAlert className="w-5 h-5 text-neon-red flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-neon-red text-sm">🚨 CRITICAL: DDoS Attack Detected</p>
+            <p className="text-sm text-foreground/80 mt-0.5">
+              Multiple probes to <span className="font-mono text-neon-red">{org?.domain}</span> are failing.
+              The site may be offline or under an active DDoS attack.
+              {latestDDoS?.checked_at && (
+                <span className="text-xs text-muted-foreground ml-2">
+                  Last checked: {formatDistanceToNow(new Date(latestDDoS.checked_at), { addSuffix: true })}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+      {ddosStatus === 'warn' && (
+        <div className="rounded-xl border border-neon-amber/50 bg-neon-amber/10 p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-neon-amber flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-neon-amber text-sm">⚠️ WARNING: DDoS Indicators Detected</p>
+            <p className="text-sm text-foreground/80 mt-0.5">
+              Anomalous latency or response patterns detected on <span className="font-mono text-neon-amber">{org?.domain}</span>. Possible degradation or attack in progress.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Back + Header */}
       <div className="flex items-center gap-4 flex-wrap">
         <button onClick={() => navigate('/organizations')} className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground hover:text-foreground">
@@ -435,7 +489,7 @@ const OrgDetail: React.FC = () => {
       </Dialog>
 
       {/* Score Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           { label: 'Risk Score', value: org.risk_score, color: org.risk_score >= 75 ? 'text-neon-green' : org.risk_score >= 50 ? 'text-neon-amber' : 'text-neon-red' },
           { label: 'Status', value: org.status, color: org.status === 'Secure' ? 'text-neon-green' : org.status === 'Warning' ? 'text-neon-amber' : 'text-neon-red' },
@@ -447,6 +501,34 @@ const OrgDetail: React.FC = () => {
             <p className="text-xs text-muted-foreground mt-1">{c.label}</p>
           </div>
         ))}
+        {/* DDoS Status Card */}
+        <div className={cn(
+          'glass-card rounded-xl p-4 border text-center',
+          ddosStatus === 'pass' ? 'border-neon-green/40 bg-neon-green/5' :
+          ddosStatus === 'warn' ? 'border-neon-amber/40 bg-neon-amber/5' :
+          ddosStatus === 'fail' ? 'border-neon-red/60 bg-neon-red/10' :
+          'border-border'
+        )}>
+          <div className="flex items-center justify-center mb-1">
+            {ddosStatus === 'pass' ? <Wifi className="w-5 h-5 text-neon-green" /> :
+             ddosStatus === 'warn' ? <WifiOff className="w-5 h-5 text-neon-amber" /> :
+             ddosStatus === 'fail' ? <ShieldAlert className={cn('w-5 h-5 text-neon-red', 'animate-pulse')} /> :
+             <Wifi className="w-5 h-5 text-muted-foreground" />}
+          </div>
+          <p className={cn(
+            'text-sm font-bold font-mono',
+            ddosStatus === 'pass' ? 'text-neon-green' :
+            ddosStatus === 'warn' ? 'text-neon-amber' :
+            ddosStatus === 'fail' ? 'text-neon-red animate-pulse' :
+            'text-muted-foreground'
+          )}>
+            {ddosStatus === 'pass' ? 'PROTECTED' :
+             ddosStatus === 'warn' ? 'WARNING' :
+             ddosStatus === 'fail' ? 'UNDER ATTACK' :
+             'NOT SCANNED'}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">DDoS Status</p>
+        </div>
       </div>
 
       {/* Radar + Details */}
