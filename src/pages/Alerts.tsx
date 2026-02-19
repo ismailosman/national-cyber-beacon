@@ -11,9 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-
-type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
-type StatusFilter = 'all' | 'open' | 'ack' | 'closed';
+import { useAlerts, type SeverityFilter, type StatusFilter } from '@/hooks/useAlerts';
 
 const severityConfig: Record<string, string> = {
   critical: 'bg-neon-red/10 text-neon-red border-neon-red/30',
@@ -36,16 +34,7 @@ const AlertsPage: React.FC = () => {
 
   const canCreate = userRole?.role === 'SuperAdmin' || userRole?.role === 'Analyst';
 
-  const { data: alerts = [], isLoading } = useQuery({
-    queryKey: ['alerts', sevFilter, statusFilter],
-    queryFn: async () => {
-      let q = supabase.from('alerts').select('*, organizations(name)').order('created_at', { ascending: false });
-      if (sevFilter !== 'all') q = q.eq('severity', sevFilter);
-      if (statusFilter !== 'all') q = q.eq('status', statusFilter);
-      const { data } = await q;
-      return data || [];
-    },
-  });
+  const { data: alerts = [], isLoading } = useAlerts({ severity: sevFilter, status: statusFilter });
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['orgs-list'],
