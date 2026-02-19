@@ -78,13 +78,32 @@ const ThreatMap: React.FC = () => {
   useEffect(() => {
     setMapError(null);
     setMapToken(null);
-    supabase.functions.invoke('get-map-token').then(({ data, error }) => {
+
+    let cancelled = false;
+
+    (async () => {
+      // Ensure we have a valid session before calling the authenticated edge function
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (!accessToken) {
+        if (!cancelled) setMapError('Session expired. Please refresh the page.');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('get-map-token', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (cancelled) return;
       if (error || !data?.token) {
         setMapError('Failed to load map token. Check configuration.');
         return;
       }
       setMapToken(data.token);
-    });
+    })();
+
+    return () => { cancelled = true; };
   }, [retryKey]);
 
   // ── 2. Initialize Mapbox once ───────────────────────────────────────────────
