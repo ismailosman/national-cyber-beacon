@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  Shield, LogOut, ChevronRight, Wifi
+  Shield, LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,9 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/organizations', icon: Building2, label: 'Organizations' },
   { to: '/alerts', icon: Bell, label: 'Alert Center' },
+  { to: '/incidents', icon: AlertOctagon, label: 'Incidents' },
+  { to: '/compliance', icon: CheckSquare, label: 'Compliance' },
+  { to: '/cert', icon: Radio, label: 'CERT-SO' },
   { to: '/reports', icon: FileText, label: 'Reports' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

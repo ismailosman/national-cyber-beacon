@@ -19,7 +19,7 @@ const AlertSidebar: React.FC = () => {
       const { data } = await supabase
         .from('alerts')
         .select('*, organizations(name)')
-        .eq('is_read', false)
+        .eq('status', 'open')
         .order('created_at', { ascending: false })
         .limit(20);
       return data || [];
@@ -57,7 +57,8 @@ const AlertSidebar: React.FC = () => {
                     <p className={cn('font-semibold uppercase text-[10px] tracking-wider', cfg.color)}>
                       {alert.severity}
                     </p>
-                    <p className="text-foreground leading-tight mt-0.5">{alert.message}</p>
+                    <p className="text-foreground leading-tight mt-0.5">{alert.title}</p>
+                    {alert.description && <p className="text-muted-foreground leading-tight mt-0.5 line-clamp-2">{alert.description}</p>}
                     {alert.organizations?.name && (
                       <p className="text-muted-foreground mt-1 truncate">{alert.organizations.name}</p>
                     )}
