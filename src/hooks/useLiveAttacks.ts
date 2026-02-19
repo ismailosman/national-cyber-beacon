@@ -83,8 +83,8 @@ function generateMockThreat(): LiveThreat {
 }
 
 const RING_BUFFER_SIZE = 100;
-// Seed with realistic daily count (2M–8M range like professional threat maps)
-const BASE_COUNT = Math.floor(2_000_000 + Math.random() * 6_000_000);
+// Seed with a credible daily count for a national CERT context (3K–15K range)
+const BASE_COUNT = Math.floor(3_000 + Math.random() * 12_000);
 
 export function useLiveAttacks(enabled: boolean) {
   const [threats, setThreats] = useState<LiveThreat[]>([]);
