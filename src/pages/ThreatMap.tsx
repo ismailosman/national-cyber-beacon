@@ -22,10 +22,11 @@ const ATTACK_COLORS: Record<AttackType, string> = {
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 
-const TRAVEL_DURATION = 2.5;
-const VISIBLE_DURATION = 8;
-const FADE_DURATION    = 2;
+const TRAVEL_DURATION  = 2.0;
+const VISIBLE_DURATION = 15;
+const FADE_DURATION    = 3;
 const ARC_STEPS        = 50;
+const RING_PERIOD      = 2000; // ms per ring cycle
 
 const POPUP_STYLE = `
   background: hsl(216 28% 12% / 0.97);
@@ -137,6 +138,38 @@ function buildImpactGeoJSON(states: globalThis.Map<string, ArcState>): GeoJSON.F
       properties: { count },
     })),
   };
+}
+
+function buildRingsGeoJSON(states: globalThis.Map<string, ArcState>, now: number): GeoJSON.FeatureCollection {
+  const seenCountries = new globalThis.Map<string, { lng: number; lat: number; color: string; firstSeen: number }>();
+  for (const state of states.values()) {
+    if (state.opacity <= 0) continue;
+    const c = state.threat.source.country;
+    if (!seenCountries.has(c)) {
+      seenCountries.set(c, {
+        lng: state.threat.source.lng,
+        lat: state.threat.source.lat,
+        color: ATTACK_COLORS[state.threat.attack_type],
+        firstSeen: state.startTime,
+      });
+    }
+  }
+  const features: GeoJSON.Feature[] = [];
+  for (const [, info] of seenCountries) {
+    for (const offset of [0, RING_PERIOD / 2]) {
+      const t = ((now - info.firstSeen + offset) % RING_PERIOD) / RING_PERIOD;
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [info.lng, info.lat] },
+        properties: {
+          radius: 4 + t * 22,
+          ringOpacity: (1 - t) * 0.85,
+          color: info.color,
+        },
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features };
 }
 
 function mapPointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
@@ -316,15 +349,15 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // Sharp arc
+        // Sharp arc (semi-transparent for stacking density)
         map.addLayer({
           id: 'attack-arcs',
           type: 'line',
           source: 'attack-arcs-source',
           paint: {
             'line-color': ['get', 'color'],
-            'line-width': 2,
-            'line-opacity': ['get', 'opacity'],
+            'line-width': 1.5,
+            'line-opacity': ['*', ['get', 'opacity'], 0.65],
           },
         });
 
@@ -363,17 +396,60 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // Impact rings at Somalia targets
+        // ── Pulsing rings at source countries (radius driven by RAF) ──────
+        map.addSource('attack-ring-source', { type: 'geojson', data: emptyFC });
+        map.addLayer({
+          id: 'attack-ring',
+          type: 'circle',
+          source: 'attack-ring-source',
+          paint: {
+            'circle-radius': ['get', 'radius'],
+            'circle-color': 'transparent',
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': ['get', 'color'],
+            'circle-stroke-opacity': ['get', 'ringOpacity'],
+          },
+        });
+
+        // ── Somalia bullseye impact layers ───────────────────────────────
+
+        // Solid center dot
+        map.addLayer({
+          id: 'attack-impact-solid',
+          type: 'circle',
+          source: 'attack-impact-source',
+          paint: {
+            'circle-radius': 5,
+            'circle-color': '#f472b6',
+            'circle-opacity': 0.9,
+          },
+        });
+
+        // Inner ring
         map.addLayer({
           id: 'attack-impact',
           type: 'circle',
           source: 'attack-impact-source',
           paint: {
-            'circle-radius': ['+', 7, ['/', ['get', 'count'], 1]],
+            'circle-radius': ['+', 10, ['/', ['get', 'count'], 2]],
             'circle-color': 'transparent',
             'circle-stroke-width': 2,
             'circle-stroke-color': '#f472b6',
-            'circle-opacity': 0.8,
+            'circle-opacity': 0.85,
+          },
+        });
+
+        // Outer ring (larger, more transparent)
+        map.addLayer({
+          id: 'attack-impact-outer',
+          type: 'circle',
+          source: 'attack-impact-source',
+          paint: {
+            'circle-radius': ['+', 20, ['/', ['get', 'count'], 1]],
+            'circle-color': 'transparent',
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#f472b6',
+            'circle-stroke-opacity': 0.35,
           },
         });
 
@@ -415,15 +491,17 @@ const ThreatMap: React.FC = () => {
   }, [geojson, mapLoaded]);
 
   // ── 4. Update arc map sources ──────────────────────────────────────────────
-  const updateMapSources = useCallback(() => {
+  const updateMapSources = useCallback((nowMs?: number) => {
     const map = mapRef.current;
     if (!map) return;
     const arcs    = map.getSource('attack-arcs-source');
     const sources = map.getSource('attack-sources-source');
     const impacts = map.getSource('attack-impact-source');
+    const rings   = map.getSource('attack-ring-source');
     if (arcs)    (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
     if (sources) (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
     if (impacts) (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+    if (rings)   (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
   }, []);
 
   // ── 5. Sync new threats into arc state ────────────────────────────────────
@@ -472,7 +550,16 @@ const ThreatMap: React.FC = () => {
 
       if (changed || isDirtyRef.current) {
         isDirtyRef.current = false;
-        updateMapSources();
+        updateMapSources(now);
+      } else {
+        // Always update rings every frame for smooth pulsing
+        const map = mapRef.current;
+        if (map) {
+          const rings = map.getSource('attack-ring-source');
+          if (rings && arcStatesRef.current.size > 0) {
+            (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, now));
+          }
+        }
       }
 
       rafRef.current = requestAnimationFrame(tick);
