@@ -127,7 +127,7 @@ const SomaliaPanel: React.FC<SomaliaPanelProps> = ({ threats, onClose }) => {
       style={{
         right: 16,
         top: 80,
-        width: 320,
+        width: 'min(320px, calc(100vw - 32px))',
         maxHeight: 'calc(80vh)',
         background: 'rgba(10,10,20,0.96)',
         backdropFilter: 'blur(14px)',
@@ -265,7 +265,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }
       style={{
         right: 16,
         top: 80,
-        width: 320,
+        width: 'min(320px, calc(100vw - 32px))',
         maxHeight: 'calc(80vh)',
         background: 'rgba(10,10,20,0.96)',
         backdropFilter: 'blur(14px)',
@@ -510,6 +510,7 @@ const CyberMap: React.FC = () => {
   const [liveOn, setLiveOn]               = useState(true);
   const [somaliaPanel, setSomaliaPanel]   = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [mobileFeedOpen, setMobileFeedOpen] = useState(false);
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<any>(null);
@@ -878,26 +879,26 @@ const CyberMap: React.FC = () => {
         <div className="relative flex-1 min-w-0">
 
           {/* ── Header overlay ──────────────────────────────────────────── */}
-          <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-6 pb-4 pointer-events-none"
+          <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-4 sm:pt-6 pb-3 sm:pb-4 pointer-events-none"
                style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
-            <div className="flex items-center gap-3 mb-2">
-              <img src={logoSrc} alt="Logo" className="w-8 h-8 object-contain opacity-90" />
+            <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
+              <img src={logoSrc} alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain opacity-90" />
               <div className="text-center">
-                <h1 className="text-white font-bold tracking-[0.25em] uppercase text-base sm:text-lg font-mono"
+                <h1 className="text-white font-bold tracking-[0.15em] sm:tracking-[0.25em] uppercase text-xs sm:text-base font-mono"
                     style={{ textShadow: '0 0 20px rgba(34,211,238,0.6)' }}>
                   LIVE CYBER THREAT MAP
                 </h1>
-                <p className="text-[10px] text-slate-400 tracking-widest uppercase">
+                <p className="hidden sm:block text-[10px] text-slate-400 tracking-widest uppercase">
                   Somalia National Cyber Defense Observatory
                 </p>
               </div>
             </div>
             <div className="text-center" aria-live="polite">
-              <p className="text-2xl sm:text-3xl font-mono font-bold"
+              <p className="text-xl sm:text-3xl font-mono font-bold"
                  style={{ color: '#f472b6', textShadow: '0 0 20px rgba(244,114,182,0.7)' }}>
                 {todayCount.toLocaleString()}
               </p>
-              <p className="text-[10px] tracking-[0.3em] text-slate-400 uppercase mt-0.5">
+              <p className="text-[9px] sm:text-[10px] tracking-[0.2em] sm:tracking-[0.3em] text-slate-400 uppercase mt-0.5">
                 ATTACKS ON THIS DAY
               </p>
             </div>
@@ -907,17 +908,19 @@ const CyberMap: React.FC = () => {
           <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
             <Link
               to="/public"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
               style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
             >
-              <Globe className="w-3 h-3" /> Public Dashboard
+              <Globe className="w-3 h-3 flex-shrink-0" />
+              <span className="hidden sm:inline">Public Dashboard</span>
             </Link>
             <Link
               to="/login"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
               style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
             >
-              <Shield className="w-3 h-3" /> Analyst Login
+              <Shield className="w-3 h-3 flex-shrink-0" />
+              <span className="hidden sm:inline">Analyst Login</span>
             </Link>
           </div>
 
@@ -987,11 +990,24 @@ const CyberMap: React.FC = () => {
               <p className="text-sm text-slate-400 font-mono">{mapError}</p>
             </div>
           )}
+
+          {/* ── Mobile Feed Toggle (inside map container so absolute works) ── */}
+          <button
+            onClick={() => setMobileFeedOpen(true)}
+            className="lg:hidden absolute bottom-12 right-4 z-20 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-mono pointer-events-auto"
+            style={{ background: 'rgba(34,211,238,0.15)', border: '1px solid rgba(34,211,238,0.4)', color: '#22d3ee' }}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            Feed
+            <span className="text-[9px] font-bold px-1 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.3)', color: '#ef4444' }}>
+              {threats.length}
+            </span>
+          </button>
         </div>
 
-        {/* ── Live Attack Feed Sidebar ───────────────────────────────────── */}
+        {/* ── Live Attack Feed Sidebar (desktop only) ───────────────────── */}
         <div
-          className="w-64 xl:w-72 flex-shrink-0 flex flex-col overflow-hidden"
+          className="hidden lg:flex w-64 xl:w-72 flex-shrink-0 flex-col overflow-hidden"
           style={{ background: '#07070f', borderLeft: '1px solid rgba(255,255,255,0.08)' }}
         >
           {/* Sidebar header */}
@@ -1028,7 +1044,6 @@ const CyberMap: React.FC = () => {
                     borderLeft: `3px solid ${attackColor}`,
                   }}
                 >
-                  {/* Country row */}
                   <div className="flex items-center gap-1.5 min-w-0">
                     <img
                       src={`https://flagcdn.com/w40/${iso}.png`}
@@ -1038,28 +1053,17 @@ const CyberMap: React.FC = () => {
                     <span className="text-xs text-white font-mono truncate">{t.source.country}</span>
                     <span className="text-[10px] text-slate-500 flex-shrink-0">→ 🇸🇴</span>
                   </div>
-
-                  {/* Attack type + severity */}
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <span
-                      className="text-[10px] font-bold uppercase tracking-wide"
-                      style={{ color: attackColor }}
-                    >
+                    <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: attackColor }}>
                       {ATTACK_LABELS[t.attack_type]}
                     </span>
                     <span
                       className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0"
-                      style={{
-                        background: `${sevColor}22`,
-                        color: sevColor,
-                        border: `1px solid ${sevColor}44`,
-                      }}
+                      style={{ background: `${sevColor}22`, color: sevColor, border: `1px solid ${sevColor}44` }}
                     >
                       {t.severity}
                     </span>
                   </div>
-
-                  {/* Time */}
                   <p className="text-[10px] text-slate-600 font-mono">{timeAgo(t.timestamp)}</p>
                 </div>
               );
@@ -1073,12 +1077,59 @@ const CyberMap: React.FC = () => {
         </div>
       </div>
 
+      {/* ── Mobile Feed Drawer ─────────────────────────────────────────────── */}
+      {mobileFeedOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setMobileFeedOpen(false)} />
+          <div
+            className="relative flex flex-col z-10 rounded-t-2xl overflow-hidden"
+            style={{ height: '60vh', background: '#07070f', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4" style={{ color: '#22d3ee' }} />
+                <span className="text-sm font-bold font-mono tracking-widest uppercase" style={{ color: '#22d3ee' }}>Live Feed</span>
+              </div>
+              <button onClick={() => setMobileFeedOpen(false)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {threats.slice(0, 30).map((t) => {
+                const iso = COUNTRY_ISO[t.source.country] ?? 'un';
+                const attackColor = ATTACK_COLORS[t.attack_type];
+                const sevColor = SEV_COLORS[t.severity];
+                return (
+                  <div
+                    key={t.id}
+                    className="flex flex-col gap-1 px-4 py-3"
+                    style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${attackColor}` }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <img src={`https://flagcdn.com/w40/${iso}.png`} alt={t.source.country} className="w-5 h-3.5 object-cover rounded-sm" />
+                      <span className="text-sm text-white font-mono">{t.source.country}</span>
+                      <span className="text-xs text-slate-500">→ 🇸🇴</span>
+                      <span className="ml-auto text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: `${sevColor}22`, color: sevColor, border: `1px solid ${sevColor}44` }}>{t.severity}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase" style={{ color: attackColor }}>{ATTACK_LABELS[t.attack_type]}</span>
+                      <span className="text-xs text-slate-600 font-mono ml-auto">{timeAgo(t.timestamp)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Bottom bar: severity cards + legend ───────────────────────────── */}
       <div
-        className="flex-shrink-0 flex items-center gap-2 px-4 py-2"
+        className="flex-shrink-0 px-3 sm:px-4 py-2"
         style={{ background: '#050508', borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
-        {/* Severity cards */}
+        {/* Severity cards: 2×2 on mobile, single row on desktop */}
+        <div className="grid grid-cols-2 lg:flex lg:items-center gap-1.5 sm:gap-2">
         {([
           { label: 'Critical', key: 'critical' as const },
           { label: 'High',     key: 'high'     as const },
@@ -1087,14 +1138,14 @@ const CyberMap: React.FC = () => {
         ]).map(({ label, key }) => (
           <div
             key={key}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg"
             style={{
               background: `${SEV_COLORS[key]}0d`,
               border: `1px solid ${SEV_COLORS[key]}33`,
             }}
           >
             <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: SEV_COLORS[key], boxShadow: `0 0 5px ${SEV_COLORS[key]}` }} />
-            <span className="text-lg font-mono font-bold tabular-nums" style={{ color: SEV_COLORS[key] }}>
+            <span className="text-base sm:text-lg font-mono font-bold tabular-nums" style={{ color: SEV_COLORS[key] }}>
               {severityCounts[key]}
             </span>
             <span className="text-[10px] font-mono uppercase tracking-wide" style={{ color: `${SEV_COLORS[key]}99` }}>
@@ -1103,11 +1154,9 @@ const CyberMap: React.FC = () => {
           </div>
         ))}
 
-        {/* Divider */}
-        <div className="w-px h-6 mx-2 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.1)' }} />
-
-        {/* Attack type legend */}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
+        {/* Divider + legend (desktop only) */}
+        <div className="hidden lg:block w-px h-6 mx-2 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.1)' }} />
+        <div className="hidden lg:flex flex-wrap gap-x-4 gap-y-1 flex-1">
           {(Object.entries(ATTACK_LABELS) as [AttackType, string][]).map(([type, label]) => (
             <div key={type} className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full" style={{ background: ATTACK_COLORS[type] }} />
@@ -1118,11 +1167,12 @@ const CyberMap: React.FC = () => {
 
         {/* Live indicator */}
         {liveOn && (
-          <div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
+          <div className="hidden lg:flex items-center gap-1.5 ml-auto flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
             <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Live</span>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

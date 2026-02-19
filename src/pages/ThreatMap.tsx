@@ -361,7 +361,9 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }
     <div
       className="absolute z-30 flex flex-col overflow-y-auto"
       style={{
-        right: 16, top: 16, width: 300, maxHeight: 'calc(90vh)',
+        right: 16, top: 16,
+        width: 'min(300px, calc(100% - 32px))',
+        maxHeight: 'calc(90vh)',
         background: 'rgba(10,10,20,0.96)',
         backdropFilter: 'blur(14px)',
         borderRadius: 8,
@@ -966,23 +968,23 @@ const ThreatMap: React.FC = () => {
 
   // ── UI ─────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 100px)', minHeight: '600px' }}>
+    <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 120px)', minHeight: '500px' }}>
 
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3 flex-shrink-0">
+      <div className="flex items-start justify-between flex-wrap gap-2 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Threat Map</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Threat Map</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
             {isLoading ? 'Loading...' : `${totalAlerts} open alerts · ${mapPoints.length} hotspots · Live attacks`}
           </p>
         </div>
         {/* Severity counters */}
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1.5 sm:gap-2 flex-wrap">
           {SEVERITY_ORDER.map((sev) => (
-            <div key={sev} className="glass-card rounded-lg px-3 py-1.5 border border-border flex items-center gap-1.5">
+            <div key={sev} className="glass-card rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 border border-border flex items-center gap-1 sm:gap-1.5">
               <div className="w-2 h-2 rounded-full" style={{ background: SEVERITY_COLORS[sev] }} />
               <span className="text-xs font-mono font-bold" style={{ color: SEVERITY_COLORS[sev] }}>{severityCounts[sev] ?? 0}</span>
-              <span className="text-xs text-muted-foreground capitalize">{sev}</span>
+              <span className="hidden sm:inline text-xs text-muted-foreground capitalize">{sev}</span>
             </div>
           ))}
         </div>
