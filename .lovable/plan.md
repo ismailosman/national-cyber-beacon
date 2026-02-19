@@ -1,155 +1,144 @@
 
-# Fix: Country Panels Show Unique Data Per Country
+# Plan: Live Attack Feed Sidebar on /cyber-map + Login Logo
 
-## The Problem
+## Summary of Changes
 
-Two bugs make every country panel display identical data:
+Two focused changes:
+1. Restructure `/cyber-map` from a single full-screen overlay into a split layout with a visible map left and a live attack feed sidebar right, plus severity count cards at the bottom that reflect live data
+2. Replace the Shield icon on `/login` with the uploaded Somalia Cyber Defence logo image
 
-**Bug 1 — Shared Sparklines (module-level constants)**
-
-In `CyberMap.tsx` lines 83-89, `SPARKLINES` is generated once at module load and reused for every country:
-
-```typescript
-// These are IDENTICAL for every country clicked:
-const SPARKLINES: Record<AttackType, {...}[]> = {
-  malware:   genSparkline(111, '#ef4444'),   // fixed seed 111
-  phishing:  genSparkline(222, '#a855f7'),   // fixed seed 222
-  ...
-};
-```
-
-So India's Malware sparkline is pixel-for-pixel identical to Russia's — they share the same fixed seed.
-
-**Bug 2 — Single Default Percentages Fallback**
-
-Lines 42-48 define `DEFAULT_PERCENTAGES` as hard-coded constants used when a country has fewer than 5 detected threats:
-
-```typescript
-const DEFAULT_PERCENTAGES = {
-  malware: 31.2,   // same for every country
-  phishing: 18.7,  // same for every country
-  ...
-};
-```
-
-Since the threat ring buffer fills slowly and some countries appear less often in the weighted source list, nearly every country falls through to this fallback — showing 31.2% Malware / 18.7% Phishing for every single country.
-
-**Bug 3 — ThreatMap has no CountryPanel at all**
-
-The ThreatMap page still has no `CountryPanel` component, `selectedCountry` state, or click handlers (the plan to add them was described previously but the file was not edited). This needs to be done as part of the same fix.
+Also: synchronize the `todayCount` across all hook instances so both maps always show the same number.
 
 ---
 
-## The Fix
+## Change 1 — Live Feed Sidebar + Severity Cards (CyberMap.tsx)
 
-### Part 1 — Per-Country Sparklines (CyberMap.tsx)
+### Current Layout
 
-Replace the static `SPARKLINES` constant with a function `genCountrySparklines(country)` that returns a full set of 5 sparklines seeded by `country + attack_type`:
+The entire page is `relative w-screen h-screen overflow-hidden` with:
+- A fullscreen `<div ref={mapContainer} className="absolute inset-0 w-full h-full" />`  
+- All UI floating as absolute overlays on top
+
+This means no sidebar is possible without covering the map.
+
+### New Layout Structure
+
+```text
+┌──────────────────────────────────┬───────────────────┐
+│                                  │  LIVE FEED        │
+│    WORLD MAP  (flex-1)           │  header + count   │
+│    (arcs, dots, animations)      │  ─────────────    │
+│                                  │  🔴 Russia        │
+│                                  │  DDoS · CRITICAL  │
+│                                  │  2s ago           │
+│                                  │  ─────────────    │
+│                                  │  🟡 China         │
+│                                  │  Malware · HIGH   │
+│                                  │  5s ago           │
+├──────────────────────────────────┴───────────────────┤
+│  [● 2 Critical] [● 5 High] [● 3 Medium] [● 1 Low]   │
+│  Legend: ● Malware ● Phishing ● Exploit ● DDoS ...  │
+└──────────────────────────────────────────────────────┘
+```
+
+The wrapper becomes a `flex flex-col h-screen w-screen bg-black`:
+- **Top row**: `flex flex-1 min-h-0` containing:
+  - **Left (map area)**: `relative flex-1 min-w-0` — the `mapContainer` div fills this absolutely, all existing overlays (header, nav, toggle, hint, panels) stay inside here
+  - **Right (feed sidebar)**: `w-64 xl:w-72 flex-shrink-0 flex flex-col bg-[#08080f] border-l border-white/10`
+- **Bottom bar**: `flex-shrink-0 bg-black border-t border-white/10 px-4 py-3` — severity cards + legend
+
+### Live Feed Sidebar Content
+
+**Header row:**
+```
+⚡ LIVE ATTACK FEED    [badge: count of threats in buffer]
+```
+
+**Each entry** (newest first, max 50 shown, `overflow-y-auto`):
+- Left color bar border matching attack type color
+- Flag emoji or `flagcdn` img + country name → Somalia
+- Attack type label + severity badge (colored pill)
+- Time ago (`formatDistanceToNow` from `date-fns`)
+
+```
+┌─ [red bar] ──────────────────────────┐
+│  🇷🇺 Russia → Somalia               │
+│  Malware          [● CRITICAL]       │
+│  2 seconds ago                       │
+└──────────────────────────────────────┘
+```
+
+### Severity Count Cards (Bottom Bar)
+
+4 cards derived from `threats.filter(t => t.severity === 'critical').length` etc.:
+
+```
+[ ● 2 CRITICAL ] [ ● 7 HIGH ] [ ● 4 MEDIUM ] [ ● 1 LOW ]
+```
+
+Colors: Critical = `#ef4444`, High = `#f97316`, Medium = `#facc15`, Low = `#22d3ee`
+
+These numbers come from the in-memory `threats` ring buffer (last 100 threats), which reflects what's currently visible on the map — so they are always in sync.
+
+### Live Counter Sync
+
+The `todayCount` currently uses isolated component state — so CyberMap and ThreatMap each show different numbers. Fix this by promoting to module-level in `useLiveAttacks.ts`:
 
 ```typescript
-function genCountrySparklines(country: string): Record<AttackType, {i: number; v: number}[]> {
-  return {
-    malware:   genSparklineForCountry(country, 'malware'),
-    phishing:  genSparklineForCountry(country, 'phishing'),
-    exploit:   genSparklineForCountry(country, 'exploit'),
-    ddos:      genSparklineForCountry(country, 'ddos'),
-    intrusion: genSparklineForCountry(country, 'intrusion'),
-  };
+// Module-level singleton — shared across all hook instances in the tab
+const BASE_COUNT = Math.floor(3_000 + Math.random() * 12_000);
+let sharedTodayCount = BASE_COUNT;
+const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
+
+function incrementSharedCount() {
+  sharedTodayCount += 1;
+  todayListeners.forEach(fn => fn(sharedTodayCount));
 }
-
-function genSparklineForCountry(country: string, type: string) {
-  // Seed = hash(country) XOR hash(type)
-  let seed = 0;
-  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
-  for (const c of type)    seed = (seed * 31 + c.charCodeAt(0)) | 0;
-  const rand = seededRand(Math.abs(seed) || 0x9e3779b9);
-  return Array.from({ length: 15 }, (_, i) => ({
-    i,
-    v: Math.round(20 + rand() * 80 + Math.sin(i / 2.5) * 25),
-  }));
-}
 ```
 
-Inside `CountryPanel`, memoize this per country:
+Each hook instance registers its `setTodayCount` into `todayListeners` on mount and unregisters on unmount. Calling `incrementSharedCount()` instead of `setTodayCount(c => c + 1)` notifies all subscribers simultaneously.
 
-```typescript
-const sparklines = React.useMemo(() => genCountrySparklines(country), [country]);
-// Use sparklines[type] instead of SPARKLINES[type] in the render
-```
+### SomaliaPanel and CountryPanel Position Adjustment
 
-### Part 2 — Per-Country Default Percentages (CyberMap.tsx)
+Currently both panels use `right: 16`. With the new sidebar taking 256-288px on the right, these panels will render underneath the sidebar. They need to move to `right: 16` within the map container (which is now `flex-1`, not full-screen) — since they're `absolute` children of the map container div, they will naturally stay inside it. No position change needed.
 
-Replace the single `DEFAULT_PERCENTAGES` fallback with a function that generates unique but stable percentages per country using its seeded PRNG:
+### Live Toggle Button
 
-```typescript
-function genCountryDefaultPercentages(country: string): Record<AttackType, number> {
-  let seed = 0;
-  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
-  const rand = seededRand(Math.abs(seed) ^ 0xc0ffee);
-  
-  // Generate 5 raw random weights
-  const types: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
-  const weights = types.map(() => 5 + rand() * 40);  // each 5-45
-  const total = weights.reduce((a, b) => a + b, 0);
-  
-  const result = {} as Record<AttackType, number>;
-  types.forEach((t, i) => {
-    result[t] = Math.round((weights[i] / total) * 1000) / 10; // 1 decimal
-  });
-  return result;
-}
-```
-
-This produces values like:
-- China: Malware 38.4% / Phishing 12.1% / Exploit 22.7% / DDoS 18.3% / Intrusion 8.5%
-- Russia: Malware 19.2% / Phishing 31.8% / Exploit 15.4% / DDoS 24.7% / Intrusion 8.9%
-- India: (completely different distribution)
-
-The values are deterministic (same every render for the same country) and unique per country.
-
-Inside `CountryPanel`, update the fallback:
-
-```typescript
-const defaultPercentages = React.useMemo(() => genCountryDefaultPercentages(country), [country]);
-
-const percentages = React.useMemo<Record<AttackType, number>>(() => {
-  if (countryThreats.length < 5) return defaultPercentages;  // was DEFAULT_PERCENTAGES
-  ...
-}, [countryThreats, defaultPercentages]);
-```
-
-### Part 3 — Add Full CountryPanel to ThreatMap.tsx
-
-ThreatMap currently has no CountryPanel. Add:
-
-1. Required imports: `X` from lucide-react, `AreaChart, Area, LineChart, Line, ResponsiveContainer` from recharts
-2. Constants: `COUNTRY_ISO`, `ATTACK_LABELS`, all seeded helper functions (same as CyberMap)
-3. The full `CountryPanel` component using per-country sparklines and per-country default percentages
-4. State: `const [selectedCountry, setSelectedCountry] = useState<string | null>(null);`
-5. Map: `interactive: true` with `scrollZoom: false, boxZoom: false, dragPan: false, dragRotate: false, doubleClickZoom: false, touchZoomRotate: false, touchPitch: false`
-6. Click + hover handlers on `attack-sources-dot` layer
-7. JSX: Render `<CountryPanel>` overlay when `selectedCountry !== null`
+Currently positioned at `right-16` (absolute) to avoid overlapping a scrollbar. With the sidebar now occupying the right, the toggle moves to `right-4` within the map container.
 
 ---
 
-## Technical File Changes
+## Change 2 — Logo on Login Page (Login.tsx)
 
-| File | Lines Changed | What |
-|---|---|---|
-| `src/pages/CyberMap.tsx` | ~74-89, ~236-246, ~324-340 | Replace static `SPARKLINES` with per-country function; replace `DEFAULT_PERCENTAGES` fallback with `genCountryDefaultPercentages(country)`; update sparkline render to use memoized per-country sparklines |
-| `src/pages/ThreatMap.tsx` | Multiple sections | Add all helpers + `CountryPanel` + `selectedCountry` state + map interactivity + click handlers + JSX overlay |
+The uploaded `image-7.png` is the Somalia Cyber Defence circular emblem.
+
+- Save it as `src/assets/logo-emblem.png`
+- Import it: `import logoEmblem from '@/assets/logo-emblem.png'`
+- Replace the `Shield` icon div:
+
+```tsx
+// Before:
+<div className="inline-flex items-center justify-center w-20 h-20 rounded-full border-2 border-neon-cyan mb-4 glow-cyan">
+  <Shield className="w-10 h-10 text-neon-cyan" />
+</div>
+
+// After:
+<img
+  src={logoEmblem}
+  alt="Somalia Cyber Defence"
+  className="w-28 h-28 object-contain mb-4 drop-shadow-[0_0_24px_rgba(34,211,238,0.45)]"
+/>
+```
+
+- Remove `Shield` from the lucide-react import (it's still used in other places on other pages, so only remove from Login.tsx)
 
 ---
 
-## Visual Result
+## Files Changed
 
-**Before:** Clicking India shows 31.2% Malware / same sparkline shapes as Russia / same sparkline shapes as Singapore.
-
-**After:**
-- India: unique sparkline shapes + unique percentage distribution (e.g. 28.7% Malware / 22.4% Exploit)
-- Russia: different sparkline shapes + different percentages (e.g. 41.2% Malware / 8.9% DDoS)
-- Singapore: different again
-
-The 30-day trend chart on top is already unique per country (from `genCountry30DayData` which uses a country-seeded PRNG) — this was working correctly. Only the sparklines and the percentage fallback needed fixing.
-
-Both `/cyber-map` and `/threat-map` will have the same fix applied.
+| File | What |
+|---|---|
+| `src/hooks/useLiveAttacks.ts` | Module-level `sharedTodayCount` + `todayListeners` set — sync counter across all pages |
+| `src/pages/CyberMap.tsx` | Restructure layout to split (map + sidebar); add LiveFeedSidebar component inline; add severity cards + legend in bottom bar; adjust toggle button position |
+| `src/pages/Login.tsx` | Import `logo-emblem.png`, replace Shield icon with `<img>`, remove Shield import |
+| `src/assets/logo-emblem.png` | New asset — the uploaded Somalia Cyber Defence logo |
