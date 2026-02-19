@@ -994,12 +994,12 @@ const CyberMap: React.FC = () => {
           {/* ── Mobile Feed Toggle (inside map container so absolute works) ── */}
           <button
             onClick={() => setMobileFeedOpen(true)}
-            className="lg:hidden absolute bottom-12 right-4 z-20 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-mono pointer-events-auto"
-            style={{ background: 'rgba(34,211,238,0.15)', border: '1px solid rgba(34,211,238,0.4)', color: '#22d3ee' }}
+            className="lg:hidden absolute bottom-4 right-4 z-20 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-mono font-bold pointer-events-auto"
+            style={{ background: 'rgba(10,10,20,0.9)', border: '1px solid rgba(34,211,238,0.5)', color: '#22d3ee', boxShadow: '0 0 16px rgba(34,211,238,0.2)' }}
           >
-            <Zap className="w-3.5 h-3.5" />
+            <Zap className="w-4 h-4" />
             Feed
-            <span className="text-[9px] font-bold px-1 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.3)', color: '#ef4444' }}>
+            <span className="text-xs font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.35)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.4)' }}>
               {threats.length}
             </span>
           </button>
@@ -1094,6 +1094,21 @@ const CyberMap: React.FC = () => {
                 <X className="w-4 h-4" />
               </button>
             </div>
+            {/* Severity summary pills */}
+            <div className="flex gap-2 px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              {([
+                { label: 'Crit',   key: 'critical' as const, color: '#ef4444' },
+                { label: 'High',   key: 'high'     as const, color: '#f97316' },
+                { label: 'Med',    key: 'medium'   as const, color: '#facc15' },
+                { label: 'Low',    key: 'low'      as const, color: '#22d3ee' },
+              ]).map(({ label, key, color }) => (
+                <div key={key} className="flex-1 flex flex-col items-center py-1.5 rounded-lg"
+                  style={{ background: `${color}0d`, border: `1px solid ${color}33` }}>
+                  <span className="text-sm font-mono font-bold" style={{ color }}>{severityCounts[key]}</span>
+                  <span className="text-[9px] uppercase font-mono" style={{ color: `${color}99` }}>{label}</span>
+                </div>
+              ))}
+            </div>
             <div className="flex-1 overflow-y-auto">
               {threats.slice(0, 30).map((t) => {
                 const iso = COUNTRY_ISO[t.source.country] ?? 'un';
@@ -1123,13 +1138,12 @@ const CyberMap: React.FC = () => {
         </div>
       )}
 
-      {/* ── Bottom bar: severity cards + legend ───────────────────────────── */}
+      {/* ── Bottom bar: severity cards + legend (desktop only) ───────────── */}
       <div
-        className="flex-shrink-0 px-3 sm:px-4 py-2"
+        className="hidden lg:flex flex-shrink-0 px-4 py-2 items-center gap-2"
         style={{ background: '#050508', borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
-        {/* Severity cards: 2×2 on mobile, single row on desktop */}
-        <div className="grid grid-cols-2 lg:flex lg:items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-2">
         {([
           { label: 'Critical', key: 'critical' as const },
           { label: 'High',     key: 'high'     as const },

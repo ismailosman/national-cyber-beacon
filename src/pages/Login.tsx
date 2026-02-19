@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, Lock, Mail, AlertTriangle } from 'lucide-react';
-import logoEmblem from '@/assets/logo-emblem.png';
+import loginLogo from '@/assets/login-logo.png';
 
 const Login: React.FC = () => {
   const { signIn } = useAuth();
@@ -47,9 +47,9 @@ const Login: React.FC = () => {
         {/* Logo */}
         <div className="text-center mb-8">
           <img
-            src={logoEmblem}
+            src={loginLogo}
             alt="Somalia Cyber Defence"
-            className="w-28 h-28 object-contain mb-4 mx-auto drop-shadow-[0_0_24px_rgba(34,211,238,0.45)]"
+            className="w-32 h-32 object-contain mb-4 mx-auto drop-shadow-[0_0_30px_rgba(34,211,238,0.5)]"
           />
           <h1 className="text-2xl font-bold text-glow-cyan text-neon-cyan tracking-widest uppercase">
             Somalia Cyber Defense
