@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Loader2, AlertTriangle, Globe, RefreshCw } from 'lucide-react';
+import { Shield, Loader2, AlertTriangle, Globe, RefreshCw, Zap } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import logoSrc from '@/assets/logo.png';
 
@@ -172,12 +172,20 @@ const Landing: React.FC = () => {
             <p className="text-[10px] text-muted-foreground tracking-widest uppercase">Public Threat Dashboard</p>
           </div>
         </div>
-        <Link
-          to="/login"
-          className="flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-        >
-          <Shield className="w-4 h-4" /> Sign In
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/cyber-map"
+            className="flex items-center gap-2 px-3 py-2 text-sm font-bold rounded-lg border border-border hover:border-primary hover:text-primary transition-colors text-muted-foreground"
+          >
+            <Zap className="w-4 h-4" /> Live Attack Map
+          </Link>
+          <Link
+            to="/login"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+          >
+            <Shield className="w-4 h-4" /> Sign In
+          </Link>
+        </div>
       </header>
 
       <main className="flex-1 flex flex-col gap-6 p-6 max-w-6xl mx-auto w-full">

@@ -77,6 +77,7 @@ Deno.serve(async (req) => {
     if (orgErr) throw orgErr;
 
     const totalAlerts = Object.values(severityCounts).reduce((a, b) => a + b, 0);
+    const mapboxToken = Deno.env.get('MAPBOX_PUBLIC_TOKEN') ?? null;
 
     return new Response(
       JSON.stringify({
@@ -85,6 +86,7 @@ Deno.serve(async (req) => {
         total_orgs: orgCount ?? 0,
         total_open_alerts: totalAlerts,
         updated_at: new Date().toISOString(),
+        mapbox_token: mapboxToken,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

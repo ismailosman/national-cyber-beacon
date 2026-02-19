@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
 import Landing from "@/pages/Landing";
+import CyberMap from "@/pages/CyberMap";
 import Dashboard from "@/pages/Dashboard";
 import Organizations from "@/pages/Organizations";
 import OrgDetail from "@/pages/OrgDetail";
@@ -68,6 +69,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/public" element={<Landing />} />
+            <Route path="/cyber-map" element={<CyberMap />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </AuthProvider>

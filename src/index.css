@@ -224,3 +224,33 @@
   background: #ef4444;
   animation: alert-pulse 2s ease-out infinite;
 }
+
+/* ── Cyber attack map impact pulse ──────────────────────────────────────── */
+@keyframes cyber-impact {
+  0%   { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(4);   opacity: 0; }
+}
+.cyber-impact-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #22d3ee;
+  animation: cyber-impact 1.5s ease-out infinite;
+}
+
+@keyframes cyber-counter-tick {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+.cyber-counter {
+  animation: cyber-counter-tick 2s ease-in-out infinite;
+}
+
+@keyframes cyber-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(1.5); }
+}
+.cyber-source-dot {
+  animation: cyber-dot-pulse 1.5s ease-in-out infinite;
+}
