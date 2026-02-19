@@ -1,77 +1,65 @@
 
-# Make Mobile Feed Drawer Transparent (Glassmorphism)
+# Fit World Map on Mobile + Static Daily Data + Add Kenya & Ethiopia
 
-## What's Happening Now
+## 3 Changes
 
-The mobile live feed drawer (lines 1539–1598) renders as a bottom sheet with a fully opaque dark background:
+### 1. Responsive Map Zoom for All Mobile Devices
 
-```typescript
-style={{ height: '60vh', background: '#07070f', border: '1px solid rgba(255,255,255,0.1)' }}
-```
+**Problem:** The Mapbox map is initialized with hardcoded `center: [20, 10]` and `zoom: 2` (line 937-938 in CyberMap.tsx). On narrow mobile screens this only shows Africa and part of Europe.
 
-This completely covers the map underneath. The user wants the feed to be see-through so the map (and its animated arc lines) remain visible behind the feed.
+**Fix:** Use `window.innerWidth` at initialization time to set responsive values:
 
-## What's Changing
+| Viewport | center | zoom | minZoom |
+|---|---|---|---|
+| < 768px (mobile) | [20, 10] | 0.8 | 0.3 |
+| >= 768px (desktop) | [20, 10] | 2 | 1 |
 
-**One element changes** — the drawer container `div` at line 1544–1545, replacing the solid `#07070f` background with a glassmorphism style using `backdrop-filter: blur()` and a semi-transparent background.
+Zoom 0.8 on a ~390px screen shows the full world map including all continents, matching the reference image.
 
-Also updating the section dividers and pill backgrounds inside the drawer to use more transparent versions so the overall glass effect is consistent end-to-end.
+**File:** `src/pages/CyberMap.tsx` lines 937-938
 
-## Technical Details
+---
 
-### Drawer container (line 1544–1545)
-```typescript
-// BEFORE:
-style={{ height: '60vh', background: '#07070f', border: '1px solid rgba(255,255,255,0.1)' }}
+### 2. Static Deterministic Data Per Day
 
-// AFTER:
-style={{
-  height: '60vh',
-  background: 'rgba(5, 7, 15, 0.72)',   // ~72% opaque — map shows through
-  backdropFilter: 'blur(20px)',           // frosted glass blur
-  WebkitBackdropFilter: 'blur(20px)',     // Safari support
-  border: '1px solid rgba(255,255,255,0.12)',
-  borderBottom: 'none',
-}}
-```
+**Problem:** The threat generator in `useLiveAttacks.ts` uses `Math.random()` everywhere -- for picking sources, targets, attack types, severity, and IDs. Every page load produces completely different attacks.
 
-### Header bar (line 1547)
-```typescript
-// BEFORE:
-style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+**Fix:** Replace `Math.random()` with a **day-seeded PRNG**. The seed is derived from today's date string (e.g., `"2026-02-19"`), so:
+- Every visitor on the same day sees the exact same sequence of attacks
+- The data changes automatically at midnight (new day = new seed)
+- The "today count" is also deterministic (seeded from the date)
 
-// AFTER:
-style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.15)' }}
-```
+Changes in `src/hooks/useLiveAttacks.ts`:
+- Add a `seededRand` function (same pattern already used in CyberMap.tsx)
+- Compute `DAY_SEED` from `new Date().toISOString().slice(0, 10)`
+- Replace all `Math.random()` calls in `pickRandom`, `generateMockThreat`, `BASE_COUNT`, and the delay timer with the seeded PRNG
+- Each threat gets a sequential index so the Nth threat of the day is always the same
 
-### Backdrop overlay (line 1542)
-The `bg-black/60` backdrop behind the drawer is already semi-transparent — it will remain as-is, but reduce it slightly to `bg-black/40` so more map is visible even outside the drawer area.
+---
 
-### Feed row items (line 1579–1581)
-The feed entries use `borderBottom: '1px solid rgba(255,255,255,0.05)'` — this stays the same (already transparent enough).
+### 3. Add Kenya and Ethiopia as Attacking Nations
 
-### Severity pills (line 1564–1568)
-The pills already use `color}0d` (5% opacity) backgrounds — no change needed, they already look glass-like.
+**Problem:** Kenya and Ethiopia are not in `THREAT_SOURCES` in `useLiveAttacks.ts`, and their ISO codes are missing from `COUNTRY_ISO` in `CyberMap.tsx`.
 
-## Visual Result
+**Fix:** Add both countries to:
 
-```text
-Before:                          After:
-┌─────────────────────┐         ┌─────────────────────┐
-│███ DARK OPAQUE ████│         │ ░░ GLASS BLUR  ░░░░ │  ← map visible through
-│████████████████████│         │ ░░░░░░░░░░░░░░░░░░░░ │
-│████████████████████│         │ Feed entry #1        │
-│████████████████████│         │ Feed entry #2        │
-│████████████████████│         │ Feed entry #3        │
-└─────────────────────┘         └─────────────────────┘
-```
+| File | What to add |
+|---|---|
+| `src/hooks/useLiveAttacks.ts` | Kenya (lat: -1.29, lng: 36.82) and Ethiopia (lat: 9.14, lng: 40.49) to `THREAT_SOURCES` |
+| `src/hooks/useLiveAttacks.ts` | Add Kenya and Ethiopia to `WEIGHTED_SOURCES` with weight 2 each (moderate frequency) |
+| `src/pages/CyberMap.tsx` | Add `'Kenya': 'ke'` and `'Ethiopia': 'et'` to `COUNTRY_ISO` map |
 
-The map, its animated arc lines, and attack dots remain fully visible through the frosted glass drawer.
+---
 
 ## Files Changed
 
-| File | Lines | What |
-|---|---|---|
-| `src/pages/CyberMap.tsx` | 1542, 1544–1545, 1547 | Replace solid background with glassmorphism, reduce backdrop opacity |
+| File | What |
+|---|---|
+| `src/hooks/useLiveAttacks.ts` | Add Kenya + Ethiopia to sources; replace Math.random() with day-seeded PRNG for deterministic daily data |
+| `src/pages/CyberMap.tsx` | Responsive mobile zoom; add Kenya/Ethiopia ISO codes |
 
-All changes are cosmetic — no logic, data, or animation code is touched.
+## Visual Result
+
+- On any mobile phone, the full world map is visible (all continents) matching the reference image
+- Every visitor on the same calendar day sees the exact same attack sequence and count
+- Kenya and Ethiopia appear as attack source nations with arcs flying from Nairobi/Addis Ababa to Somalia
