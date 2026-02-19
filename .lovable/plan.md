@@ -1,137 +1,41 @@
 
-# Somalia Cyber Defense Observatory — Build Plan
+# Assign SuperAdmin Role to osmando@gmail.com
 
-## Overview
-A dark-themed, enterprise-grade SOC (Security Operations Center) dashboard built with React + Vite + Supabase. It monitors cybersecurity posture for Somali government institutions and banks with real automated checks, live alerts, role-based access, and PDF reporting.
+## The Problem
+The user account for `osmando@gmail.com` does not yet exist in the system. A row in `user_roles` requires a valid `user_id` from the auth system — so the account must be created first.
 
----
+## Step-by-Step Plan
 
-## 1. Database Schema (Supabase)
+### Step 1 — You Sign Up First
+- Go to the login page at `/login`
+- Click "Sign Up" and create an account with `osmando@gmail.com` and your chosen password
+- This registers you in the authentication system and gives your account a UUID
 
-### Tables to create:
-- **organizations** — name, sector (Government/Bank), domain, risk_score, status, last_scanned_at
-- **security_checks** — org_id, check_type (SSL/HTTPS/headers/DNS/uptime), result (pass/fail/warn), details, checked_at
-- **alerts** — org_id, type, severity, message, is_read, created_at
-- **risk_score_history** — org_id, score, recorded_at (for trend graphs)
-- **user_roles** — user_id, role (SuperAdmin / OrgAdmin / Analyst / Auditor)
+### Step 2 — Insert SuperAdmin Role (after signup)
+Once the account exists, I will run a database insert that:
+- Looks up your user ID by email from `auth.users`
+- Inserts a row into `user_roles` with `role = 'SuperAdmin'` and `org_id = NULL` (SuperAdmin is platform-wide, not org-scoped)
 
-### RLS Policies:
-- SuperAdmin: full access to all tables
-- OrgAdmin: read/write only their assigned organization
-- Analyst: read-only access to security_checks and alerts
-- Auditor: read-only access to all data, no mutations
+The SQL that will run:
+```sql
+INSERT INTO public.user_roles (user_id, role, org_id)
+SELECT id, 'SuperAdmin', NULL
+FROM auth.users
+WHERE email = 'osmando@gmail.com'
+ON CONFLICT DO NOTHING;
+```
 
----
+### Step 3 — Verify Access
+After the insert, signing in will give you:
+- Full access to Settings page
+- Ability to add/delete organizations
+- Trigger full platform scans
+- View all data across all tables (RLS SuperAdmin policies are already in place)
 
-## 2. Pages & Routing
+## Technical Notes
+- The `user_roles` table already has the correct RLS: SuperAdmin is granted via the `has_role()` security-definer function
+- `org_id` is `NULL` for SuperAdmin because they have platform-wide access, not tied to a single organization
+- No code changes are needed — this is purely a data operation
 
-### `/` — National Dashboard (main view)
-- Animated circular gauge: **National Cyber Security Score (0–100)**
-- Stats row: total organizations, active alerts, orgs at risk
-- Risk trend line chart (Recharts) — 30-day score history
-- Real-time alert sidebar on the right
-- Auto-updates via Supabase Realtime subscriptions
-
-### `/organizations` — Organization Grid
-- Filterable cards by sector (All / Government / Bank)
-- Each card: org name, domain, risk score badge, status pill (Secure / Warning / Critical)
-- Color-coded borders: green → yellow → red by severity
-- Clicking a card navigates to its detail page
-
-### `/organizations/:id` — Organization Detail
-- Score breakdown radar/bar chart showing the 6 scoring components
-- Security check results table (SSL, HTTPS, headers, DNS, uptime) with timestamps
-- Alert history for that org
-- "Run Scan Now" button triggers the edge function manually
-
-### `/alerts` — Alert Center
-- Filterable alert list: all / unread / by severity
-- Mark as read, bulk dismiss
-- Alert types: score drop below 60, cert expiry < 15 days, missing headers, website offline
-
-### `/reports` — Report Generator
-- Select organization + date range
-- Preview: risk posture summary, score history chart, check results table, recommendations
-- "Download PDF" button calls Supabase Edge Function that generates the PDF using jsPDF
-
-### `/settings` — Admin Only
-- Add / remove organizations
-- Manage users and role assignments
-- Trigger manual full scan
-
----
-
-## 3. Security Check Engine (Supabase Edge Function: `run-security-checks`)
-Runs real HTTP checks against each organization's domain:
-- **SSL validity** — verify cert exists and days until expiry
-- **HTTPS enforcement** — check HTTP→HTTPS redirect
-- **Security headers** — check for HSTS, CSP, X-Frame-Options, X-Content-Type-Options
-- **DNS resolution** — verify domain resolves
-- **Uptime** — HTTP response status check
-
-Results stored in `security_checks` table after each scan.
-
----
-
-## 4. Risk Scoring Engine
-After each scan, automatically recalculates risk score per organization:
-- TLS Security: 15%
-- Security Headers: 15%
-- Availability/Uptime: 10%
-- Vulnerability signals: 20%
-- Patch signals: 20%
-- Threat activity: 20%
-
-Writes new score to `organizations.risk_score` and appends a record to `risk_score_history`.
-
----
-
-## 5. Automated Scheduling (Edge Function: `scheduled-scan`)
-- Uses Supabase `pg_cron` to trigger scans every 6 hours
-- Loops through all organizations, runs checks, recalculates scores, creates alerts where thresholds are breached
-
----
-
-## 6. Alert Engine (inside scan function)
-Auto-creates alerts when:
-- Risk score drops below 60
-- SSL certificate expires in < 15 days
-- Critical security headers missing
-- Domain/website is offline
-
----
-
-## 7. PDF Report (Edge Function: `generate-report`)
-- Accepts org_id + date range
-- Pulls data from Supabase
-- Generates PDF with: org name, current score, score trend, check results, risk breakdown, tailored recommendations
-- Returns PDF as downloadable binary
-
----
-
-## 8. Visual Design
-- **Dark SOC theme**: deep navy/charcoal background (#0d1117 style)
-- **Neon accents**: cyan (#00f5ff), green (#00ff88), amber (#ffaa00), red (#ff4444)
-- **Animated gauge**: SVG circular progress with glow effect, animates on load
-- **Animated metric lines**: subtle pulsing connection lines between dashboard KPIs
-- **Recharts**: dark-styled line, bar, and radar charts with glowing strokes
-- **Card design**: glassmorphism panels with colored left borders indicating severity
-- **Mobile-responsive**: sidebar collapses to bottom nav on mobile
-
----
-
-## 9. Seed Data (5–8 organizations)
-Pre-loaded mix of:
-- 3 government institutions (e.g., Ministry of Finance, Central Bank of Somalia, NISA)
-- 3–5 banks (e.g., Dahabshiil Bank, Premier Bank, Salaam Somali Bank)
-- Varied risk scores and statuses to showcase all UI states
-
----
-
-## 10. Authentication & Roles
-- Supabase Auth (email/password)
-- Role stored in `user_roles` table (separate from profiles)
-- RLS enforces data access by role
-- Login page with dark SOC-themed design
-- Role badge shown in top navigation
-
+## Action Required from You
+Please sign up on the login page first, then come back and let me know — I will immediately insert the SuperAdmin role for your account.
