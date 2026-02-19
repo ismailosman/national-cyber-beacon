@@ -6,7 +6,7 @@ import { Search, Filter, Globe, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 
-type Sector = 'All' | 'Government' | 'Bank';
+type Sector = 'All' | 'Government' | 'Bank' | 'Telecom';
 
 const statusConfig = {
   Secure: { border: 'border-l-neon-green', badge: 'bg-neon-green/10 text-neon-green border-neon-green/30', dot: 'bg-neon-green' },
@@ -28,7 +28,7 @@ const Organizations: React.FC = () => {
   });
 
   const filtered = orgs.filter((o: any) => {
-    const matchSector = sector === 'All' || o.sector === sector;
+    const matchSector = sector === 'All' || o.sector.toLowerCase() === sector.toLowerCase();
     const matchSearch = !search || o.name.toLowerCase().includes(search.toLowerCase()) || o.domain.toLowerCase().includes(search.toLowerCase());
     return matchSector && matchSearch;
   });
@@ -54,7 +54,7 @@ const Organizations: React.FC = () => {
           />
         </div>
         <div className="flex gap-2">
-          {(['All', 'Government', 'Bank'] as Sector[]).map(s => (
+          {(['All', 'Government', 'Bank', 'Telecom'] as Sector[]).map(s => (
             <button
               key={s}
               onClick={() => setSector(s)}
