@@ -1,185 +1,124 @@
 
-# Animation Upgrade: Speed + Impact Flash + Persistent Solid Line
+# Add Animated Canvas Arc Lines to the Cyber Threat Map
 
-## What's Changing (3 features)
+## Analysis: What's Missing
 
-### 1. Travel Speed: 2.0 → 1.2 seconds
+The current `CyberMap.tsx` has a full Mapbox GeoJSON-based animation engine (arc layers, projectile dots, flash rings). However, the user reports the animated arc lines are **not visible** on the map. After reading the code carefully, here's why:
 
-One-line change at the top of the file:
+The Mapbox layer approach has a critical dependency chain:
+1. Token must load from `public-stats` edge function
+2. Map must fully initialize and fire `map.on('load')`
+3. GeoJSON sources must be registered in the correct order
+4. Layers must render on top of the dark map tiles
+
+The user's request specifies a **Canvas-based approach** using HTML5 `<canvas>` with `requestAnimationFrame` drawn directly on top of the map. This is more reliable — it doesn't depend on Mapbox internals, works at 60fps with direct pixel control, and produces the glowing trail effect shown in the reference image.
+
+## What the User Wants (from the prompt)
+
+- **Quadratic Bézier curves** from source country → Somalia
+- **Progressive drawing** segment by segment (progress 0→1, +0.012 per frame)
+- **Trail fade**: bright head, fading tail
+- **Glowing moving dot** at the leading edge (radius 3px, shadowBlur 15)
+- **Source dot** at origin when animation starts
+- **Destination pulse ring** at 80% progress
+- **Fade out** after reaching destination (opacity 1→0 over ~60 frames)
+- **Lifecycle**: animating → fading → done
+- **Color coded** by attack type (existing `ATTACK_COLORS`)
+- **Spawning**: new arc every 1.5–3s, 3 arcs on load staggered 400ms
+
+## Implementation Plan
+
+### New approach: Canvas overlay
+
+Add a `<canvas>` element absolutely positioned over the Mapbox canvas. The canvas handles ALL arc drawing independently of Mapbox.
+
+Key conversion needed: lat/lng → pixel coordinates. Since the map uses Mapbox, use `map.project(lngLat)` to convert geographic coordinates to pixel positions. This is called every frame so arcs move correctly when the map pans/zooms.
+
+### New types and data
+
 ```typescript
-// Before
-const TRAVEL_DURATION = 2.0;
-// After
-const TRAVEL_DURATION = 1.2;
-```
-
-This makes every projectile travel 40% faster — much more urgent and dramatic.
-
----
-
-### 2. Impact Flash/Explosion at Somalia
-
-**The problem:** When a projectile arrives at Somalia (`progress` hits `1`), there's no "hit" visual — it just stops. The user wants an expanding ring burst, color-matched to the attack type.
-
-**The solution:** A dedicated impact flash system, separate from the existing static bullseye rings.
-
-#### New state structure: `FlashState`
-
-When a projectile's `progress` transitions from `< 1` to `>= 1`, we record a new flash event:
-
-```typescript
-interface FlashState {
-  id: string;                     // same as threat id
-  color: string;                  // attack type color
-  coords: [number, number];       // target location
-  startTime: number;              // when impact occurred (ms)
+interface CanvasArc {
+  id: string;
+  srcLng: number; srcLat: number;
+  dstLng: number; dstLat: number;
+  color: string;
+  progress: number;       // 0→1 while animating
+  phase: 'animating' | 'fading';
+  fadeProgress: number;   // 0→1 while fading (60 frames)
+  spawnTime: number;
 }
 ```
 
-This is stored in a new `flashStatesRef: Map<string, FlashState>` ref.
+### The draw loop
 
-#### Detection in the RAF tick
+Each frame:
+1. Clear the canvas
+2. For each active arc:
+   - Project src/dst/control point to pixel coords via `map.project()`
+   - Build Bézier path to current `progress`
+   - Draw trail: iterate from tail to head, each segment with decreasing opacity
+   - Draw glowing head dot
+   - If `progress > 0.8` → draw expanding pulse ring at dst
+   - If `phase === 'fading'` → reduce opacity of the whole arc
+3. Remove arcs where `fadeProgress >= 1`
 
-In the RAF loop, when we detect `state.progress` newly hitting `1`, we push a new FlashState. Flash events expire after **1.5 seconds**.
-
-#### `buildFlashGeoJSON` — two animated rings
+### Bezier drawing with trail
 
 ```typescript
-const FLASH_DURATION = 1.2; // seconds
-
-function buildFlashGeoJSON(flashes: Map<string, FlashState>, now: number): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  for (const [id, flash] of flashes) {
-    const t = (now - flash.startTime) / (FLASH_DURATION * 1000); // 0 → 1
-    if (t > 1) { flashes.delete(id); continue; }
-    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic for expansion
-    // Inner ring: expands 0→30px, fades 1→0
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: flash.coords },
-      properties: { color: flash.color, radius: eased * 30, opacity: (1 - t) * 0.9, strokeW: 2.5 } });
-    // Outer ring: expands 0→55px with delay, fades faster
-    const t2 = Math.max(0, t - 0.15);
-    const eased2 = 1 - Math.pow(1 - t2, 3);
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: flash.coords },
-      properties: { color: flash.color, radius: eased2 * 55, opacity: Math.max(0, 1 - t2) * 0.5, strokeW: 1.5 } });
-  }
-  return { type: 'FeatureCollection', features };
+// Draw N points along the curve from tailProgress to progress
+for (let i = tailStart; i <= currentPoint; i++) {
+  const t = i / SEGMENTS;
+  const pt = bezierPoint(srcPx, ctrlPx, dstPx, t);
+  const segOpacity = ((i - tailStart) / tailLength) * baseOpacity;
+  ctx.strokeStyle = `${color}${toHex(segOpacity)}`;
+  // draw small segment
 }
+// Head dot
+ctx.shadowBlur = 15;
+ctx.shadowColor = color;
+ctx.fillStyle = 'white';
+ctx.arc(headX, headY, 3, 0, Math.PI * 2);
 ```
 
-#### New Mapbox layer
+### Integration with existing system
 
-```typescript
-map.addSource('attack-flash-source', { type: 'geojson', data: emptyFC });
-map.addLayer({
-  id: 'attack-flash',
-  type: 'circle',
-  source: 'attack-flash-source',
-  paint: {
-    'circle-radius': ['get', 'radius'],
-    'circle-color': 'transparent',
-    'circle-stroke-width': ['get', 'strokeW'],
-    'circle-stroke-color': ['get', 'color'],
-    'circle-stroke-opacity': ['get', 'opacity'],
-  },
-});
-```
+The Canvas approach **adds to** the existing Mapbox layers (doesn't remove them). The Mapbox layers provide source country dots and labels. The Canvas provides the animated arc lines and projectile dots that the user says are missing.
 
----
+### Canvas sizing
 
-### 3. Solid Persistent Arc Line (Reference Image Effect)
+The canvas is created with `devicePixelRatio` scaling for crisp rendering on retina displays. It's resized via a `ResizeObserver` on the map container.
 
-Looking at the reference image: it shows solid, colored lines from source countries (USA, Netherlands) converging at a target point — these lines persist and remain visible (not just a short traveling tail). This is the **full arc as a solid line** that persists after the projectile hits and while it's in flight.
+## Files Changed
 
-**What currently exists:**
-- `attack-full-arcs-source` renders dashed/dim lines for the full path (the "rail"). However it renders for ALL arcs including ones still traveling.
-- The traveling beam only shows a `TAIL_FRACTION` short segment while in motion.
-
-**What the user wants:** A solid, clearly visible line from source → Somalia **at all times** (during travel AND after hit), styled like the reference (solid colored lines, not dashed).
-
-**Solution:** Change the `attack-full-arcs` layer paint to be a **solid colored line** with opacity driven by the arc's progress level:
-
-- During travel (`progress < 1`): show at reduced opacity (0.3) — a dim guide rail
-- After arrival (`progress >= 1`): show at full opacity (0.7) — the full solid hit trace fades over `FADE_DURATION`
-
-**In `buildFullArcsGeoJSON`:** Add a `phase` property:
-
-```typescript
-properties: {
-  color:   ATTACK_COLORS[state.threat.attack_type],
-  opacity: state.progress >= 1 ? state.opacity * 0.7 : state.opacity * 0.3,
-}
-```
-
-**Layer paint change** — replace the current dashed style with solid:
-
-```typescript
-map.addLayer({
-  id: 'attack-full-arcs',
-  type: 'line',
-  source: 'attack-full-arcs-source',
-  paint: {
-    'line-color': ['get', 'color'],
-    'line-width': 1.2,
-    'line-opacity': ['get', 'opacity'],
-    // No line-dasharray → solid line
-  },
-});
-```
-
-Currently the `attack-full-arcs` layer doesn't appear to be explicitly added in the code — only the source is added. The full arc rendering uses `buildFullArcsGeoJSON` which is called in `updateMapSources`, but the Mapbox layer definition for it is either missing or defined elsewhere. Let me check...
-
-Looking at lines 608-760, the sources added are: `attack-arcs-source`, `attack-full-arcs-source`, `attack-sources-source`, `attack-impact-source`, `attack-projectiles-source`. But the **layer** for `attack-full-arcs-source` is never added with `map.addLayer()`! Only `attack-arcs` is layered. This means the full arc lines are never actually visible — they're computed but never rendered. This is likely why the lines look invisible currently.
-
-**Fix:** Add a proper `attack-full-arcs` layer after the source is registered:
-
-```typescript
-map.addLayer({
-  id: 'attack-full-arcs',
-  type: 'line',
-  source: 'attack-full-arcs-source',
-  paint: {
-    'line-color': ['get', 'color'],
-    'line-width': 1.2,
-    'line-opacity': ['get', 'opacity'],
-  },
-});
-```
-
-This must be inserted **before** the glow and arc layers so it renders underneath the traveling beam.
-
----
-
-## File Changes
-
-| File | What |
+| File | Changes |
 |---|---|
-| `src/pages/CyberMap.tsx` | 5 targeted changes |
+| `src/pages/CyberMap.tsx` | Add `canvasRef`, `canvasArcsRef`, canvas draw loop, canvas element in JSX, arc spawner that picks from `useLiveAttacks` threats |
 
-### Specific changes in `CyberMap.tsx`:
+## Technical Details
 
-1. **Line 55**: `TRAVEL_DURATION = 1.2` (was 2.0)
+### Canvas element placement (in JSX)
+```tsx
+<canvas
+  ref={canvasRef}
+  className="absolute inset-0 w-full h-full pointer-events-none z-10"
+  style={{ mixBlendMode: 'screen' }} // screen blend for glow effect over dark map
+/>
+```
+The `pointer-events-none` lets map clicks pass through. `mixBlendMode: 'screen'` makes dark portions transparent, enhancing the glow against the dark map.
 
-2. **Lines 55–59** (constants block): Add `FLASH_DURATION = 1.2`
+### Control point elevation
+```typescript
+const dist = Math.sqrt((dstLng - srcLng)**2 + (dstLat - srcLat)**2);
+const elevate = Math.min(dist * 0.35, 45); // higher arc for distant countries
+const cpLat = (srcLat + dstLat) / 2 + elevate;
+const cpLng = (srcLng + dstLng) / 2;
+```
 
-3. **After `buildRingsGeoJSON` (~line 537)**: Add new `FlashState` interface + `buildFlashGeoJSON` function
+### Spawner
+Driven by `threats` from `useLiveAttacks`. Each new threat → new `CanvasArc`. Minimum spawn rate: one arc per threat received (max 1 arc per 1.5s to avoid flooding).
 
-4. **In the `ArcState` interface (~line 387)**: Add `impacted?: boolean` flag so we can detect the moment of first arrival for flash triggering
+### Cleanup
+Arcs are removed when `phase === 'fading' && fadeProgress >= 1`. The ref array never grows unbounded (capped at 60 concurrent arcs).
 
-5. **In `map.on('load')` (~line 603)**: 
-   - Add `attack-flash-source` + `attack-flash` layer
-   - Add the **missing `attack-full-arcs` layer** (solid line, before `attack-arcs-glow`)
-
-6. **In `updateMapSources` (~line 801)**: Add flash source update
-
-7. **In the RAF tick (~line 864)**: Detect new impacts and push to `flashStatesRef`; update flash source every frame
-
-8. **In the layer visibility toggle (~line 823)**: Add `attack-full-arcs` and `attack-flash` to the list
-
----
-
-## Visual Result
-
-- Projectiles fly from source → Somalia in **1.2 seconds** (was 2.0) — snappy, urgent
-- A **solid colored line** from source country to Somalia is visible the whole time (dim while traveling, brighter after hit)
-- When projectile hits Somalia → **2 concentric rings burst outward** in the attack's color, fading and expanding over 1.2 seconds
-- Multiple simultaneous impacts create overlapping flash rings at different timestamps
+### Map readiness
+The canvas loop only runs when `mapLoaded === true` and `mapRef.current` exists (needed for `map.project()`).
