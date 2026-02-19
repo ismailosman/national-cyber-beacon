@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, Loader2, Map, Activity, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,7 @@ function severityBadge(sev: string) {
 
 const ThreatMap: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Filters
   const [sevFilter, setSevFilter] = useState<SeverityFilter>('all');
@@ -204,7 +206,11 @@ const ThreatMap: React.FC = () => {
               </div>
               <p style="margin:0 0 4px;font-size:13px;font-weight:600;line-height:1.35;">${p.title}</p>
               <p style="margin:0 0 2px;font-size:11px;color:hsl(215 20% 55%);">${p.orgName} · ${p.region}</p>
-              <p style="margin:0;font-size:10px;color:hsl(215 20% 45%);font-family:monospace;">${ts}</p>
+              <p style="margin:0 0 8px;font-size:10px;color:hsl(215 20% 45%);font-family:monospace;">${ts}</p>
+              <button
+                data-alert-id="${p.id}"
+                style="width:100%;padding:6px 0;background:hsl(190 100% 50% / 0.12);border:1px solid hsl(190 100% 50% / 0.3);border-radius:6px;color:#00e5ff;font-size:11px;font-weight:700;cursor:pointer;font-family:monospace;letter-spacing:0.05em;"
+              >View Details →</button>
             </div>`;
 
           clickPopupRef.current = new mapboxgl.Popup({ closeButton: true, maxWidth: '300px', className: 'threat-popup' })
@@ -275,6 +281,21 @@ const ThreatMap: React.FC = () => {
       }
     };
   }, [mapToken, retryKey]);
+
+  // ── Delegated click handler for popup "View Details →" buttons ────────────
+  useEffect(() => {
+    const container = mapContainer.current;
+    if (!container) return;
+    const handler = (e: MouseEvent) => {
+      const btn = (e.target as HTMLElement).closest('[data-alert-id]') as HTMLElement | null;
+      if (btn) {
+        const alertId = btn.getAttribute('data-alert-id');
+        if (alertId) navigate(`/alerts/${alertId}`);
+      }
+    };
+    container.addEventListener('click', handler);
+    return () => container.removeEventListener('click', handler);
+  }, [navigate]);
 
   // ── 3. Push data to map whenever alerts or filters change (debounced) ───────
   useEffect(() => {
