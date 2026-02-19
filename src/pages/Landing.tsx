@@ -73,15 +73,17 @@ const Landing: React.FC = () => {
         <div className="flex items-center gap-2">
           <Link
             to="/cyber-map"
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-border hover:border-primary hover:text-primary transition-colors text-muted-foreground"
+            className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 text-xs font-bold rounded-lg border border-border hover:border-primary hover:text-primary transition-colors text-muted-foreground"
           >
-            <Zap className="w-3.5 h-3.5" /> Live Attack Map
+            <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="hidden sm:inline">Live Attack Map</span>
           </Link>
           <Link
             to="/login"
-            className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            <Shield className="w-3.5 h-3.5" /> Sign In
+            <Shield className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="hidden xs:inline sm:inline">Sign In</span>
           </Link>
         </div>
       </header>
@@ -164,8 +166,8 @@ const Landing: React.FC = () => {
         </div>
       </section>
 
-      {/* ── Live Attack Map Section (CyberMap iframe) ──────────────────── */}
-      <section className="px-6 pb-12 max-w-7xl mx-auto w-full">
+      {/* ── Live Attack Map Section ─────────────────────────────────────── */}
+      <section className="px-4 sm:px-6 pb-10 sm:pb-12 max-w-7xl mx-auto w-full">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -181,8 +183,27 @@ const Landing: React.FC = () => {
           </Link>
         </div>
 
+        {/* Mobile: show a link card instead of the heavy iframe */}
+        <Link
+          to="/cyber-map"
+          className="sm:hidden glass-card rounded-2xl border border-border flex flex-col items-center justify-center gap-4 p-8 text-center hover:border-primary/50 transition-colors"
+        >
+          <div className="w-14 h-14 rounded-2xl border border-primary/30 flex items-center justify-center"
+            style={{ background: 'hsl(var(--primary)/0.1)' }}>
+            <Zap className="w-7 h-7 text-primary" />
+          </div>
+          <div>
+            <p className="font-bold text-foreground text-lg">View Live Attack Map</p>
+            <p className="text-sm text-muted-foreground mt-1">Real-time attacks targeting Somalia</p>
+          </div>
+          <span className="flex items-center gap-1.5 text-sm font-bold text-primary">
+            Open Full Screen →
+          </span>
+        </Link>
+
+        {/* Desktop: show the actual iframe */}
         <div
-          className="glass-card rounded-2xl border border-border overflow-hidden relative"
+          className="hidden sm:block glass-card rounded-2xl border border-border overflow-hidden relative"
           style={{ height: '560px' }}
         >
           <iframe
@@ -193,19 +214,19 @@ const Landing: React.FC = () => {
           />
         </div>
 
-        {/* Severity stat cards below the iframe */}
+        {/* Severity stat cards below the map */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           {SEVERITY_ORDER.map((s) => (
             <div
               key={s}
-              className="glass-card rounded-xl border border-border p-4 flex flex-col items-center gap-1"
+              className="glass-card rounded-xl border border-border p-3 sm:p-4 flex flex-col items-center gap-1"
               style={{ borderColor: `${SEVERITY_COLORS[s]}30` }}
             >
               <div
                 className="w-3 h-3 rounded-full mb-1"
                 style={{ background: SEVERITY_COLORS[s], boxShadow: `0 0 8px ${SEVERITY_COLORS[s]}70` }}
               />
-              <span className="text-2xl font-bold font-mono" style={{ color: SEVERITY_COLORS[s] }}>
+              <span className="text-xl sm:text-2xl font-bold font-mono" style={{ color: SEVERITY_COLORS[s] }}>
                 {stats ? (sev[s] ?? 0) : '—'}
               </span>
               <span className="text-xs text-muted-foreground capitalize">{s}</span>
@@ -217,7 +238,7 @@ const Landing: React.FC = () => {
       {/* ── CTA ─────────────────────────────────────────────────────────── */}
       <section className="px-6 pb-16 max-w-6xl mx-auto w-full">
         <div
-          className="rounded-2xl border border-border p-10 flex flex-col items-center gap-5 text-center relative overflow-hidden"
+          className="rounded-2xl border border-border p-6 sm:p-10 flex flex-col items-center gap-5 text-center relative overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, hsl(var(--card)), hsl(var(--primary)/0.06))',
           }}

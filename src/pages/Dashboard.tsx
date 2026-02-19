@@ -147,7 +147,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           {/* Alert severity breakdown */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { label: 'Critical', count: severityCounts.critical, color: 'text-neon-red', bg: 'bg-neon-red/10 border-neon-red/20' },
               { label: 'High', count: severityCounts.high, color: 'text-neon-red', bg: 'bg-neon-red/5 border-neon-red/10' },
