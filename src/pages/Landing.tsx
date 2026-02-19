@@ -1,18 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Loader2, AlertTriangle, RefreshCw, Zap, Globe, ChevronRight, Lock } from 'lucide-react';
+import { Shield, AlertTriangle, RefreshCw, Zap, Globe, ChevronRight, Lock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import logoSrc from '@/assets/logo.png';
-
-const REGION_COORDS: Record<string, [number, number]> = {
-  Banaadir:     [45.34,  2.05],
-  Puntland:     [49.0,   8.4],
-  Somaliland:   [44.06,  9.56],
-  Jubaland:     [42.55,  0.35],
-  'South West': [43.4,   2.6],
-  Hirshabelle:  [45.9,   3.1],
-  Galmudug:     [47.2,   5.5],
-};
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -31,7 +21,7 @@ type PublicStats = {
 
 function useCountUp(target: number, duration = 1500) {
   const [value, setValue] = useState(0);
-  const started = useRef(false);
+  const started = React.useRef(false);
   useEffect(() => {
     if (target === 0 || started.current) return;
     started.current = true;
@@ -52,21 +42,12 @@ const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 const Landing: React.FC = () => {
   const [stats, setStats] = useState<PublicStats | null>(null);
   const [statsError, setStatsError] = useState(false);
-  const [mapToken, setMapToken] = useState<string | null>(null);
-  const [mapError, setMapError] = useState<string | null>(null);
-  const [mapLoaded, setMapLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const mapboxglRef = useRef<any>(null);
+  const orgsCount    = useCountUp(stats?.total_orgs ?? 0);
+  const alertsCount  = useCountUp(stats?.total_open_alerts ?? 0);
+  const regionsCount = useCountUp(stats ? Object.keys(stats.region_stats).length : 0);
 
-  const orgsCount   = useCountUp(stats?.total_orgs ?? 0);
-  const alertsCount = useCountUp(stats?.total_open_alerts ?? 0);
-  const regionsCount= useCountUp(stats ? Object.keys(stats.region_stats).length : 0);
-
-  // Fetch public stats
   useEffect(() => {
     setStatsError(false);
     supabase.functions.invoke('public-stats').then(({ data, error }) => {
@@ -74,140 +55,6 @@ const Landing: React.FC = () => {
       setStats(data as PublicStats);
     });
   }, [retryKey]);
-
-  // Fetch map token
-  useEffect(() => {
-    supabase.functions.invoke('get-map-token').then(({ data, error }) => {
-      if (!error && data?.token) setMapToken(data.token);
-      else setMapError('Map unavailable');
-    });
-  }, []);
-
-  // Init Mapbox
-  useEffect(() => {
-    if (!mapToken || !mapContainer.current || mapRef.current) return;
-    let cancelled = false;
-
-    import('mapbox-gl').then((mod) => {
-      if (cancelled || !mapContainer.current) return;
-      const mapboxgl = mod.default;
-      mapboxglRef.current = mapboxgl;
-      mapboxgl.accessToken = mapToken;
-
-      const map = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/dark-v11',
-        center: [46, 6],
-        zoom: 4.8,
-        projection: 'mercator',
-        pitchWithRotate: false,
-        dragRotate: false,
-        attributionControl: false,
-        interactive: false,
-      });
-
-      map.on('load', () => {
-        if (cancelled) return;
-
-        // Somalia light blue highlight
-        map.addSource('somalia-boundaries', {
-          type: 'vector',
-          url: 'mapbox://mapbox.country-boundaries-v1',
-        });
-        map.addLayer({
-          id: 'somalia-highlight',
-          type: 'fill',
-          source: 'somalia-boundaries',
-          'source-layer': 'country_boundaries',
-          filter: ['==', ['get', 'name_en'], 'Somalia'],
-          paint: {
-            'fill-color': '#38bdf8',
-            'fill-opacity': 0.3,
-          },
-        });
-        map.addLayer({
-          id: 'somalia-outline',
-          type: 'line',
-          source: 'somalia-boundaries',
-          'source-layer': 'country_boundaries',
-          filter: ['==', ['get', 'name_en'], 'Somalia'],
-          paint: {
-            'line-color': '#38bdf8',
-            'line-width': 2,
-            'line-opacity': 0.9,
-          },
-        });
-
-        setMapLoaded(true);
-        mapRef.current = map;
-      });
-
-      map.on('error', () => {
-        if (!cancelled) setMapError('Map failed to load.');
-      });
-
-      mapRef.current = map;
-    }).catch(() => {
-      if (!cancelled) setMapError('Map library error.');
-    });
-
-    return () => {
-      cancelled = true;
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        setMapLoaded(false);
-      }
-    };
-  }, [mapToken]);
-
-  // Place region markers
-  useEffect(() => {
-    if (!mapLoaded || !stats || !mapboxglRef.current || !mapRef.current) return;
-
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
-
-    const mapboxgl = mapboxglRef.current;
-    const map = mapRef.current;
-
-    for (const [region, data] of Object.entries(stats.region_stats)) {
-      const coords = REGION_COORDS[region];
-      if (!coords) continue;
-
-      const color = SEVERITY_COLORS[data.dominant] ?? '#94a3b8';
-      const size = Math.min(8 + data.count * 1.5, 22);
-
-      const el = document.createElement('div');
-      el.style.cssText = `
-        width:${size}px;height:${size}px;border-radius:50%;
-        background:${color};opacity:0.85;
-        border:1.5px solid rgba(255,255,255,0.5);
-        box-shadow:0 0 ${size}px ${color}80;
-        cursor:default;
-      `;
-      el.title = `${region}: ${data.count} open alert${data.count !== 1 ? 's' : ''}`;
-
-      const popup = new mapboxgl.Popup({
-        closeButton: false,
-        offset: 10,
-        className: 'threat-tooltip',
-      }).setHTML(`
-        <div style="background:hsl(216 28% 12%/0.97);border:1px solid hsl(216 28% 22%);color:hsl(210 40% 95%);border-radius:8px;padding:10px 12px;font-family:Inter,system-ui,sans-serif;min-width:130px;">
-          <p style="margin:0 0 2px;font-size:12px;font-weight:600;">${region}</p>
-          <p style="margin:0;font-size:11px;color:hsl(215 20% 55%);">${data.count} open alert${data.count !== 1 ? 's' : ''}</p>
-        </div>`);
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([coords[0], coords[1]])
-        .setPopup(popup)
-        .addTo(map);
-
-      markersRef.current.push(marker);
-    }
-  }, [mapLoaded, stats]);
 
   const sev = stats?.severity_counts ?? {};
 
@@ -298,9 +145,9 @@ const Landing: React.FC = () => {
           {/* Stat counters */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-12">
             {[
-              { value: orgsCount, label: 'Organizations Monitored', suffix: '+' },
-              { value: alertsCount, label: 'Open Alerts', suffix: '' },
-              { value: regionsCount, label: 'Active Regions', suffix: '' },
+              { value: orgsCount,    label: 'Organizations Monitored', suffix: '+' },
+              { value: alertsCount,  label: 'Open Alerts',             suffix: '' },
+              { value: regionsCount, label: 'Active Regions',          suffix: '' },
             ].map(({ value, label, suffix }) => (
               <div
                 key={label}
@@ -317,15 +164,37 @@ const Landing: React.FC = () => {
         </div>
       </section>
 
-      {/* ── Map Section ───────────────────────────────────────────────────── */}
-      <section className="px-6 pb-12 max-w-6xl mx-auto w-full">
-        <div className="mb-4 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Live Threat Overview · Somalia</span>
+      {/* ── Live Attack Map Section (CyberMap iframe) ──────────────────── */}
+      <section className="px-6 pb-12 max-w-7xl mx-auto w-full">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+              Live Cyber Attack Map · Somalia National CERT
+            </span>
+          </div>
+          <Link
+            to="/cyber-map"
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            <Zap className="w-3 h-3" /> Open Full Screen
+          </Link>
         </div>
 
-        {/* Severity stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div
+          className="glass-card rounded-2xl border border-border overflow-hidden relative"
+          style={{ height: '560px' }}
+        >
+          <iframe
+            src="/cyber-map"
+            title="Live Cyber Attack Map"
+            className="w-full h-full border-0"
+            loading="lazy"
+          />
+        </div>
+
+        {/* Severity stat cards below the iframe */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           {SEVERITY_ORDER.map((s) => (
             <div
               key={s}
@@ -337,58 +206,11 @@ const Landing: React.FC = () => {
                 style={{ background: SEVERITY_COLORS[s], boxShadow: `0 0 8px ${SEVERITY_COLORS[s]}70` }}
               />
               <span className="text-2xl font-bold font-mono" style={{ color: SEVERITY_COLORS[s] }}>
-                {stats ? (sev[s] ?? 0) : <Loader2 className="w-5 h-5 animate-spin" style={{ color: SEVERITY_COLORS[s] }} />}
+                {stats ? (sev[s] ?? 0) : '—'}
               </span>
               <span className="text-xs text-muted-foreground capitalize">{s}</span>
             </div>
           ))}
-        </div>
-
-        {/* Map */}
-        <div
-          className="glass-card rounded-2xl border border-border overflow-hidden relative"
-          style={{ height: '460px' }}
-        >
-          {!mapToken && !mapError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
-              <Loader2 className="w-7 h-7 animate-spin text-primary opacity-70" />
-            </div>
-          )}
-          {mapError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
-              <p className="text-xs text-muted-foreground">{mapError}</p>
-            </div>
-          )}
-          <div ref={mapContainer} className="w-full h-full" role="img" aria-label="Threat map showing alert concentrations across Somalia regions" />
-
-          {/* Vignette overlay */}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: 'radial-gradient(ellipse at center, transparent 50%, hsl(var(--background)/0.4) 100%)',
-            }}
-          />
-
-          {/* Map legend */}
-          {mapLoaded && (
-            <div className="absolute bottom-4 left-4 z-10 glass-card rounded-lg p-3 border border-border text-xs space-y-1.5">
-              <p className="text-muted-foreground font-mono font-semibold text-[10px] uppercase tracking-wider mb-2">Severity</p>
-              {SEVERITY_ORDER.map((s) => (
-                <div key={s} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full border border-white/30" style={{ background: SEVERITY_COLORS[s] }} />
-                  <span className="text-muted-foreground capitalize">{s}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Somalia label */}
-          {mapLoaded && (
-            <div className="absolute top-4 right-4 z-10 flex items-center gap-2 px-2 py-1 rounded text-[10px] font-mono"
-              style={{ background: 'rgba(56,189,248,0.15)', border: '1px solid rgba(56,189,248,0.4)', color: '#38bdf8' }}>
-              🇸🇴 Somalia highlighted
-            </div>
-          )}
         </div>
       </section>
 

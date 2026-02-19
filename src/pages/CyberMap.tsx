@@ -247,6 +247,22 @@ function buildArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollect
   return { type: 'FeatureCollection', features };
 }
 
+function buildFullArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.opacity <= 0) continue;
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: state.arcCoords },
+      properties: {
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 function buildSourcesGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
   const seen = new Set<string>();
   const features: GeoJSON.Feature[] = [];
@@ -327,7 +343,7 @@ const CyberMap: React.FC = () => {
   const [mapToken, setMapToken]       = useState<string | null>(null);
   const [mapError, setMapError]       = useState<string | null>(null);
   const [mapLoaded, setMapLoaded]     = useState(false);
-  const [liveOn, setLiveOn]           = useState(true);
+  const [liveOn, setLiveOn]             = useState(true);
   const [somaliaPanel, setSomaliaPanel] = useState(false);
 
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -383,8 +399,22 @@ const CyberMap: React.FC = () => {
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
         map.addSource('attack-arcs-source', { type: 'geojson', data: emptyFC });
+        map.addSource('attack-full-arcs-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-impact-source', { type: 'geojson', data: emptyFC });
+
+        // ── Full arc backbone (dim dashed "rail" line from source to Somalia) ──
+        map.addLayer({
+          id: 'attack-full-arcs',
+          type: 'line',
+          source: 'attack-full-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1,
+            'line-opacity': ['*', ['get', 'opacity'], 0.3],
+            'line-dasharray': [3, 2],
+          },
+        });
 
         // Glow (fat translucent line)
         map.addLayer({
@@ -529,14 +559,16 @@ const CyberMap: React.FC = () => {
   const updateMapSources = useCallback((nowMs?: number) => {
     const map = mapRef.current;
     if (!map) return;
-    const arcs    = map.getSource('attack-arcs-source');
-    const sources = map.getSource('attack-sources-source');
-    const impacts = map.getSource('attack-impact-source');
-    const rings   = map.getSource('attack-ring-source');
-    if (arcs)    (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
-    if (sources) (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
-    if (impacts) (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
-    if (rings)   (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
+    const arcs      = map.getSource('attack-arcs-source');
+    const fullArcs  = map.getSource('attack-full-arcs-source');
+    const sources   = map.getSource('attack-sources-source');
+    const impacts   = map.getSource('attack-impact-source');
+    const rings     = map.getSource('attack-ring-source');
+    if (arcs)      (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
+    if (fullArcs)  (fullArcs as any).setData(buildFullArcsGeoJSON(arcStatesRef.current));
+    if (sources)   (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
+    if (impacts)   (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+    if (rings)     (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
   }, []);
 
   // ── Toggle layer visibility ────────────────────────────────────────────────
