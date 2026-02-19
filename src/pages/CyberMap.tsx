@@ -1539,12 +1539,12 @@ const CyberMap: React.FC = () => {
       {/* ── Mobile Feed Drawer ─────────────────────────────────────────────── */}
       {mobileFeedOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setMobileFeedOpen(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileFeedOpen(false)} />
           <div
             className="relative flex flex-col z-10 rounded-t-2xl overflow-hidden"
-            style={{ height: '60vh', background: '#07070f', border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ height: '60vh', background: 'rgba(5, 7, 15, 0.72)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderBottom: 'none' }}
           >
-            <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4" style={{ color: '#22d3ee' }} />
                 <span className="text-sm font-bold font-mono tracking-widest uppercase" style={{ color: '#22d3ee' }}>Live Feed</span>
