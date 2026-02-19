@@ -394,14 +394,49 @@ interface ArcState {
 
 // ── GeoJSON builders ──────────────────────────────────────────────────────────
 
+const TAIL_FRACTION = 0.18;
+
 function buildArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   for (const state of states.values()) {
     if (state.progress <= 0) continue;
-    const sliceEnd = Math.max(2, Math.ceil(state.progress * state.arcCoords.length));
+
+    let coords: [number, number][];
+    if (state.progress >= 1) {
+      // After arrival: show full arc so it persists then fades
+      coords = state.arcCoords;
+    } else {
+      // During travel: show only a short moving tail segment (traveling beam effect)
+      const sliceEnd   = Math.max(2, Math.ceil(state.progress * (state.arcCoords.length - 1)));
+      const tailLength = Math.max(4, Math.floor(sliceEnd * TAIL_FRACTION));
+      const sliceStart = Math.max(0, sliceEnd - tailLength);
+      coords = state.arcCoords.slice(sliceStart, sliceEnd);
+    }
+
+    if (coords.length < 2) continue;
     features.push({
       type: 'Feature',
-      geometry: { type: 'LineString', coordinates: state.arcCoords.slice(0, sliceEnd) },
+      geometry: { type: 'LineString', coordinates: coords },
+      properties: {
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildProjectilesGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.progress <= 0 || state.progress >= 1) continue;
+    const idx = Math.min(
+      Math.floor(state.progress * (state.arcCoords.length - 1)),
+      state.arcCoords.length - 1,
+    );
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: state.arcCoords[idx] },
       properties: {
         color:   ATTACK_COLORS[state.threat.attack_type],
         opacity: state.opacity,
@@ -574,19 +609,7 @@ const CyberMap: React.FC = () => {
         map.addSource('attack-full-arcs-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-impact-source', { type: 'geojson', data: emptyFC });
-
-        // ── Full arc backbone (dim dashed "rail" line from source to Somalia) ──
-        map.addLayer({
-          id: 'attack-full-arcs',
-          type: 'line',
-          source: 'attack-full-arcs-source',
-          paint: {
-            'line-color': ['get', 'color'],
-            'line-width': 1,
-            'line-opacity': ['*', ['get', 'opacity'], 0.3],
-            'line-dasharray': [3, 2],
-          },
-        });
+        map.addSource('attack-projectiles-source', { type: 'geojson', data: emptyFC });
 
         // Glow (fat translucent line)
         map.addLayer({
@@ -705,6 +728,36 @@ const CyberMap: React.FC = () => {
           },
         });
 
+        // ── Traveling projectile dot layers ──────────────────────────────
+
+        // Outer glow halo
+        map.addLayer({
+          id: 'attack-projectiles-glow',
+          type: 'circle',
+          source: 'attack-projectiles-source',
+          paint: {
+            'circle-radius': 14,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': ['*', ['get', 'opacity'], 0.28],
+            'circle-blur': 1,
+          },
+        });
+
+        // Core bright dot with white stroke
+        map.addLayer({
+          id: 'attack-projectiles-core',
+          type: 'circle',
+          source: 'attack-projectiles-source',
+          paint: {
+            'circle-radius': 4,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': ['get', 'opacity'],
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': 'rgba(255,255,255,0.95)',
+            'circle-stroke-opacity': ['get', 'opacity'],
+          },
+        });
+
         // Source country dot click → open CountryPanel
         map.on('click', 'attack-sources-dot', (e: any) => {
           const props = e.features?.[0]?.properties;
@@ -748,16 +801,18 @@ const CyberMap: React.FC = () => {
   const updateMapSources = useCallback((nowMs?: number) => {
     const map = mapRef.current;
     if (!map) return;
-    const arcs      = map.getSource('attack-arcs-source');
-    const fullArcs  = map.getSource('attack-full-arcs-source');
-    const sources   = map.getSource('attack-sources-source');
-    const impacts   = map.getSource('attack-impact-source');
-    const rings     = map.getSource('attack-ring-source');
-    if (arcs)      (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
-    if (fullArcs)  (fullArcs as any).setData(buildFullArcsGeoJSON(arcStatesRef.current));
-    if (sources)   (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
-    if (impacts)   (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
-    if (rings)     (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
+    const arcs        = map.getSource('attack-arcs-source');
+    const fullArcs    = map.getSource('attack-full-arcs-source');
+    const sources     = map.getSource('attack-sources-source');
+    const impacts     = map.getSource('attack-impact-source');
+    const rings       = map.getSource('attack-ring-source');
+    const projectiles = map.getSource('attack-projectiles-source');
+    if (arcs)        (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
+    if (fullArcs)    (fullArcs as any).setData(buildFullArcsGeoJSON(arcStatesRef.current));
+    if (sources)     (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
+    if (impacts)     (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+    if (rings)       (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
+    if (projectiles) (projectiles as any).setData(buildProjectilesGeoJSON(arcStatesRef.current));
   }, []);
 
   // ── Toggle layer visibility ────────────────────────────────────────────────
@@ -770,6 +825,7 @@ const CyberMap: React.FC = () => {
       'attack-sources-dot', 'attack-sources-label',
       'attack-ring',
       'attack-impact-solid', 'attack-impact', 'attack-impact-outer',
+      'attack-projectiles-glow', 'attack-projectiles-core',
     ].forEach(id => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
     });
