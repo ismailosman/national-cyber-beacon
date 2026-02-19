@@ -18,7 +18,7 @@ const COUNTRY_ISO: Record<string, string> = {
   'Vietnam': 'vn', 'Romania': 'ro', 'Turkey': 'tr', 'South Korea': 'kr',
   'Indonesia': 'id', 'France': 'fr', 'UK': 'gb', 'Saudi Arabia': 'sa',
   'Egypt': 'eg', 'Singapore': 'sg', 'Canada': 'ca', 'Japan': 'jp',
-  'Israel': 'il', 'Somalia': 'so',
+  'Israel': 'il', 'Somalia': 'so', 'Kenya': 'ke', 'Ethiopia': 'et',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -935,7 +935,8 @@ const CyberMap: React.FC = () => {
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/dark-v11',
         center: [20, 10],
-        zoom: 2,
+        zoom: window.innerWidth < 768 ? 0.8 : 2,
+        minZoom: window.innerWidth < 768 ? 0.3 : 1,
         projection: 'mercator',
         pitchWithRotate: false,
         attributionControl: false,
