@@ -26,7 +26,6 @@ async function checkUptime(domain: string): Promise<CheckResult> {
 
 async function checkHTTPS(domain: string): Promise<CheckResult> {
   try {
-    // Check if HTTP redirects to HTTPS
     const httpUrl = `http://${domain}`
     const resp = await fetch(httpUrl, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(8000) })
     const location = resp.headers.get('location') || ''
@@ -38,7 +37,6 @@ async function checkHTTPS(domain: string): Promise<CheckResult> {
     }
     return { check_type: 'https', result: 'pass', details: { note: 'HTTPS likely enforced', status: resp.status } }
   } catch (err: any) {
-    // If connection refused on HTTP, HTTPS is probably enforced
     return { check_type: 'https', result: 'warn', details: { error: err.message, note: 'Could not verify redirect' } }
   }
 }
@@ -46,7 +44,6 @@ async function checkHTTPS(domain: string): Promise<CheckResult> {
 async function checkSSL(domain: string): Promise<CheckResult> {
   try {
     const resp = await fetch(`https://${domain}`, { method: 'HEAD', signal: AbortSignal.timeout(10000) })
-    // If we got here, SSL is valid
     return {
       check_type: 'ssl',
       result: 'pass',
@@ -57,7 +54,6 @@ async function checkSSL(domain: string): Promise<CheckResult> {
     if (msg.includes('cert') || msg.includes('ssl') || msg.includes('SSL') || msg.includes('certificate')) {
       return { check_type: 'ssl', result: 'fail', details: { error: err.message, note: 'SSL certificate error' } }
     }
-    // Other errors might just be network issues
     return { check_type: 'ssl', result: 'warn', details: { error: err.message, note: 'Could not verify SSL' } }
   }
 }
@@ -82,7 +78,6 @@ async function checkHeaders(domain: string): Promise<CheckResult> {
 
 async function checkDNS(domain: string): Promise<CheckResult> {
   try {
-    // DNS check via Cloudflare's DNS-over-HTTPS
     const resp = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=A`, {
       headers: { Accept: 'application/dns-json' },
       signal: AbortSignal.timeout(8000)
@@ -116,8 +111,8 @@ function calculateRiskScore(checks: CheckResult[]): number {
     maxTotal += w
   }
 
-  const vulnerabilityBonus = 20 // We give 20% for general vulnerability posture (placeholder)
-  const threatBonus = 20 // Threat activity (placeholder — calculated as avg of other checks)
+  const vulnerabilityBonus = 20
+  const threatBonus = 20
   const avgChecks = maxTotal > 0 ? (total / maxTotal) : 0.5
   const finalScore = (total + vulnerabilityBonus * avgChecks + threatBonus * avgChecks) / (maxTotal + 40)
   return Math.max(0, Math.min(100, Math.round(finalScore * 100)))
@@ -169,59 +164,135 @@ Deno.serve(async (req: Request) => {
 
     const checks: CheckResult[] = [ssl, https, headers, dns, uptime]
 
-    // Store results
+    // ✅ FIX 1: security_checks requires asset_id — fetch or create website asset
+    let assetId: string
+    const { data: existingAssets } = await supabase
+      .from('assets')
+      .select('id')
+      .eq('organization_id', org_id)
+      .eq('asset_type', 'website')
+      .limit(1)
+
+    if (existingAssets && existingAssets.length > 0) {
+      assetId = existingAssets[0].id
+    } else {
+      const { data: newAsset, error: assetErr } = await supabase
+        .from('assets')
+        .insert({
+          organization_id: org_id,
+          asset_type: 'website',
+          url: `https://${domain}`,
+          is_critical: true,
+        })
+        .select('id')
+        .single()
+
+      if (assetErr || !newAsset) {
+        console.error('Failed to create asset:', assetErr)
+        return new Response(JSON.stringify({ error: 'Failed to create asset for org' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+      assetId = newAsset.id
+    }
+
+    // Store results with correct column names
     const checkedAt = new Date().toISOString()
-    await supabase.from('security_checks').insert(
-      checks.map(c => ({ org_id, check_type: c.check_type, result: c.result, details: c.details, checked_at: checkedAt }))
+    const { error: scErr } = await supabase.from('security_checks').insert(
+      checks.map(c => ({
+        asset_id: assetId,                                              // ✅ was org_id
+        check_type: c.check_type,
+        status: c.result,                                               // ✅ column is 'status' not 'result'
+        score: c.result === 'pass' ? 100 : c.result === 'warn' ? 50 : 0,
+        details: c.details,
+        checked_at: checkedAt,
+      }))
     )
+    if (scErr) console.error('security_checks insert error:', scErr)
 
     // Calculate and update risk score
     const riskScore = calculateRiskScore(checks)
     const status = getStatus(riskScore)
 
-    await supabase.from('organizations').update({
+    // ✅ FIX 2: column is last_scan not last_scanned_at
+    const { error: orgUpdateErr } = await supabase.from('organizations').update({
       risk_score: riskScore,
       status,
-      last_scanned_at: checkedAt,
+      last_scan: checkedAt,   // ✅ was: last_scanned_at
     }).eq('id', org_id)
+    if (orgUpdateErr) console.error('organizations update error:', orgUpdateErr)
 
-    // Store score history
-    await supabase.from('risk_score_history').insert({ org_id, score: riskScore, recorded_at: checkedAt })
+    // ✅ FIX 3: table is risk_history with organization_id, not risk_score_history with org_id
+    const { error: rhErr } = await supabase.from('risk_history').insert({
+      organization_id: org_id,  // ✅ was: org_id in risk_score_history
+      score: riskScore,
+      // created_at defaults automatically
+    })
+    if (rhErr) console.error('risk_history insert error:', rhErr)
 
-    // Generate alerts
-    const alertsToCreate: Array<{ org_id: string; type: string; severity: string; message: string }> = []
+    // ✅ FIX 4: alerts use title + description + organization_id, not type + message + org_id
+    const alertsToCreate: Array<{
+      organization_id: string
+      title: string
+      description: string
+      severity: string
+      source: string
+      status: string
+      is_read: boolean
+    }> = []
 
     if (riskScore < 60) {
       alertsToCreate.push({
-        org_id, type: 'risk_score_drop', severity: riskScore < 40 ? 'critical' : 'high',
-        message: `${org.name} risk score dropped to ${riskScore}/100. Immediate review required.`
+        organization_id: org_id,
+        title: `Risk Score Drop: ${org.name}`,
+        description: `${org.name} risk score dropped to ${riskScore}/100. Immediate review required.`,
+        severity: riskScore < 40 ? 'critical' : 'high',
+        source: 'scanner',
+        status: 'open',
+        is_read: false,
       })
     }
 
     if (ssl.result === 'fail') {
       alertsToCreate.push({
-        org_id, type: 'ssl_failure', severity: 'critical',
-        message: `${org.name}: SSL certificate validation failed on ${domain}. Communications may be unencrypted.`
+        organization_id: org_id,
+        title: `SSL Certificate Failure: ${org.name}`,
+        description: `${org.name}: SSL certificate validation failed on ${domain}. Communications may be unencrypted.`,
+        severity: 'critical',
+        source: 'scanner',
+        status: 'open',
+        is_read: false,
       })
     }
 
     if (headers.result === 'fail') {
       const missing = (headers.details as any)?.missing || []
       alertsToCreate.push({
-        org_id, type: 'missing_headers', severity: 'high',
-        message: `${org.name}: Critical security headers missing: ${missing.join(', ')}`
+        organization_id: org_id,
+        title: `Missing Security Headers: ${org.name}`,
+        description: `${org.name}: Critical security headers missing: ${missing.join(', ')}`,
+        severity: 'high',
+        source: 'scanner',
+        status: 'open',
+        is_read: false,
       })
     }
 
     if (uptime.result === 'fail') {
       alertsToCreate.push({
-        org_id, type: 'website_offline', severity: 'critical',
-        message: `${org.name}: Website ${domain} is offline or returning errors.`
+        organization_id: org_id,
+        title: `Website Offline: ${org.name}`,
+        description: `${org.name}: Website ${domain} is offline or returning errors.`,
+        severity: 'critical',
+        source: 'scanner',
+        status: 'open',
+        is_read: false,
       })
     }
 
     if (alertsToCreate.length > 0) {
-      await supabase.from('alerts').insert(alertsToCreate)
+      const { error: alertErr } = await supabase.from('alerts').insert(alertsToCreate)
+      if (alertErr) console.error('alerts insert error:', alertErr)
     }
 
     return new Response(JSON.stringify({ success: true, org_id, risk_score: riskScore, status, checks }), {
