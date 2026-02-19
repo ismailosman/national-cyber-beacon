@@ -338,10 +338,8 @@ const CyberMap: React.FC = () => {
         pitchWithRotate: false,
         dragRotate: false,
         attributionControl: false,
-        interactive: true,
+        interactive: false,
       });
-
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
 
       map.on('load', () => {
         if (cancelled) return;

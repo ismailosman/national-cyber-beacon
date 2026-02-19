@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, Loader2, Map, Activity, RefreshCw, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useLiveAttacks, LiveThreat, AttackType } from '@/hooks/useLiveAttacks';
+
+// ── Constants ──────────────────────────────────────────────────────────────────
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -10,7 +12,20 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: '#3b82f6',
 };
 
+const ATTACK_COLORS: Record<AttackType, string> = {
+  malware:   '#ef4444',
+  phishing:  '#a855f7',
+  exploit:   '#f97316',
+  ddos:      '#facc15',
+  intrusion: '#22d3ee',
+};
+
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
+
+const TRAVEL_DURATION = 2.5;
+const VISIBLE_DURATION = 8;
+const FADE_DURATION    = 2;
+const ARC_STEPS        = 50;
 
 const POPUP_STYLE = `
   background: hsl(216 28% 12% / 0.97);
@@ -23,16 +38,7 @@ const POPUP_STYLE = `
   max-width: 280px;
 `;
 
-function severityBadge(sev: string) {
-  const colorMap: Record<string, string> = {
-    critical: 'background:#ef444422;color:#ef4444;border:1px solid #ef444440',
-    high:     'background:#f9731622;color:#f97316;border:1px solid #f9731640',
-    medium:   'background:#facc1522;color:#facc15;border:1px solid #facc1540',
-    low:      'background:#3b82f622;color:#3b82f6;border:1px solid #3b82f640',
-  };
-  const style = colorMap[sev] || colorMap.low;
-  return `<span style="font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:4px;font-family:monospace;${style}">${sev}</span>`;
-}
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface MapPoint {
   lat: number;
@@ -43,13 +49,100 @@ interface MapPoint {
   sector?: string;
 }
 
-type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
+// ── Arc State ──────────────────────────────────────────────────────────────────
 
-function mapPointsToGeoJSON(points: MapPoint[], sevFilter: SeverityFilter): GeoJSON.FeatureCollection {
-  const filtered = sevFilter === 'all' ? points : points.filter(p => p.severity === sevFilter);
+interface ArcState {
+  threat:    LiveThreat;
+  arcCoords: [number, number][];
+  startTime: number;
+  progress:  number;
+  opacity:   number;
+}
+
+// ── Bezier arc math ────────────────────────────────────────────────────────────
+
+function computeBezierArc(
+  src: { lat: number; lng: number },
+  dst: { lat: number; lng: number },
+): [number, number][] {
+  const cpLng = (src.lng + dst.lng) / 2;
+  const dist   = Math.sqrt((dst.lng - src.lng) ** 2 + (dst.lat - src.lat) ** 2);
+  const elevate = Math.min(dist * 0.4, 40);
+  const cpLat  = (src.lat + dst.lat) / 2 + elevate;
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= ARC_STEPS; i++) {
+    const t   = i / ARC_STEPS;
+    const tm  = 1 - t;
+    const lng = tm * tm * src.lng + 2 * tm * t * cpLng + t * t * dst.lng;
+    const lat = tm * tm * src.lat + 2 * tm * t * cpLat + t * t * dst.lat;
+    coords.push([lng, lat]);
+  }
+  return coords;
+}
+
+// ── GeoJSON builders ───────────────────────────────────────────────────────────
+
+function buildArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.progress <= 0) continue;
+    const sliceEnd = Math.max(2, Math.ceil(state.progress * state.arcCoords.length));
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: state.arcCoords.slice(0, sliceEnd) },
+      properties: {
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildSourcesGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const seen = new Set<string>();
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.opacity <= 0) continue;
+    if (seen.has(state.threat.source.country)) continue;
+    seen.add(state.threat.source.country);
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [state.threat.source.lng, state.threat.source.lat] },
+      properties: {
+        country: state.threat.source.country,
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildImpactGeoJSON(states: globalThis.Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const targetMap = new globalThis.Map<string, { lng: number; lat: number; count: number }>();
+  for (const state of states.values()) {
+    if (state.progress < 0.95 || state.opacity <= 0) continue;
+    const key = `${state.threat.target.lng.toFixed(3)},${state.threat.target.lat.toFixed(3)}`;
+    const existing = targetMap.get(key);
+    if (existing) existing.count++;
+    else targetMap.set(key, { lng: state.threat.target.lng, lat: state.threat.target.lat, count: 1 });
+  }
   return {
     type: 'FeatureCollection',
-    features: filtered.map(p => ({
+    features: [...targetMap.values()].map(({ lng, lat, count }) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [lng, lat] },
+      properties: { count },
+    })),
+  };
+}
+
+function mapPointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: points.map(p => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
       properties: {
@@ -62,9 +155,9 @@ function mapPointsToGeoJSON(points: MapPoint[], sevFilter: SeverityFilter): GeoJ
   };
 }
 
-const ThreatMap: React.FC = () => {
-  const [sevFilter, setSevFilter] = useState<SeverityFilter>('all');
+// ── Main Component ─────────────────────────────────────────────────────────────
 
+const ThreatMap: React.FC = () => {
   const [mapToken, setMapToken] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -77,14 +170,22 @@ const ThreatMap: React.FC = () => {
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
-  const hovPopupRef = useRef<any>(null);
-  const clickPopupRef = useRef<any>(null);
-  const pulseMarkersRef = useRef<any[]>([]);
   const mapboxglRef = useRef<any>(null);
 
-  const geojson = useMemo(() => mapPointsToGeoJSON(mapPoints, sevFilter), [mapPoints, sevFilter]);
+  // Arc animation refs
+  const arcStatesRef = useRef<globalThis.Map<string, ArcState>>(new globalThis.Map());
+  const rafRef       = useRef<number>(0);
+  const isDirtyRef   = useRef(false);
+  const seenIdsRef   = useRef<globalThis.Set<string>>(new globalThis.Set());
 
-  // ── 1. Fetch public stats (token + map points) ──────────────────────────
+  const { threats, todayCount } = useLiveAttacks(true);
+
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const geojson = useMemo(() => mapPointsToGeoJSON(mapPoints), [mapPoints]);
+
+  // ── 1. Fetch public stats ──────────────────────────────────────────────────
   useEffect(() => {
     setMapError(null);
     setMapToken(null);
@@ -109,7 +210,7 @@ const ThreatMap: React.FC = () => {
     return () => { cancelled = true; };
   }, [retryKey]);
 
-  // ── 2. Initialize Mapbox once ───────────────────────────────────────────
+  // ── 2. Initialize Mapbox (static, locked) ─────────────────────────────────
   useEffect(() => {
     if (!mapToken || !mapContainer.current || mapRef.current) return;
 
@@ -125,22 +226,25 @@ const ThreatMap: React.FC = () => {
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/dark-v11',
         center: [46, 5.5],
-        zoom: 5,
+        zoom: 3.5,
         projection: 'mercator',
+        interactive: false,       // ← static map, no pan/zoom
         pitchWithRotate: false,
         dragRotate: false,
         attributionControl: false,
       });
 
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
       map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
       map.on('load', () => {
         if (cancelled) return;
 
+        const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+        // ── Alert dot layers ──────────────────────────────────────────────
         map.addSource('alerts-source', {
           type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] },
+          data: emptyFC,
           cluster: true,
           clusterRadius: 40,
           clusterMaxZoom: 10,
@@ -194,70 +298,84 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        map.on('click', 'alerts-clusters', (e: any) => {
-          const features = map.queryRenderedFeatures(e.point, { layers: ['alerts-clusters'] });
-          if (!features.length) return;
-          const clusterId = features[0].properties.cluster_id;
-          (map.getSource('alerts-source') as any).getClusterExpansionZoom(clusterId, (err: any, zoom: number) => {
-            if (err) return;
-            map.easeTo({ center: (features[0].geometry as any).coordinates, zoom: zoom + 1 });
-          });
+        // ── Attack arc layers (on top of alert dots) ──────────────────────
+        map.addSource('attack-arcs-source',    { type: 'geojson', data: emptyFC });
+        map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
+        map.addSource('attack-impact-source',  { type: 'geojson', data: emptyFC });
+
+        // Glow
+        map.addLayer({
+          id: 'attack-arcs-glow',
+          type: 'line',
+          source: 'attack-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 8,
+            'line-opacity': ['*', ['get', 'opacity'], 0.22],
+            'line-blur': 6,
+          },
         });
 
-        map.on('click', 'alerts-unclustered', (e: any) => {
-          const feat = e.features?.[0];
-          if (!feat) return;
-          const p = feat.properties;
-          clickPopupRef.current?.remove();
-
-          const html = `
-            <div style="${POPUP_STYLE}">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                ${severityBadge(p.severity)}
-                <span style="font-size:10px;color:hsl(215 20% 55%);font-family:monospace;">OPEN</span>
-              </div>
-              <p style="margin:0 0 4px;font-size:13px;font-weight:600;line-height:1.35;">${p.count} active alert${p.count !== 1 ? 's' : ''} in this area</p>
-              <p style="margin:0 0 2px;font-size:11px;color:hsl(215 20% 55%);">📍 ${p.region} · ${p.sector}</p>
-              <p style="margin:0;font-size:10px;color:hsl(215 20% 40%);font-family:monospace;">Public read-only view</p>
-            </div>`;
-
-          clickPopupRef.current = new mapboxgl.Popup({ closeButton: true, maxWidth: '300px', className: 'threat-popup' })
-            .setLngLat((feat.geometry as any).coordinates.slice())
-            .setHTML(html)
-            .addTo(map);
+        // Sharp arc
+        map.addLayer({
+          id: 'attack-arcs',
+          type: 'line',
+          source: 'attack-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 2,
+            'line-opacity': ['get', 'opacity'],
+          },
         });
 
-        map.on('mouseenter', 'alerts-unclustered', (e: any) => {
-          map.getCanvas().style.cursor = 'pointer';
-          const feat = e.features?.[0];
-          if (!feat) return;
-          const p = feat.properties;
-          hovPopupRef.current?.remove();
-          hovPopupRef.current = new mapboxgl.Popup({
-            closeButton: false,
-            className: 'threat-tooltip',
-            offset: 10,
-          })
-            .setLngLat(e.lngLat)
-            .setHTML(`
-              <div style="${POPUP_STYLE}padding:8px 10px;min-width:160px;">
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                  ${severityBadge(p.severity)}
-                </div>
-                <p style="margin:0 0 2px;font-size:12px;font-weight:600;">${p.count} alert${p.count !== 1 ? 's' : ''}</p>
-                <p style="margin:0;font-size:10px;color:hsl(215 20% 55%);">${p.region} · ${p.sector}</p>
-              </div>`)
-            .addTo(map);
+        // Source dots
+        map.addLayer({
+          id: 'attack-sources-dot',
+          type: 'circle',
+          source: 'attack-sources-source',
+          paint: {
+            'circle-radius': 4,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': ['get', 'opacity'],
+            'circle-stroke-width': 1,
+            'circle-stroke-color': 'rgba(255,255,255,0.5)',
+          },
         });
 
-        map.on('mouseleave', 'alerts-unclustered', () => {
-          map.getCanvas().style.cursor = '';
-          hovPopupRef.current?.remove();
-          hovPopupRef.current = null;
+        // Country labels
+        map.addLayer({
+          id: 'attack-sources-label',
+          type: 'symbol',
+          source: 'attack-sources-source',
+          layout: {
+            'text-field': ['get', 'country'],
+            'text-size': 9,
+            'text-anchor': 'bottom',
+            'text-offset': [0, -0.8],
+            'text-allow-overlap': false,
+            'text-optional': true,
+          },
+          paint: {
+            'text-color': '#ffffff',
+            'text-opacity': ['get', 'opacity'],
+            'text-halo-color': 'rgba(0,0,0,0.9)',
+            'text-halo-width': 1.2,
+          },
         });
 
-        map.on('mouseenter', 'alerts-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
-        map.on('mouseleave', 'alerts-clusters', () => { map.getCanvas().style.cursor = ''; });
+        // Impact rings at Somalia targets
+        map.addLayer({
+          id: 'attack-impact',
+          type: 'circle',
+          source: 'attack-impact-source',
+          paint: {
+            'circle-radius': ['+', 7, ['/', ['get', 'count'], 1]],
+            'circle-color': 'transparent',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#f472b6',
+            'circle-opacity': 0.8,
+          },
+        });
 
         setMapLoaded(true);
       });
@@ -273,10 +391,7 @@ const ThreatMap: React.FC = () => {
 
     return () => {
       cancelled = true;
-      hovPopupRef.current?.remove();
-      clickPopupRef.current?.remove();
-      pulseMarkersRef.current.forEach((m) => m.remove());
-      pulseMarkersRef.current = [];
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -286,63 +401,100 @@ const ThreatMap: React.FC = () => {
     };
   }, [mapToken, retryKey]);
 
-  // ── 3. Push GeoJSON data to map ──────────────────────────────────────────
+  // ── 3. Push alert dot GeoJSON ──────────────────────────────────────────────
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
 
     const timer = setTimeout(() => {
       const map = mapRef.current;
       if (!map || !map.getSource('alerts-source')) return;
-
       (map.getSource('alerts-source') as any).setData(geojson);
-
-      if (geojson.features.length > 0) {
-        const mapboxgl = mapboxglRef.current;
-        if (!mapboxgl) return;
-        const bounds = new mapboxgl.LngLatBounds();
-        geojson.features.forEach((f: any) => bounds.extend(f.geometry.coordinates));
-        map.fitBounds(bounds, { padding: 80, maxZoom: 9, duration: 600 });
-      } else {
-        map.flyTo({ center: [46, 5.5], zoom: 5, duration: 600 });
-      }
-
-      // Pulse markers for critical alerts (cap at 15)
-      pulseMarkersRef.current.forEach((m) => m.remove());
-      pulseMarkersRef.current = [];
-
-      const mapboxgl = mapboxglRef.current;
-      if (!mapboxgl) return;
-
-      const criticals = mapPoints.filter(p => p.severity === 'critical').slice(0, 15);
-      for (const point of criticals) {
-        const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'position:relative;width:12px;height:12px;pointer-events:none;';
-        const ring = document.createElement('div');
-        ring.className = 'critical-pulse-ring';
-        wrapper.appendChild(ring);
-        const marker = new mapboxgl.Marker({ element: wrapper, anchor: 'center' })
-          .setLngLat([point.lng, point.lat])
-          .addTo(map);
-        pulseMarkersRef.current.push(marker);
-      }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [geojson, mapLoaded, mapPoints]);
+  }, [geojson, mapLoaded]);
 
-  const hasAlerts = geojson.features.length > 0;
+  // ── 4. Update arc map sources ──────────────────────────────────────────────
+  const updateMapSources = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const arcs    = map.getSource('attack-arcs-source');
+    const sources = map.getSource('attack-sources-source');
+    const impacts = map.getSource('attack-impact-source');
+    if (arcs)    (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
+    if (sources) (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
+    if (impacts) (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+  }, []);
 
+  // ── 5. Sync new threats into arc state ────────────────────────────────────
+  useEffect(() => {
+    if (!mapLoaded) return;
+    for (const threat of threats) {
+      if (seenIdsRef.current.has(threat.id)) continue;
+      seenIdsRef.current.add(threat.id);
+      arcStatesRef.current.set(threat.id, {
+        threat,
+        arcCoords: computeBezierArc(threat.source, threat.target),
+        startTime: prefersReducedMotion ? Date.now() - TRAVEL_DURATION * 1000 : Date.now(),
+        progress:  prefersReducedMotion ? 1 : 0,
+        opacity:   1,
+      });
+      isDirtyRef.current = true;
+    }
+  }, [threats, mapLoaded, prefersReducedMotion]);
+
+  // ── 6. requestAnimationFrame loop ─────────────────────────────────────────
+  useEffect(() => {
+    if (!mapLoaded) return;
+
+    const tick = () => {
+      const now = performance.now();
+      let changed = false;
+
+      for (const [id, state] of arcStatesRef.current) {
+        const elapsed = (now - state.startTime) / 1000;
+        const newProgress = Math.min(elapsed / TRAVEL_DURATION, 1);
+        const newOpacity  = elapsed > (VISIBLE_DURATION - FADE_DURATION)
+          ? Math.max(0, 1 - (elapsed - (VISIBLE_DURATION - FADE_DURATION)) / FADE_DURATION)
+          : 1;
+
+        if (newOpacity <= 0) {
+          arcStatesRef.current.delete(id);
+          changed = true;
+          continue;
+        }
+        if (state.progress !== newProgress || state.opacity !== newOpacity) {
+          state.progress = newProgress;
+          state.opacity  = newOpacity;
+          changed = true;
+        }
+      }
+
+      if (changed || isDirtyRef.current) {
+        isDirtyRef.current = false;
+        updateMapSources();
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [mapLoaded, updateMapSources]);
+
+  // ── UI ─────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 100px)', minHeight: '600px' }}>
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+
+      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3 flex-shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Threat Map</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {isLoading ? 'Loading...' : `${totalAlerts} open alerts · ${geojson.features.length} mapped · Public view`}
+            {isLoading ? 'Loading...' : `${totalAlerts} open alerts · ${mapPoints.length} hotspots · Live attacks`}
           </p>
         </div>
-        {/* Live severity counters */}
+        {/* Severity counters */}
         <div className="flex gap-2 flex-wrap">
           {SEVERITY_ORDER.map((sev) => (
             <div key={sev} className="glass-card rounded-lg px-3 py-1.5 border border-border flex items-center gap-1.5">
@@ -354,44 +506,16 @@ const ThreatMap: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Filter bar ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2 flex-shrink-0" role="group" aria-label="Alert filters">
-        <div className="flex gap-1 p-1 bg-muted rounded-lg" role="radiogroup" aria-label="Severity filter">
-          {(['all', 'critical', 'high', 'medium', 'low'] as SeverityFilter[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSevFilter(s)}
-              aria-pressed={sevFilter === s}
-              className={cn(
-                'px-3 py-1.5 text-xs font-medium rounded transition-all capitalize',
-                sevFilter === s
-                  ? 'bg-primary text-primary-foreground font-bold'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        {sevFilter !== 'all' && (
-          <button
-            onClick={() => setSevFilter('all')}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded-lg border border-border bg-muted transition-colors"
-          >
-            <X className="w-3 h-3" /> Clear
-          </button>
-        )}
-      </div>
-
-      {/* ── Map + Sidebar ──────────────────────────────────────────────────── */}
+      {/* Map + Sidebar */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_272px] gap-4 min-h-0">
-        {/* Map container */}
+
+        {/* Map */}
         <div
           className="relative glass-card rounded-xl border border-border overflow-hidden"
           role="application"
-          aria-label="Interactive threat map showing alert locations across Somalia"
+          aria-label="Live cyber threat map showing attacks targeting Somalia"
         >
-          {/* Loading state */}
+          {/* Loading */}
           {!mapToken && !mapError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/60">
               <Loader2 className="w-8 h-8 animate-spin text-primary opacity-70" />
@@ -399,7 +523,7 @@ const ThreatMap: React.FC = () => {
             </div>
           )}
 
-          {/* Error state */}
+          {/* Error */}
           {mapError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background/80">
               <AlertTriangle className="w-10 h-10 text-destructive opacity-70" />
@@ -413,37 +537,40 @@ const ThreatMap: React.FC = () => {
             </div>
           )}
 
-          {/* Empty state overlay */}
-          {mapLoaded && !hasAlerts && !isLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 pointer-events-none">
-              <Map className="w-10 h-10 text-muted-foreground opacity-30" />
-              <p className="text-sm text-muted-foreground opacity-60">No alerts match current filters</p>
+          <div ref={mapContainer} className="w-full h-full" />
+
+          {/* Live attacks badge */}
+          {mapLoaded && (
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono"
+              style={{ background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(244,114,182,0.4)' }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+              <span style={{ color: '#f472b6' }}>{todayCount.toLocaleString()} attacks today</span>
             </div>
           )}
 
-          <div ref={mapContainer} className="w-full h-full" />
-
-          {/* Legend — floating bottom-left */}
+          {/* Legend */}
           {mapLoaded && (
             <div className="absolute bottom-4 left-4 z-10 glass-card rounded-lg p-3 border border-border text-xs space-y-1.5">
-              <p className="text-muted-foreground font-mono font-semibold text-[10px] uppercase tracking-wider mb-2">Legend</p>
+              <p className="text-muted-foreground font-mono font-semibold text-[10px] uppercase tracking-wider mb-2">Severity</p>
               {SEVERITY_ORDER.map((sev) => (
                 <div key={sev} className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-1.5">
-                    <div
-                      className="w-2.5 h-2.5 rounded-full border border-white/30"
-                      style={{ background: SEVERITY_COLORS[sev] }}
-                    />
+                    <div className="w-2.5 h-2.5 rounded-full border border-white/30" style={{ background: SEVERITY_COLORS[sev] }} />
                     <span className="text-muted-foreground capitalize">{sev}</span>
                   </div>
                   <span className="font-mono font-bold text-foreground">{severityCounts[sev] ?? 0}</span>
                 </div>
               ))}
-              <div className="pt-1.5 border-t border-border flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded-full border border-primary/60 bg-background/50 flex items-center justify-center">
-                  <span className="text-primary font-mono text-[8px] font-bold">N</span>
+              <div className="pt-1.5 border-t border-border">
+                <p className="text-muted-foreground font-mono font-semibold text-[10px] uppercase tracking-wider mb-1.5">Live Attacks</p>
+                <div className="flex flex-wrap gap-x-2 gap-y-1">
+                  {(['malware','phishing','exploit','ddos','intrusion'] as AttackType[]).map(type => (
+                    <div key={type} className="flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: ATTACK_COLORS[type] }} />
+                      <span className="text-[9px] text-muted-foreground capitalize">{type}</span>
+                    </div>
+                  ))}
                 </div>
-                <span className="text-muted-foreground">Cluster (tap to expand)</span>
               </div>
             </div>
           )}
@@ -451,7 +578,7 @@ const ThreatMap: React.FC = () => {
 
         {/* Sidebar */}
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
-          {/* Alert summary feed */}
+          {/* Alert hotspots feed */}
           <div className="glass-card rounded-xl border border-border flex flex-col flex-1 min-h-0">
             <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
               <Activity className="w-4 h-4 text-destructive" />
@@ -463,15 +590,10 @@ const ThreatMap: React.FC = () => {
             </div>
             <div className="overflow-y-auto flex-1 divide-y divide-border/50">
               {mapPoints.length === 0 && !isLoading ? (
-                <div className="p-6 text-center text-muted-foreground text-xs">
-                  No alert data available
-                </div>
+                <div className="p-6 text-center text-muted-foreground text-xs">No alert data available</div>
               ) : (
                 mapPoints.slice(0, 12).map((point, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3"
-                  >
+                  <div key={idx} className="p-3">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span
                         className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded font-mono border"
@@ -487,12 +609,8 @@ const ThreatMap: React.FC = () => {
                         {point.count} alert{point.count !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <p className="text-xs font-medium text-foreground">
-                      {point.region ?? 'Somalia'}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">
-                      {point.sector ?? 'government'}
-                    </p>
+                    <p className="text-xs font-medium text-foreground">{point.region ?? 'Somalia'}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">{point.sector ?? 'government'}</p>
                   </div>
                 ))
               )}
