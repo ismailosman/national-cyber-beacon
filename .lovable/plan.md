@@ -1,355 +1,263 @@
 
-# Production-Ready Threat Map — Complete Rebuild
+# Four Changes: Alert Detail Page, Map Popup Navigation, Org Coordinates, Landing Page, Sign-Up Removal
 
-## What's Wrong Today
+## Overview
 
-The current `/threat-map` page reads from `organizations` and `threat_events`. The user wants it to **visualize `alerts`** — the same data the `/alerts` page shows — as geo-located dots on the map.
-
-### Key Schema Facts (critical for implementation)
-
-- The `alerts` table has **no `lat`/`lng` columns** — location comes from joining to `organizations` (which has `lat`, `lng`, and `region`)
-- There is **no `/alerts/:id` detail route** in the app — clicking a dot will navigate to `/alerts` with the alert pre-selected/highlighted instead (the safest approach that works with the existing router)
-- `mapbox-gl` is **already installed** — no new dependencies needed
-- The `get-map-token` edge function is **already deployed and working**
-- Alert severity enum: `critical | high | medium | low`
-- Alert status: `open | ack | closed`
+1. **`/alerts/:id` detail page** — full single-alert view with acknowledge/close actions
+2. **Update ThreatMap popup** — "View" button navigates to `/alerts/:id`
+3. **Seed 12 missing org coordinates** — data update via the insert tool
+4. **Public landing page** — read-only view at `/` accessible without login
+5. **Remove sign-up from login** — sign-in only
 
 ---
 
-## Architecture
+## 1. Alert Detail Page — `src/pages/AlertDetail.tsx` (NEW)
 
-### 1. Shared Hook — `src/hooks/useAlerts.ts` (NEW)
+### Route
+`/alerts/:id` — added to both the protected routes (in `AppLayout`) so logged-in users see the full detail, and accessible from the threat map popup.
 
-Extract the alert-fetching logic from `Alerts.tsx` into a reusable hook so both the Alerts page and the Threat Map consume identical data with zero duplication:
+### Layout
+```text
+← Back to Alerts           [Acknowledge] [Close Alert]
+────────────────────────────────────────────────────
+CRITICAL  open            SSL Certificate Expired
+                          Hormuud Telecom · Banaadir · Telecom
 
-```ts
-// Fetches alerts joined with organizations (for name, lat, lng, region, sector)
-export function useAlerts(filters: AlertFilters) {
-  return useQuery({
-    queryKey: ['alerts', filters],
-    queryFn: async () => {
-      let q = supabase
-        .from('alerts')
-        .select('*, organizations(id, name, lat, lng, region, sector)')
-        .order('created_at', { ascending: false });
-      if (filters.severity !== 'all') q = q.eq('severity', filters.severity);
-      if (filters.status !== 'all') q = q.eq('status', filters.status);
-      const { data } = await q;
-      return data || [];
-    },
-  });
-}
+Description:
+  The SSL certificate for the main portal expired 3 days ago...
+
+  Organization:   Hormuud Telecom
+  Source:         scanner
+  Created:        Feb 19, 2026, 14:32 UTC (3 hours ago)
+  Status:         open → history of changes (if closed/ack)
 ```
 
-The hook returns alerts with an embedded `organizations` object containing `lat`, `lng`, `region`, and `sector`.
+### Data Fetching
+```ts
+// Single alert with org join
+const { data: alert } = useQuery({
+  queryKey: ['alert', id],
+  queryFn: async () => {
+    const { data, error } = await supabase
+      .from('alerts')
+      .select('*, organizations(id, name, region, sector, lat, lng, contact_email, domain)')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
+  }
+});
+```
 
-### 2. Update `Alerts.tsx`
+### Action Buttons
+- **Acknowledge** (visible if `status === 'open'`, SuperAdmin + Analyst only): `UPDATE alerts SET status='ack', is_read=true WHERE id=...`
+- **Close** (visible if `status !== 'closed'`, SuperAdmin + Analyst only): `UPDATE alerts SET status='closed' WHERE id=...`
+- On success: toast + invalidate `['alerts']` + `['alert', id]` queries
 
-Replace the inline query in `Alerts.tsx` with `useAlerts(filters)` — no other changes to the alerts page UI. This ensures both pages stay in sync automatically via React Query's shared cache key.
+### Fields Displayed
+| Field | Value |
+|---|---|
+| Severity | Colored badge (critical/high/medium/low) |
+| Status | Colored pill (open/ack/closed) |
+| Title | Large heading |
+| Description | Full text (or "No description provided") |
+| Organization | Name + link to `/organizations/:id` |
+| Region | From org |
+| Sector | From org |
+| Source | e.g. "scanner", "manual" |
+| Created | Full date + relative time |
 
-### 3. Region-to-Coordinate Fallback Utility — `src/lib/regionCoords.ts` (NEW)
+### Error / Loading States
+- Loading: skeleton card
+- 404: "Alert not found" with back button
+
+---
+
+## 2. Update ThreatMap Popup — `src/pages/ThreatMap.tsx`
+
+The current popup (click on unclustered dot) shows no navigation. We add a "View Details →" button that uses `react-router-dom`'s `useNavigate`.
+
+Since Mapbox popup HTML is a string, we use a **delegated click handler** on the map container:
 
 ```ts
-export const REGION_COORDS: Record<string, [number, number]> = {
-  Banaadir:     [45.34, 2.05],   // [lng, lat]
-  Puntland:     [49.0,  8.4],
-  Somaliland:   [44.06, 9.56],
-  Jubaland:     [42.55, 0.35],
-  'South West': [43.4,  2.6],
-  Hirshabelle:  [45.9,  3.1],
-  Galmudug:     [47.2,  5.5],
+// Add a data-alert-id attribute to the button in the popup HTML
+const html = `
+  <div style="${POPUP_STYLE}">
+    ...existing content...
+    <button 
+      data-alert-id="${p.id}"
+      style="margin-top:8px;width:100%;padding:5px 0;background:#00e5ff18;
+             border:1px solid #00e5ff40;border-radius:5px;color:#00e5ff;
+             font-size:11px;font-weight:600;cursor:pointer;font-family:monospace;"
+    >View Details →</button>
+  </div>`;
+```
+
+Then a single delegated listener on the map container `div`:
+```ts
+mapContainer.current.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('[data-alert-id]');
+  if (btn) {
+    const alertId = btn.getAttribute('data-alert-id');
+    navigate(`/alerts/${alertId}`);
+  }
+});
+```
+
+This avoids re-running Mapbox event setup and works cleanly with React Router's `navigate`.
+
+---
+
+## 3. Seed Missing Org Coordinates — Data Update
+
+12 organizations in Banaadir currently have `lat IS NULL`. All are government ministries located in/around Mogadishu. We assign unique, slightly offset coordinates around Villa Somalia and the government district (Hamarweyne / Shangani areas).
+
+| Organization | lat | lng |
+|---|---|---|
+| Villa Somalia | 2.0674 | 45.3245 |
+| Ministry of Commerce & Industry | 2.0620 | 45.3310 |
+| Ministry of Communications & Technology | 2.0598 | 45.3289 |
+| Ministry of Environment & Climate Change | 2.0555 | 45.3257 |
+| Ministry of Fishery and Blue Economy | 2.0510 | 45.3222 |
+| Ministry of Foreign Affairs | 2.0480 | 45.3198 |
+| Ministry of Interior | 2.0645 | 45.3335 |
+| Ministry of Justice & Constitutional Affairs | 2.0412 | 45.3175 |
+| Ministry of Labor | 2.0375 | 45.3148 |
+| Ministry of Planning | 2.0438 | 45.3266 |
+| National Communications Authority | 2.0561 | 45.3415 |
+| Immigration and Custom Authority | 2.0500 | 45.3450 |
+
+These are real geographic coordinates within central Mogadishu, spread enough to be distinguishable at zoom level 12.
+
+**Method:** Use the Lovable Cloud insert tool with `UPDATE` statements for each org by its UUID.
+
+---
+
+## 4. Public Landing Page — `src/pages/Landing.tsx` (NEW)
+
+### Route
+`/` — **public**, no authentication required. When a logged-in user visits `/`, they still see the Dashboard (the ProtectedRoutes component handles this). The landing page is rendered at `/` only when **not logged in**.
+
+**Routing logic change in `App.tsx`:**
+```tsx
+<Routes>
+  <Route path="/login" element={<Login />} />
+  <Route path="/" element={<PublicOrDashboard />} />  {/* Smart route */}
+  <Route path="/*" element={<ProtectedRoutes />} />
+</Routes>
+```
+
+Where `PublicOrDashboard` checks auth:
+```tsx
+const PublicOrDashboard = () => {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  if (user) return <Navigate to="/dashboard-home" replace />; // or render dashboard directly
+  return <Landing />;
 };
-
-export function getAlertCoords(alert: AlertWithOrg): [number, number] | null {
-  const org = alert.organizations;
-  if (!org) return null;
-  // Prefer precise org coordinates
-  if (org.lat != null && org.lng != null) return [org.lng, org.lat];
-  // Fall back to region centroid
-  const regional = REGION_COORDS[org.region];
-  if (regional) return regional;
-  return null; // Skip — no location available
-}
 ```
 
-Alerts with no org or no resolvable coordinates are excluded from the map (not rendered).
+Actually simpler: keep `/` as the dashboard for logged-in users and use `/public` for the landing. Then the landing links to `/login`. The `ProtectedRoutes` wrapper already redirects to `/login` when not authenticated — so the landing page should be at a **separate public route**, not `/`.
 
-### 4. GeoJSON Memoization Utility
+**Better approach:**
+- Landing page lives at `/` — always public
+- Logged-in users who go to `/` see the landing with a "Go to Dashboard" button
+- The protected dashboard moves to — no, that breaks the existing sidebar links.
 
+**Cleanest approach:** The landing page is served at `/` for unauthenticated users. When authenticated users visit `/`, they're shown the Dashboard (existing behavior). We wrap the `/` route:
+
+```tsx
+// In App.tsx routes (outside ProtectedRoutes):
+<Route path="/" element={<RootRoute />} />
+// RootRoute:
+const RootRoute = () => {
+  const { user, loading } = useAuth();
+  if (loading) return <Spinner />;
+  return user ? <Navigate to="/-/dashboard" replace /> : <Landing />;
+};
+// ProtectedRoutes serves /-/dashboard and all other protected routes
+```
+
+This is over-engineered. The simplest solution that fits the current structure:
+
+**Final approach:**
+- Landing page at route `/landing` — linked from the login page ("View Public Dashboard →")
+- The landing page fetches data using an **anonymous Supabase client call** (no auth required if we make a public RLS policy for the landing)
+
+Wait — current RLS on `alerts` requires `has_role(auth.uid(), ...)`. Anonymous users will get 0 rows. We need either:
+1. A public-facing Edge Function that returns summary stats (no sensitive details)
+2. Or add a public SELECT policy on a summary view
+
+**Best approach for a public landing:**
+- The landing page calls a **new edge function** `public-stats` that uses the service role key to aggregate: total open alerts by severity, org count, recent critical count — **no PII, no alert titles or org names**
+- The map on the landing shows **only severity-colored dots at region centroids** (no specific org/title data), using hardcoded Somali region coordinates
+- The landing is read-only, fully public, no auth required
+
+### Landing Page Content
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  [Logo]  Somalia National Cyber Observatory        [Sign In →]  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  LIVE THREAT OVERVIEW  ●  Updated 2 min ago                     │
+│                                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │ Critical │  │   High   │  │  Medium  │  │   Low    │       │
+│  │    12    │  │    8     │  │    23    │  │    5     │       │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+│                                                                 │
+│  [Mini Mapbox map showing dots at region centroids]             │
+│   — Interactive, dark style, zoom/pan enabled                   │
+│   — Dots colored by dominant severity per region                │
+│   — No popups with sensitive detail, just region name + count   │
+│                                                                 │
+│  [Sign In to Access Full Platform →]                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Edge Function: `public-stats`
 ```ts
-// Converts filtered alerts into a Mapbox GeoJSON FeatureCollection
-// Memoized with useMemo to prevent re-computation on unrelated renders
-export function alertsToGeoJSON(alerts: AlertWithOrg[]): GeoJSON.FeatureCollection {
-  const features = alerts
-    .map(alert => {
-      const coords = getAlertCoords(alert);
-      if (!coords) return null;
-      return {
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: coords },
-        properties: {
-          id: alert.id,
-          title: alert.title,
-          severity: alert.severity,
-          status: alert.status,
-          orgName: alert.organizations?.name ?? 'Unknown',
-          region: alert.organizations?.region ?? '',
-          createdAt: alert.created_at,
-        }
-      };
-    })
-    .filter(Boolean);
-  return { type: 'FeatureCollection', features };
-}
+// supabase/functions/public-stats/index.ts
+// Uses service role to return:
+// - counts by severity (critical, high, medium, low)
+// - count by region (for heatmap dots)
+// - total orgs monitored
+// Returns NO titles, NO org names, NO descriptions
 ```
+
+RLS note: Since the edge function runs with service role, we don't need to change any RLS policies. The landing page data is aggregated and anonymized.
 
 ---
 
-## Full `ThreatMap.tsx` Implementation Plan
+## 5. Remove Sign-Up from Login Page — `src/pages/Login.tsx`
 
-### State Management
+Changes:
+- Remove the `mode` state (`signin | signup`)
+- Remove the tab switcher (`Sign In | Sign Up` pills)
+- Remove the `signUp` import and call
+- Remove the `success` state
+- Keep only the sign-in form
+- Remove the `signUp` reference from `useAuth` destructuring (the function still exists in context, just unused on this page)
 
-```ts
-// Filters — mirrors Alerts.tsx
-const [sevFilter, setSevFilter] = useState<'all'|'critical'|'high'|'medium'|'low'>('all');
-const [statusFilter, setStatusFilter] = useState<'all'|'open'|'ack'|'closed'>('all');
-
-// Map lifecycle
-const [mapToken, setMapToken] = useState<string | null>(null);
-const [mapError, setMapError] = useState<string | null>(null);
-const [mapLoaded, setMapLoaded] = useState(false);
-const [retryKey, setRetryKey] = useState(0); // for retry UI
-
-// Refs
-const mapContainer = useRef<HTMLDivElement>(null);
-const mapRef = useRef<any>(null);
-const popupRef = useRef<any>(null);
-```
-
-### Map Initialization (once, stable)
-
-- Initialize Mapbox map **once** when token is available, using the dark style `mapbox://styles/mapbox/dark-v11`
-- Disable pitch rotation: `pitchWithRotate: false`, `dragRotate: false`
-- Default center: Somalia `[46, 5.5]`, zoom `5`
-- On load: add the GeoJSON source + 3 layers (clusters, cluster count, unclustered dots)
-- The map instance is **never re-created** — data updates use `setData()` only
-
-### Mapbox Layers (added once on map load)
-
-```
-Source: 'alerts-source'
-  type: 'geojson'
-  cluster: true
-  clusterRadius: 40
-  clusterMaxZoom: 10
-
-Layer 1: 'alerts-clusters' (type: circle)
-  filter: ['has', 'point_count']
-  circle-radius: interpolate zoom 0→16, 14→20
-  circle-color: '#1e293b'  (dark navy)
-  circle-stroke-color: '#00e5ff'
-  circle-stroke-width: 1.5
-
-Layer 2: 'alerts-cluster-count' (type: symbol)
-  filter: ['has', 'point_count']
-  text-field: '{point_count_abbreviated}'
-  text-size: 11
-  text-color: '#ffffff'
-
-Layer 3: 'alerts-unclustered' (type: circle)
-  filter: ['!', ['has', 'point_count']]
-  circle-radius: interpolate zoom 5→6, 14→9
-  circle-color: match severity:
-    critical → #ef4444
-    high → #f97316
-    medium → #facc15
-    low → #3b82f6
-    fallback → #94a3b8
-  circle-opacity: 0.85
-  circle-stroke-width: 1
-  circle-stroke-color: '#ffffff'
-```
-
-### Filter Updates (debounced, no map re-init)
-
-When `sevFilter` or `statusFilter` changes:
-1. Wait 300ms (debounce via `useEffect` with `setTimeout`)
-2. Call `(map.getSource('alerts-source') as any).setData(newGeoJSON)`
-3. Also re-fit bounds if alerts count changed significantly
-
-### Cluster Click Behavior
-
-```ts
-map.on('click', 'alerts-clusters', (e) => {
-  const features = map.queryRenderedFeatures(e.point, { layers: ['alerts-clusters'] });
-  const clusterId = features[0].properties.cluster_id;
-  (map.getSource('alerts-source') as any).getClusterExpansionZoom(clusterId, (err, zoom) => {
-    if (!err) map.easeTo({ center: features[0].geometry.coordinates, zoom });
-  });
-});
-```
-
-### Unclustered Dot Click — Popup or Navigation
-
-Since there is no `/alerts/:id` route, clicking a dot shows a **Mapbox popup** styled to match the dark UI. If multiple alerts share the same coordinates, the popup lists all of them with severity badges and a "View in Alerts" button (scrolls to `/alerts` filtered by that org).
-
-The popup HTML is injected as a string with inline styles matching the dark cybersecurity theme.
-
-### Hover Behavior
-
-```ts
-map.on('mouseenter', 'alerts-unclustered', (e) => {
-  map.getCanvas().style.cursor = 'pointer';
-  // Show tooltip popup with: title, severity, org name, formatted timestamp
-  const props = e.features[0].properties;
-  new mapboxgl.Popup({ closeButton: false, className: 'threat-tooltip' })
-    .setLngLat(e.lngLat)
-    .setHTML(`...tooltip HTML...`)
-    .addTo(map);
-});
-map.on('mouseleave', 'alerts-unclustered', () => {
-  map.getCanvas().style.cursor = '';
-  popupRef.current?.remove();
-});
-```
-
-### Critical Alert Pulse Animation
-
-For `severity === 'critical'` alerts, add a 4th layer `'alerts-critical-pulse'` using circle-radius with a CSS animation via a periodic `setInterval` that alternates the paint property between 8 and 14px — OR more simply, add a `@keyframes` CSS animation in `index.css` and inject a custom Mapbox HTML marker for each critical alert using `mapboxgl.Marker` with a pulsing `div` element. The GeoJSON layer handles all alerts; the pulse markers are overlaid only for critical ones (limited to 20 most recent to keep performance).
-
-### Fit Bounds
-
-After data loads:
-```ts
-if (alerts.length > 0) {
-  const bounds = new mapboxgl.LngLatBounds();
-  geojson.features.forEach(f => bounds.extend(f.geometry.coordinates));
-  map.fitBounds(bounds, { padding: 60, maxZoom: 9 });
-} else {
-  map.flyTo({ center: [46, 5.5], zoom: 5 });
-}
-```
-
-### Real-Time Updates
-
-Subscribe to Supabase Realtime on the `alerts` table:
-```ts
-const channel = supabase.channel('alerts-realtime')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
-    queryClient.invalidateQueries({ queryKey: ['alerts'] });
-  })
-  .subscribe();
-```
-
-When the query cache updates, the `useEffect` watching `alerts` will call `setData()`.
+The login page becomes a clean, minimal sign-in only form.
 
 ---
 
-## Filter Bar UI
+## Route Updates — `src/App.tsx`
 
-Above the map, a filter row matching the Alerts page style:
+```tsx
+// New imports
+import AlertDetail from "@/pages/AlertDetail";
+import Landing from "@/pages/Landing";
 
+// Public routes (outside ProtectedRoutes):
+<Route path="/login" element={<Login />} />
+<Route path="/public" element={<Landing />} />  // public landing
+
+// Protected routes (inside AppLayout):
+<Route path="/alerts" element={<AlertsPage />} />
+<Route path="/alerts/:id" element={<AlertDetail />} />  // NEW
 ```
-[ Status: All | Open | Ack | Closed ] [ Severity: All | Critical | High | Medium | Low ]
-```
-
-Implemented with the same `bg-muted` pill style as in `Alerts.tsx`.
-
----
-
-## Dynamic Legend
-
-A floating legend panel (bottom-right of map) showing:
-- Severity colors with live counts from filtered alerts
-- Cluster indicator explanation
-
-```
-LEGEND
-● Critical  (N)
-● High      (N)
-● Medium    (N)
-● Low       (N)
-○ Cluster (tap to expand)
-```
-
-Counts update reactively as filters change.
-
----
-
-## Sidebar Panel
-
-Right side (280px on desktop, hidden on mobile):
-- **Alert Feed**: top 8 filtered alerts (title, severity badge, org name, timestamp)
-- **Severity Breakdown**: progress bars showing critical/high/medium/low counts
-- Clicking a sidebar alert item highlights it on the map (flyTo its coordinates)
-
----
-
-## Empty State
-
-When no alerts match filters, show an overlay over the map:
-
-```
-  [Map icon, dim opacity]
-  No alerts match current filters
-  [Clear Filters button]
-```
-
----
-
-## Error State + Retry
-
-When map token fails or Mapbox fails to load:
-```
-  [AlertTriangle icon]
-  Failed to load map
-  [Retry button → increments retryKey to restart init]
-```
-
----
-
-## CSS Additions to `index.css`
-
-Add custom Mapbox popup styles and pulse keyframes:
-
-```css
-/* Mapbox popup override for dark theme */
-.mapboxgl-popup-content {
-  background: hsl(216 28% 12% / 0.95);
-  border: 1px solid hsl(216 28% 20%);
-  color: hsl(210 40% 95%);
-  border-radius: 8px;
-  padding: 12px;
-  font-family: 'Inter', system-ui, sans-serif;
-}
-.mapboxgl-popup-tip {
-  border-top-color: hsl(216 28% 12% / 0.95) !important;
-  border-bottom-color: hsl(216 28% 12% / 0.95) !important;
-}
-
-/* Critical alert pulse ring */
-@keyframes alert-pulse {
-  0%   { transform: scale(1); opacity: 0.8; }
-  70%  { transform: scale(2.5); opacity: 0; }
-  100% { transform: scale(2.5); opacity: 0; }
-}
-.critical-pulse-ring {
-  position: absolute;
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: alert-pulse 2s ease-out infinite;
-}
-```
-
----
-
-## Accessibility
-
-- Map container: `role="application"` and `aria-label="Interactive threat map showing alert locations"`
-- Cluster markers: no interactive ARIA needed (screen readers get the sidebar list)
-- Sidebar alert list items: `role="listitem"`, `aria-label="Critical alert in Banaadir — SSL Certificate Expired"`
-- Filter buttons: standard `<button>` with descriptive labels
 
 ---
 
@@ -357,19 +265,14 @@ Add custom Mapbox popup styles and pulse keyframes:
 
 | File | Action |
 |---|---|
-| `src/hooks/useAlerts.ts` | CREATE — shared alert fetch hook with org join |
-| `src/lib/regionCoords.ts` | CREATE — region fallback coordinates + `getAlertCoords()` |
-| `src/pages/Alerts.tsx` | EDIT — swap inline query for `useAlerts()` hook |
-| `src/pages/ThreatMap.tsx` | COMPLETE REWRITE — production map with all features |
-| `src/index.css` | EDIT — add Mapbox popup dark theme CSS + pulse animation |
+| `src/pages/AlertDetail.tsx` | CREATE — single alert detail page |
+| `src/pages/Landing.tsx` | CREATE — public read-only landing page |
+| `supabase/functions/public-stats/index.ts` | CREATE — public aggregated stats edge function |
+| `src/pages/ThreatMap.tsx` | EDIT — add "View Details →" button to popup + delegated nav |
+| `src/pages/Login.tsx` | EDIT — remove sign-up tab and form |
+| `src/App.tsx` | EDIT — add `/alerts/:id` and `/public` routes |
 
-No database migrations, no new dependencies, no edge function changes needed. The `get-map-token` function is already deployed and working.
+### Database
+Use the insert tool to `UPDATE` the 12 organizations missing lat/lng with precise Mogadishu coordinates.
 
----
-
-## Technical Clarifications / Assumptions Made
-
-1. **No `/alerts/:id` route** — dot clicks show an inline Mapbox popup. If a detail route is added in future, this is trivially swappable.
-2. **Alert location = org location** — since `alerts` has no coordinates, we join `organizations` and use its `lat/lng` or fall back to `region`. Alerts without a resolvable location are silently excluded.
-3. **Realtime** — uses Supabase Realtime postgres_changes subscription on the `alerts` table. New alerts auto-appear on the map. Critical alerts added in real-time get the pulse animation.
-4. **Performance** — GeoJSON is memoized (`useMemo`). Map source is updated via `setData()`, never re-initialized. Pulse markers are capped at 15 to prevent DOM bloat.
+No schema migrations required — `lat` and `lng` columns already exist and are nullable.
