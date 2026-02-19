@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { Menu, X } from 'lucide-react';
+import logoImg from '@/assets/logo.png';
 
 const AppLayout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -30,7 +31,7 @@ const AppLayout: React.FC = () => {
           <button onClick={() => setMobileOpen(true)} className="text-muted-foreground hover:text-foreground">
             <Menu className="w-5 h-5" />
           </button>
-          <span className="text-sm font-bold text-neon-cyan tracking-widest uppercase">Somalia Cyber Defense</span>
+          <img src={logoImg} alt="Somalia Cyber Defence" className="h-7 object-contain" />
           {mobileOpen && (
             <button onClick={() => setMobileOpen(false)} className="ml-auto text-muted-foreground hover:text-foreground">
               <X className="w-5 h-5" />

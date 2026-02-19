@@ -2,8 +2,9 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  Shield, LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio
 } from 'lucide-react';
+import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -42,14 +43,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     <div className="flex flex-col h-full bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
       <div className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-neon-cyan/10 border border-neon-cyan/30 glow-cyan">
-            <Shield className="w-5 h-5 text-neon-cyan" />
-          </div>
-          <div>
-            <p className="text-xs font-bold text-neon-cyan tracking-widest uppercase leading-none">Somalia</p>
-            <p className="text-xs text-muted-foreground tracking-wider">Cyber Defense</p>
-          </div>
+        <div className="flex items-center justify-center">
+          <img src={logoImg} alt="Somalia Cyber Defence" className="w-36 object-contain" />
         </div>
         <div className="flex items-center gap-2 mt-3">
           <div className="w-2 h-2 rounded-full bg-neon-green animate-blink" />

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Activity } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -10,6 +10,11 @@ import {
 import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const checkTypeLabels: Record<string, string> = {
   tls: 'TLS Certificate',
@@ -31,7 +36,13 @@ const OrgDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { userRole } = useAuth();
   const [scanning, setScanning] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  const canEdit = userRole?.role === 'SuperAdmin' || userRole?.role === 'OrgAdmin';
 
   const { data: org } = useQuery({
     queryKey: ['org', id],
@@ -117,6 +128,43 @@ const OrgDetail: React.FC = () => {
     }
   };
 
+  const handleEditOpen = () => {
+    if (!org) return;
+    setEditForm({
+      name: org.name,
+      domain: org.domain,
+      region: org.region,
+      contact_email: org.contact_email || '',
+      sector: org.sector,
+      status: org.status,
+    });
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm || !id) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('organizations').update({
+        name: editForm.name,
+        domain: editForm.domain,
+        region: editForm.region,
+        contact_email: editForm.contact_email || null,
+        sector: editForm.sector,
+        status: editForm.status,
+      }).eq('id', id);
+      if (error) throw error;
+      toast.success('Organization updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['org', id] });
+      queryClient.invalidateQueries({ queryKey: ['organizations'] });
+      setEditOpen(false);
+    } catch (err: any) {
+      toast.error('Failed to save: ' + (err.message || 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const radarData = [
     { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'tls')?.score ?? 50 },
     { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.score ?? 50 },
@@ -154,6 +202,15 @@ const OrgDetail: React.FC = () => {
             <span className="text-xs px-2 py-0.5 rounded font-mono border text-neon-cyan border-neon-cyan/30 bg-neon-cyan/5 capitalize">{org.sector}</span>
           </div>
         </div>
+        {canEdit && (
+          <button
+            onClick={handleEditOpen}
+            className="flex items-center gap-2 px-4 py-2.5 bg-card text-foreground font-bold text-sm rounded-lg border border-border hover:border-neon-cyan/40 hover:text-neon-cyan transition-all"
+          >
+            <Pencil className="w-4 h-4" />
+            Edit
+          </button>
+        )}
         <button
           onClick={handleRunScan}
           disabled={scanning}
@@ -163,6 +220,69 @@ const OrgDetail: React.FC = () => {
           {scanning ? 'Scanning...' : 'Run Scan Now'}
         </button>
       </div>
+
+      {/* Edit Organization Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Organization</DialogTitle>
+          </DialogHeader>
+          {editForm && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input id="edit-name" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-domain">Domain</Label>
+                <Input id="edit-domain" value={editForm.domain} onChange={e => setEditForm({ ...editForm, domain: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-region">Region</Label>
+                <Input id="edit-region" value={editForm.region} onChange={e => setEditForm({ ...editForm, region: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-email">Contact Email</Label>
+                <Input id="edit-email" type="email" value={editForm.contact_email} onChange={e => setEditForm({ ...editForm, contact_email: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-sector">Sector</Label>
+                  <select
+                    id="edit-sector"
+                    value={editForm.sector}
+                    onChange={e => setEditForm({ ...editForm, sector: e.target.value })}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {['government', 'bank', 'telecom', 'health', 'education', 'other'].map(s => (
+                      <option key={s} value={s} className="capitalize">{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-status">Status</Label>
+                  <select
+                    id="edit-status"
+                    value={editForm.status}
+                    onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {['Secure', 'Warning', 'Critical'].map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={saving}>
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Score Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
