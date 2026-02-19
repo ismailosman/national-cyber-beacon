@@ -52,7 +52,8 @@ function genCountryDefaultPercentages(country: string): Record<AttackType, numbe
   return result;
 }
 
-const TRAVEL_DURATION  = 2.0;   // faster travel
+const TRAVEL_DURATION  = 1.2;   // snappy, urgent travel
+const FLASH_DURATION   = 1.2;   // impact flash ring expansion (seconds)
 const VISIBLE_DURATION = 15;   // long persistence → stacking effect
 const FADE_DURATION    = 3;
 const ARC_STEPS        = 50;
@@ -390,6 +391,40 @@ interface ArcState {
   startTime:  number;
   progress:   number;
   opacity:    number;
+  impacted?:  boolean; // true once progress first reached 1 (for flash trigger)
+}
+
+// ── Flash/explosion state ─────────────────────────────────────────────────────
+
+interface FlashState {
+  id:        string;
+  color:     string;
+  coords:    [number, number];
+  startTime: number;
+}
+
+function buildFlashGeoJSON(flashes: Map<string, FlashState>, now: number): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const [id, flash] of flashes) {
+    const t = (now - flash.startTime) / (FLASH_DURATION * 1000); // 0→1
+    if (t > 1) { flashes.delete(id); continue; }
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    // Inner ring: expands 0→32px, fades 1→0
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: flash.coords },
+      properties: { color: flash.color, radius: eased * 32, opacity: (1 - t) * 0.9, strokeW: 2.5 },
+    });
+    // Outer ring: delayed start, expands 0→60px, fades faster
+    const t2 = Math.max(0, t - 0.15);
+    const eased2 = 1 - Math.pow(1 - t2, 3);
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: flash.coords },
+      properties: { color: flash.color, radius: eased2 * 60, opacity: Math.max(0, 1 - t2) * 0.5, strokeW: 1.5 },
+    });
+  }
+  return { type: 'FeatureCollection', features };
 }
 
 // ── GeoJSON builders ──────────────────────────────────────────────────────────
@@ -450,12 +485,16 @@ function buildFullArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCol
   const features: GeoJSON.Feature[] = [];
   for (const state of states.values()) {
     if (state.opacity <= 0) continue;
+    // During travel: dim guide rail (0.25); after hit: solid bright line that fades
+    const opacity = state.progress >= 1
+      ? state.opacity * 0.75
+      : state.opacity * 0.28;
     features.push({
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: state.arcCoords },
       properties: {
-        color:   ATTACK_COLORS[state.threat.attack_type],
-        opacity: state.opacity,
+        color: ATTACK_COLORS[state.threat.attack_type],
+        opacity,
       },
     });
   }
@@ -550,10 +589,11 @@ const CyberMap: React.FC = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<any>(null);
   const mapboxglRef  = useRef<any>(null);
-  const arcStatesRef = useRef<Map<string, ArcState>>(new Map());
-  const rafRef       = useRef<number>(0);
-  const isDirtyRef   = useRef(false);
-  const seenIdsRef   = useRef<Set<string>>(new Set());
+  const arcStatesRef   = useRef<Map<string, ArcState>>(new Map());
+  const flashStatesRef = useRef<Map<string, FlashState>>(new Map());
+  const rafRef         = useRef<number>(0);
+  const isDirtyRef     = useRef(false);
+  const seenIdsRef     = useRef<Set<string>>(new Set());
 
   const { threats, todayCount } = useLiveAttacks(liveOn);
 
@@ -610,6 +650,19 @@ const CyberMap: React.FC = () => {
         map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-impact-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-projectiles-source', { type: 'geojson', data: emptyFC });
+        map.addSource('attack-flash-source', { type: 'geojson', data: emptyFC });
+
+        // ── Solid persistent full arc (background rail, always visible) ───
+        map.addLayer({
+          id: 'attack-full-arcs',
+          type: 'line',
+          source: 'attack-full-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1.2,
+            'line-opacity': ['get', 'opacity'],
+          },
+        });
 
         // Glow (fat translucent line)
         map.addLayer({
@@ -758,6 +811,20 @@ const CyberMap: React.FC = () => {
           },
         });
 
+        // ── Impact flash/explosion rings at target on hit ────────────────
+        map.addLayer({
+          id: 'attack-flash',
+          type: 'circle',
+          source: 'attack-flash-source',
+          paint: {
+            'circle-radius': ['get', 'radius'],
+            'circle-color': 'transparent',
+            'circle-stroke-width': ['get', 'strokeW'],
+            'circle-stroke-color': ['get', 'color'],
+            'circle-stroke-opacity': ['get', 'opacity'],
+          },
+        });
+
         // Source country dot click → open CountryPanel
         map.on('click', 'attack-sources-dot', (e: any) => {
           const props = e.features?.[0]?.properties;
@@ -801,18 +868,21 @@ const CyberMap: React.FC = () => {
   const updateMapSources = useCallback((nowMs?: number) => {
     const map = mapRef.current;
     if (!map) return;
+    const now         = nowMs ?? performance.now();
     const arcs        = map.getSource('attack-arcs-source');
     const fullArcs    = map.getSource('attack-full-arcs-source');
     const sources     = map.getSource('attack-sources-source');
     const impacts     = map.getSource('attack-impact-source');
     const rings       = map.getSource('attack-ring-source');
     const projectiles = map.getSource('attack-projectiles-source');
+    const flash       = map.getSource('attack-flash-source');
     if (arcs)        (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
     if (fullArcs)    (fullArcs as any).setData(buildFullArcsGeoJSON(arcStatesRef.current));
     if (sources)     (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
     if (impacts)     (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
-    if (rings)       (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, nowMs ?? performance.now()));
+    if (rings)       (rings as any).setData(buildRingsGeoJSON(arcStatesRef.current, now));
     if (projectiles) (projectiles as any).setData(buildProjectilesGeoJSON(arcStatesRef.current));
+    if (flash)       (flash as any).setData(buildFlashGeoJSON(flashStatesRef.current, now));
   }, []);
 
   // ── Toggle layer visibility ────────────────────────────────────────────────
@@ -821,16 +891,19 @@ const CyberMap: React.FC = () => {
     const map = mapRef.current;
     const vis = liveOn ? 'visible' : 'none';
     [
+      'attack-full-arcs',
       'attack-arcs-glow', 'attack-arcs',
       'attack-sources-dot', 'attack-sources-label',
       'attack-ring',
       'attack-impact-solid', 'attack-impact', 'attack-impact-outer',
       'attack-projectiles-glow', 'attack-projectiles-core',
+      'attack-flash',
     ].forEach(id => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
     });
     if (!liveOn) {
       arcStatesRef.current.clear();
+      flashStatesRef.current.clear();
       seenIdsRef.current.clear();
       updateMapSources();
     }
@@ -873,6 +946,18 @@ const CyberMap: React.FC = () => {
           changed = true;
           continue;
         }
+
+        // Detect first impact moment → trigger flash
+        if (newProgress >= 1 && !state.impacted) {
+          state.impacted = true;
+          flashStatesRef.current.set(id, {
+            id,
+            color:     ATTACK_COLORS[state.threat.attack_type],
+            coords:    [state.threat.target.lng, state.threat.target.lat],
+            startTime: now,
+          });
+        }
+
         if (state.progress !== newProgress || state.opacity !== newOpacity) {
           state.progress = newProgress;
           state.opacity  = newOpacity;
@@ -880,8 +965,10 @@ const CyberMap: React.FC = () => {
         }
       }
 
-      // Always update rings (they animate every frame) + other sources when dirty
-      if (changed || isDirtyRef.current) {
+      const hasFlashes = flashStatesRef.current.size > 0;
+
+      // Always update rings + flash (they animate every frame) + other sources when dirty
+      if (changed || isDirtyRef.current || hasFlashes) {
         isDirtyRef.current = false;
         updateMapSources(now);
       } else {
