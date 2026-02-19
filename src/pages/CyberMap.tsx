@@ -1,0 +1,483 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Shield, Loader2, Zap, Globe } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useLiveAttacks, LiveThreat, AttackType } from '@/hooks/useLiveAttacks';
+import logoSrc from '@/assets/logo.png';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const ATTACK_COLORS: Record<AttackType, string> = {
+  malware:   '#ef4444',
+  phishing:  '#a855f7',
+  exploit:   '#f97316',
+  ddos:      '#facc15',
+  intrusion: '#22d3ee',
+};
+
+const ATTACK_LABELS: Record<AttackType, string> = {
+  malware:   'Malware',
+  phishing:  'Phishing',
+  exploit:   'Exploit',
+  ddos:      'DDoS',
+  intrusion: 'Intrusion',
+};
+
+const TRAVEL_DURATION = 2.5;   // seconds for arc to travel from source → target
+const VISIBLE_DURATION = 8;    // seconds arc stays visible
+const FADE_DURATION    = 2;    // seconds to fade out
+const ARC_STEPS        = 50;   // Bezier interpolation segments
+
+// ── Bezier arc math ───────────────────────────────────────────────────────────
+
+function computeBezierArc(
+  src: { lat: number; lng: number },
+  dst: { lat: number; lng: number },
+): [number, number][] {
+  // Control point: midpoint elevated above the great-circle path
+  const cpLng = (src.lng + dst.lng) / 2;
+  const dist   = Math.sqrt((dst.lng - src.lng) ** 2 + (dst.lat - src.lat) ** 2);
+  const elevate = Math.min(dist * 0.4, 40);
+  const cpLat  = (src.lat + dst.lat) / 2 + elevate;
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= ARC_STEPS; i++) {
+    const t   = i / ARC_STEPS;
+    const tm  = 1 - t;
+    const lng = tm * tm * src.lng + 2 * tm * t * cpLng + t * t * dst.lng;
+    const lat = tm * tm * src.lat + 2 * tm * t * cpLat + t * t * dst.lat;
+    coords.push([lng, lat]);
+  }
+  return coords;
+}
+
+// ── Arc state tracking ────────────────────────────────────────────────────────
+
+interface ArcState {
+  threat:     LiveThreat;
+  arcCoords:  [number, number][];
+  startTime:  number;
+  progress:   number;
+  opacity:    number;
+}
+
+// ── GeoJSON builders ──────────────────────────────────────────────────────────
+
+function buildArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.progress <= 0) continue;
+    const sliceEnd = Math.max(2, Math.ceil(state.progress * state.arcCoords.length));
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: state.arcCoords.slice(0, sliceEnd) },
+      properties: {
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildSourcesGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  // Deduplicate by country
+  const seen = new Set<string>();
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.opacity <= 0) continue;
+    if (seen.has(state.threat.source.country)) continue;
+    seen.add(state.threat.source.country);
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [state.threat.source.lng, state.threat.source.lat] },
+      properties: {
+        country: state.threat.source.country,
+        color:   ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function buildImpactGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  // Show impact dots at targets that have recently arrived arcs
+  const impacts: { lng: number; lat: number; count: number }[] = [];
+  const targetMap = new Map<string, { lng: number; lat: number; count: number }>();
+  for (const state of states.values()) {
+    if (state.progress < 0.95 || state.opacity <= 0) continue;
+    const key = `${state.threat.target.lng.toFixed(3)},${state.threat.target.lat.toFixed(3)}`;
+    const existing = targetMap.get(key);
+    if (existing) existing.count++;
+    else targetMap.set(key, { lng: state.threat.target.lng, lat: state.threat.target.lat, count: 1 });
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [...targetMap.values()].map(({ lng, lat, count }) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [lng, lat] },
+      properties: { count },
+    })),
+  };
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+
+const CyberMap: React.FC = () => {
+  const [mapToken, setMapToken]   = useState<string | null>(null);
+  const [mapError, setMapError]   = useState<string | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [liveOn, setLiveOn]       = useState(true);
+
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const mapRef       = useRef<any>(null);
+  const mapboxglRef  = useRef<any>(null);
+  const arcStatesRef = useRef<Map<string, ArcState>>(new Map());
+  const rafRef       = useRef<number>(0);
+  const isDirtyRef   = useRef(false);
+  const seenIdsRef   = useRef<Set<string>>(new Set());
+
+  const { threats, todayCount } = useLiveAttacks(liveOn);
+
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── Fetch Mapbox token from public-stats (no auth required) ──────────────
+  useEffect(() => {
+    supabase.functions.invoke('public-stats').then(({ data, error }) => {
+      if (!error && data?.mapbox_token) {
+        setMapToken(data.mapbox_token);
+      } else {
+        setMapError('Map token unavailable');
+      }
+    });
+  }, []);
+
+  // ── Init Mapbox ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapToken || !mapContainer.current || mapRef.current) return;
+    let cancelled = false;
+
+    import('mapbox-gl').then((mod) => {
+      if (cancelled || !mapContainer.current) return;
+      const mapboxgl = mod.default;
+      mapboxglRef.current = mapboxgl;
+      mapboxgl.accessToken = mapToken;
+
+      const map = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: 'mapbox://styles/mapbox/dark-v11',
+        center: [20, 10],
+        zoom: 2,
+        projection: 'mercator',
+        pitchWithRotate: false,
+        dragRotate: false,
+        attributionControl: false,
+        interactive: true,
+      });
+
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+
+      map.on('load', () => {
+        if (cancelled) return;
+
+        // ── GeoJSON sources ───────────────────────────────────────────────
+        const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+        map.addSource('attack-arcs-source', { type: 'geojson', data: emptyFC });
+        map.addSource('attack-sources-source', { type: 'geojson', data: emptyFC });
+        map.addSource('attack-impact-source', { type: 'geojson', data: emptyFC });
+
+        // ── Glow (fat translucent line behind sharp line) ────────────────
+        map.addLayer({
+          id: 'attack-arcs-glow',
+          type: 'line',
+          source: 'attack-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 6,
+            'line-opacity': ['*', ['get', 'opacity'], 0.18],
+            'line-blur': 4,
+          },
+        });
+
+        // ── Sharp arc line ───────────────────────────────────────────────
+        map.addLayer({
+          id: 'attack-arcs',
+          type: 'line',
+          source: 'attack-arcs-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1.5,
+            'line-opacity': ['get', 'opacity'],
+          },
+        });
+
+        // ── Source origin dots ───────────────────────────────────────────
+        map.addLayer({
+          id: 'attack-sources-dot',
+          type: 'circle',
+          source: 'attack-sources-source',
+          paint: {
+            'circle-radius': 3,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': ['get', 'opacity'],
+            'circle-stroke-width': 1,
+            'circle-stroke-color': 'rgba(255,255,255,0.4)',
+          },
+        });
+
+        // ── Source country labels ────────────────────────────────────────
+        map.addLayer({
+          id: 'attack-sources-label',
+          type: 'symbol',
+          source: 'attack-sources-source',
+          layout: {
+            'text-field': ['get', 'country'],
+            'text-size': 9,
+            'text-anchor': 'bottom',
+            'text-offset': [0, -0.8],
+            'text-allow-overlap': false,
+            'text-optional': true,
+          },
+          paint: {
+            'text-color': '#ffffff',
+            'text-opacity': ['get', 'opacity'],
+            'text-halo-color': 'rgba(0,0,0,0.9)',
+            'text-halo-width': 1.2,
+          },
+        });
+
+        // ── Impact circles at Somalia targets ────────────────────────────
+        map.addLayer({
+          id: 'attack-impact',
+          type: 'circle',
+          source: 'attack-impact-source',
+          paint: {
+            'circle-radius': ['+', 5, ['/', ['get', 'count'], 1]],
+            'circle-color': 'transparent',
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#22d3ee',
+            'circle-opacity': 0.7,
+          },
+        });
+
+        mapRef.current = map;
+        setMapLoaded(true);
+      });
+
+      map.on('error', () => { if (!cancelled) setMapError('Map failed to load.'); });
+    }).catch(() => { if (!cancelled) setMapError('Map library error.'); });
+
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; setMapLoaded(false); }
+    };
+  }, [mapToken]);
+
+  // ── Update map source data ────────────────────────────────────────────────
+  const updateMapSources = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const arcs    = map.getSource('attack-arcs-source');
+    const sources = map.getSource('attack-sources-source');
+    const impacts = map.getSource('attack-impact-source');
+    if (arcs)    (arcs as any).setData(buildArcsGeoJSON(arcStatesRef.current));
+    if (sources) (sources as any).setData(buildSourcesGeoJSON(arcStatesRef.current));
+    if (impacts) (impacts as any).setData(buildImpactGeoJSON(arcStatesRef.current));
+  }, []);
+
+  // ── Toggle layer visibility ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const vis = liveOn ? 'visible' : 'none';
+    ['attack-arcs-glow', 'attack-arcs', 'attack-sources-dot', 'attack-sources-label', 'attack-impact'].forEach(id => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+    });
+    if (!liveOn) {
+      arcStatesRef.current.clear();
+      seenIdsRef.current.clear();
+      updateMapSources();
+    }
+  }, [liveOn, mapLoaded, updateMapSources]);
+
+  // ── Sync new threats into arc state ──────────────────────────────────────
+  useEffect(() => {
+    if (!mapLoaded || !liveOn) return;
+    for (const threat of threats) {
+      if (seenIdsRef.current.has(threat.id)) continue;
+      seenIdsRef.current.add(threat.id);
+      arcStatesRef.current.set(threat.id, {
+        threat,
+        arcCoords: computeBezierArc(threat.source, threat.target),
+        startTime: prefersReducedMotion ? Date.now() - TRAVEL_DURATION * 1000 : Date.now(),
+        progress:  prefersReducedMotion ? 1 : 0,
+        opacity:   1,
+      });
+      isDirtyRef.current = true;
+    }
+  }, [threats, mapLoaded, liveOn, prefersReducedMotion]);
+
+  // ── requestAnimationFrame loop ────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapLoaded) return;
+
+    const tick = () => {
+      const now = performance.now();
+      let changed = false;
+
+      for (const [id, state] of arcStatesRef.current) {
+        const elapsed = (now - state.startTime) / 1000;
+        const newProgress = Math.min(elapsed / TRAVEL_DURATION, 1);
+        const newOpacity  = elapsed > (VISIBLE_DURATION - FADE_DURATION)
+          ? Math.max(0, 1 - (elapsed - (VISIBLE_DURATION - FADE_DURATION)) / FADE_DURATION)
+          : 1;
+
+        if (newOpacity <= 0) {
+          arcStatesRef.current.delete(id);
+          changed = true;
+          continue;
+        }
+        if (state.progress !== newProgress || state.opacity !== newOpacity) {
+          state.progress = newProgress;
+          state.opacity  = newOpacity;
+          changed = true;
+        }
+      }
+
+      if (changed || isDirtyRef.current) {
+        isDirtyRef.current = false;
+        updateMapSources();
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [mapLoaded, updateMapSources]);
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+  return (
+    <div className="relative w-screen h-screen overflow-hidden bg-black flex flex-col">
+
+      {/* ── Header overlay ───────────────────────────────────────────────── */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-6 pb-4 pointer-events-none"
+           style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
+
+        {/* Logo + title row */}
+        <div className="flex items-center gap-3 mb-2">
+          <img src={logoSrc} alt="Logo" className="w-8 h-8 object-contain opacity-90" />
+          <div className="text-center">
+            <h1 className="text-white font-bold tracking-[0.25em] uppercase text-base sm:text-lg font-mono"
+                style={{ textShadow: '0 0 20px rgba(34,211,238,0.6)' }}>
+              LIVE CYBER THREAT MAP
+            </h1>
+            <p className="text-[10px] text-slate-400 tracking-widest uppercase">
+              Somalia National Cyber Defense Observatory
+            </p>
+          </div>
+        </div>
+
+        {/* Attack counter */}
+        <div className="text-center" aria-live="polite" aria-label={`Live attacks today: ${todayCount.toLocaleString()}`}>
+          <p className="text-2xl sm:text-3xl font-mono font-bold cyber-counter"
+             style={{ color: '#f472b6', textShadow: '0 0 20px rgba(244,114,182,0.7)' }}>
+            {todayCount.toLocaleString()}
+          </p>
+          <p className="text-[10px] tracking-[0.3em] text-slate-400 uppercase mt-0.5">
+            ATTACKS ON THIS DAY
+          </p>
+        </div>
+      </div>
+
+      {/* ── Nav buttons top-left ─────────────────────────────────────────── */}
+      <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
+        <Link
+          to="/public"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+          style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
+        >
+          <Globe className="w-3 h-3" /> Public Dashboard
+        </Link>
+        <Link
+          to="/login"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+          style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
+        >
+          <Shield className="w-3 h-3" /> Analyst Login
+        </Link>
+      </div>
+
+      {/* ── Live toggle top-right ────────────────────────────────────────── */}
+      <div className="absolute top-4 right-16 z-20 pointer-events-auto">
+        <button
+          onClick={() => setLiveOn(v => !v)}
+          aria-pressed={liveOn}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
+          style={{
+            background: liveOn ? 'rgba(34,211,238,0.15)' : 'rgba(0,0,0,0.7)',
+            border: `1px solid ${liveOn ? '#22d3ee' : 'rgba(255,255,255,0.15)'}`,
+            color: liveOn ? '#22d3ee' : '#94a3b8',
+          }}
+        >
+          <Zap className={`w-3 h-3 ${liveOn ? 'text-[#22d3ee]' : 'text-slate-500'}`} />
+          Live Attack Layer
+          <span className={`w-1.5 h-1.5 rounded-full ${liveOn ? 'bg-[#22d3ee] animate-pulse' : 'bg-slate-600'}`} />
+        </button>
+      </div>
+
+      {/* ── Mapbox canvas ─────────────────────────────────────────────────── */}
+      <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+
+      {/* Loading overlay */}
+      {!mapToken && !mapError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#22d3ee' }} />
+            <p className="text-sm font-mono text-slate-400 tracking-widest">INITIALIZING MAP...</p>
+          </div>
+        </div>
+      )}
+      {mapError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90">
+          <p className="text-sm text-slate-400 font-mono">{mapError}</p>
+        </div>
+      )}
+
+      {/* ── Bottom legend ─────────────────────────────────────────────────── */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-8 pointer-events-none"
+        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)' }}
+      >
+        {/* Attack type legend */}
+        <div className="flex flex-wrap justify-center gap-x-5 gap-y-2">
+          {(Object.entries(ATTACK_LABELS) as [AttackType, string][]).map(([type, label]) => (
+            <div key={type} className="flex items-center gap-1.5">
+              <span
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ background: ATTACK_COLORS[type], boxShadow: `0 0 6px ${ATTACK_COLORS[type]}` }}
+              />
+              <span className="text-xs font-mono text-slate-300 tracking-wide">{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Live status bar */}
+        {liveOn && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-[10px] font-mono text-slate-500 tracking-widest uppercase">
+              Live simulation active
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default CyberMap;
