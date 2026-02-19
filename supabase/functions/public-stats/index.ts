@@ -76,6 +76,61 @@ Deno.serve(async (req) => {
 
     if (orgErr) throw orgErr;
 
+    // Build map_points — join alerts with orgs to get lat/lng (no org names, no alert titles)
+    const { data: mapData, error: mapErr } = await supabase
+      .from('alerts')
+      .select('severity, organizations(lat, lng, region, sector)')
+      .eq('status', 'open');
+
+    if (mapErr) throw mapErr;
+
+    // Group by coordinate bucket (2 decimal places ≈ 1km precision)
+    const pointBuckets = new Map<string, { lat: number; lng: number; severity: string; count: number; region: string; sector: string; sevCounts: Record<string, number> }>();
+
+    for (const row of (mapData ?? [])) {
+      const org = row.organizations as { lat: number | null; lng: number | null; region: string; sector: string } | null;
+      if (!org?.lat || !org?.lng) continue;
+
+      const key = `${org.lat.toFixed(2)},${org.lng.toFixed(2)}`;
+      const sev = row.severity as string;
+
+      if (!pointBuckets.has(key)) {
+        pointBuckets.set(key, {
+          lat: org.lat,
+          lng: org.lng,
+          severity: sev,
+          count: 0,
+          region: org.region ?? 'Somalia',
+          sector: org.sector ?? 'government',
+          sevCounts: { critical: 0, high: 0, medium: 0, low: 0 },
+        });
+      }
+
+      const bucket = pointBuckets.get(key)!;
+      bucket.count++;
+      if (sev in bucket.sevCounts) bucket.sevCounts[sev]++;
+    }
+
+    // Determine dominant severity per point
+    const mapPoints = [...pointBuckets.values()].map(b => {
+      let dominant = 'low';
+      let maxRank = 0;
+      for (const [sev, cnt] of Object.entries(b.sevCounts)) {
+        if (cnt > 0 && (SEV_RANK[sev] ?? 0) > maxRank) {
+          maxRank = SEV_RANK[sev];
+          dominant = sev;
+        }
+      }
+      return {
+        lat: b.lat,
+        lng: b.lng,
+        severity: dominant,
+        count: b.count,
+        region: b.region,
+        sector: b.sector,
+      };
+    });
+
     const totalAlerts = Object.values(severityCounts).reduce((a, b) => a + b, 0);
     const mapboxToken = Deno.env.get('MAPBOX_PUBLIC_TOKEN') ?? null;
 
@@ -87,6 +142,7 @@ Deno.serve(async (req) => {
         total_open_alerts: totalAlerts,
         updated_at: new Date().toISOString(),
         mapbox_token: mapboxToken,
+        map_points: mapPoints,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

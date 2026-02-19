@@ -1,12 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, Loader2, Map, Activity, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow } from 'date-fns';
-import { useAlerts, type SeverityFilter, type StatusFilter, type AlertWithOrg } from '@/hooks/useAlerts';
-import { alertsToGeoJSON, getAlertCoords } from '@/lib/regionCoords';
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -39,21 +34,47 @@ function severityBadge(sev: string) {
   return `<span style="font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:4px;font-family:monospace;${style}">${sev}</span>`;
 }
 
+interface MapPoint {
+  lat: number;
+  lng: number;
+  severity: string;
+  count: number;
+  region?: string;
+  sector?: string;
+}
+
+type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
+
+function mapPointsToGeoJSON(points: MapPoint[], sevFilter: SeverityFilter): GeoJSON.FeatureCollection {
+  const filtered = sevFilter === 'all' ? points : points.filter(p => p.severity === sevFilter);
+  return {
+    type: 'FeatureCollection',
+    features: filtered.map(p => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+      properties: {
+        severity: p.severity,
+        count: p.count,
+        region: p.region ?? 'Somalia',
+        sector: p.sector ?? 'government',
+      },
+    })),
+  };
+}
+
 const ThreatMap: React.FC = () => {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-
-  // Filters
   const [sevFilter, setSevFilter] = useState<SeverityFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  // Map state
   const [mapToken, setMapToken] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
-  // Refs — stable across renders
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
+  const [totalAlerts, setTotalAlerts] = useState(0);
+  const [severityCounts, setSeverityCounts] = useState<Record<string, number>>({ critical: 0, high: 0, medium: 0, low: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const hovPopupRef = useRef<any>(null);
@@ -61,52 +82,34 @@ const ThreatMap: React.FC = () => {
   const pulseMarkersRef = useRef<any[]>([]);
   const mapboxglRef = useRef<any>(null);
 
-  // Data
-  const { data: alerts = [], isLoading } = useAlerts({ severity: sevFilter, status: statusFilter });
+  const geojson = useMemo(() => mapPointsToGeoJSON(mapPoints, sevFilter), [mapPoints, sevFilter]);
 
-  // Memoize GeoJSON — only recompute when alerts change
-  const geojson = useMemo(() => alertsToGeoJSON(alerts), [alerts]);
-
-  // Live severity counts
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
-    for (const a of alerts) c[a.severity] = (c[a.severity] || 0) + 1;
-    return c;
-  }, [alerts]);
-
-  // ── 1. Fetch map token ──────────────────────────────────────────────────────
+  // ── 1. Fetch public stats (token + map points) ──────────────────────────
   useEffect(() => {
     setMapError(null);
     setMapToken(null);
+    setIsLoading(true);
 
     let cancelled = false;
 
-    (async () => {
-      // Ensure we have a valid session before calling the authenticated edge function
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      if (!accessToken) {
-        if (!cancelled) setMapError('Session expired. Please refresh the page.');
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke('get-map-token', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
+    supabase.functions.invoke('public-stats').then(({ data, error }) => {
       if (cancelled) return;
-      if (error || !data?.token) {
-        setMapError('Failed to load map token. Check configuration.');
+      if (error || !data) {
+        setMapError('Failed to load map data.');
+        setIsLoading(false);
         return;
       }
-      setMapToken(data.token);
-    })();
+      if (data.mapbox_token) setMapToken(data.mapbox_token);
+      if (data.map_points) setMapPoints(data.map_points as MapPoint[]);
+      if (data.total_open_alerts) setTotalAlerts(data.total_open_alerts);
+      if (data.severity_counts) setSeverityCounts(data.severity_counts);
+      setIsLoading(false);
+    });
 
     return () => { cancelled = true; };
   }, [retryKey]);
 
-  // ── 2. Initialize Mapbox once ───────────────────────────────────────────────
+  // ── 2. Initialize Mapbox once ───────────────────────────────────────────
   useEffect(() => {
     if (!mapToken || !mapContainer.current || mapRef.current) return;
 
@@ -135,7 +138,6 @@ const ThreatMap: React.FC = () => {
       map.on('load', () => {
         if (cancelled) return;
 
-        // ── Source ───────────────────────────────────────────────────────────
         map.addSource('alerts-source', {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [] },
@@ -144,7 +146,6 @@ const ThreatMap: React.FC = () => {
           clusterMaxZoom: 10,
         });
 
-        // ── Layer 1: Cluster circles ─────────────────────────────────────────
         map.addLayer({
           id: 'alerts-clusters',
           type: 'circle',
@@ -159,7 +160,6 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // ── Layer 2: Cluster count labels ────────────────────────────────────
         map.addLayer({
           id: 'alerts-cluster-count',
           type: 'symbol',
@@ -173,7 +173,6 @@ const ThreatMap: React.FC = () => {
           paint: { 'text-color': '#ffffff' },
         });
 
-        // ── Layer 3: Unclustered dots ────────────────────────────────────────
         map.addLayer({
           id: 'alerts-unclustered',
           type: 'circle',
@@ -195,7 +194,6 @@ const ThreatMap: React.FC = () => {
           },
         });
 
-        // ── Cluster click → zoom in ──────────────────────────────────────────
         map.on('click', 'alerts-clusters', (e: any) => {
           const features = map.queryRenderedFeatures(e.point, { layers: ['alerts-clusters'] });
           if (!features.length) return;
@@ -206,30 +204,21 @@ const ThreatMap: React.FC = () => {
           });
         });
 
-        // ── Unclustered dot click → popup ────────────────────────────────────
         map.on('click', 'alerts-unclustered', (e: any) => {
           const feat = e.features?.[0];
           if (!feat) return;
           const p = feat.properties;
           clickPopupRef.current?.remove();
 
-          const ts = p.createdAt
-            ? formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })
-            : '';
-
           const html = `
             <div style="${POPUP_STYLE}">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 ${severityBadge(p.severity)}
-                <span style="font-size:10px;color:hsl(215 20% 55%);font-family:monospace;">${p.status?.toUpperCase()}</span>
+                <span style="font-size:10px;color:hsl(215 20% 55%);font-family:monospace;">OPEN</span>
               </div>
-              <p style="margin:0 0 4px;font-size:13px;font-weight:600;line-height:1.35;">${p.title}</p>
-              <p style="margin:0 0 2px;font-size:11px;color:hsl(215 20% 55%);">${p.orgName} · ${p.region}</p>
-              <p style="margin:0 0 8px;font-size:10px;color:hsl(215 20% 45%);font-family:monospace;">${ts}</p>
-              <button
-                data-alert-id="${p.id}"
-                style="width:100%;padding:6px 0;background:hsl(190 100% 50% / 0.12);border:1px solid hsl(190 100% 50% / 0.3);border-radius:6px;color:#00e5ff;font-size:11px;font-weight:700;cursor:pointer;font-family:monospace;letter-spacing:0.05em;"
-              >View Details →</button>
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;line-height:1.35;">${p.count} active alert${p.count !== 1 ? 's' : ''} in this area</p>
+              <p style="margin:0 0 2px;font-size:11px;color:hsl(215 20% 55%);">📍 ${p.region} · ${p.sector}</p>
+              <p style="margin:0;font-size:10px;color:hsl(215 20% 40%);font-family:monospace;">Public read-only view</p>
             </div>`;
 
           clickPopupRef.current = new mapboxgl.Popup({ closeButton: true, maxWidth: '300px', className: 'threat-popup' })
@@ -238,15 +227,11 @@ const ThreatMap: React.FC = () => {
             .addTo(map);
         });
 
-        // ── Hover tooltip ────────────────────────────────────────────────────
         map.on('mouseenter', 'alerts-unclustered', (e: any) => {
           map.getCanvas().style.cursor = 'pointer';
           const feat = e.features?.[0];
           if (!feat) return;
           const p = feat.properties;
-          const ts = p.createdAt
-            ? formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })
-            : '';
           hovPopupRef.current?.remove();
           hovPopupRef.current = new mapboxgl.Popup({
             closeButton: false,
@@ -259,8 +244,8 @@ const ThreatMap: React.FC = () => {
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
                   ${severityBadge(p.severity)}
                 </div>
-                <p style="margin:0 0 2px;font-size:12px;font-weight:600;">${p.title}</p>
-                <p style="margin:0;font-size:10px;color:hsl(215 20% 55%);">${p.orgName} · ${ts}</p>
+                <p style="margin:0 0 2px;font-size:12px;font-weight:600;">${p.count} alert${p.count !== 1 ? 's' : ''}</p>
+                <p style="margin:0;font-size:10px;color:hsl(215 20% 55%);">${p.region} · ${p.sector}</p>
               </div>`)
             .addTo(map);
         });
@@ -301,22 +286,7 @@ const ThreatMap: React.FC = () => {
     };
   }, [mapToken, retryKey]);
 
-  // ── Delegated click handler for popup "View Details →" buttons ────────────
-  useEffect(() => {
-    const container = mapContainer.current;
-    if (!container) return;
-    const handler = (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest('[data-alert-id]') as HTMLElement | null;
-      if (btn) {
-        const alertId = btn.getAttribute('data-alert-id');
-        if (alertId) navigate(`/alerts/${alertId}`);
-      }
-    };
-    container.addEventListener('click', handler);
-    return () => container.removeEventListener('click', handler);
-  }, [navigate]);
-
-  // ── 3. Push data to map whenever alerts or filters change (debounced) ───────
+  // ── 3. Push GeoJSON data to map ──────────────────────────────────────────
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
 
@@ -324,17 +294,13 @@ const ThreatMap: React.FC = () => {
       const map = mapRef.current;
       if (!map || !map.getSource('alerts-source')) return;
 
-      // Update GeoJSON source
       (map.getSource('alerts-source') as any).setData(geojson);
 
-      // Fit bounds
       if (geojson.features.length > 0) {
         const mapboxgl = mapboxglRef.current;
         if (!mapboxgl) return;
         const bounds = new mapboxgl.LngLatBounds();
-        geojson.features.forEach((f) =>
-          bounds.extend((f.geometry as any).coordinates)
-        );
+        geojson.features.forEach((f: any) => bounds.extend(f.geometry.coordinates));
         map.fitBounds(bounds, { padding: 80, maxZoom: 9, duration: 600 });
       } else {
         map.flyTo({ center: [46, 5.5], zoom: 5, duration: 600 });
@@ -347,45 +313,23 @@ const ThreatMap: React.FC = () => {
       const mapboxgl = mapboxglRef.current;
       if (!mapboxgl) return;
 
-      const criticals = alerts.filter((a) => a.severity === 'critical').slice(0, 15);
-      for (const alert of criticals) {
-        const coords = getAlertCoords(alert);
-        if (!coords) continue;
+      const criticals = mapPoints.filter(p => p.severity === 'critical').slice(0, 15);
+      for (const point of criticals) {
         const wrapper = document.createElement('div');
         wrapper.style.cssText = 'position:relative;width:12px;height:12px;pointer-events:none;';
         const ring = document.createElement('div');
         ring.className = 'critical-pulse-ring';
         wrapper.appendChild(ring);
         const marker = new mapboxgl.Marker({ element: wrapper, anchor: 'center' })
-          .setLngLat(coords)
+          .setLngLat([point.lng, point.lat])
           .addTo(map);
         pulseMarkersRef.current.push(marker);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [geojson, mapLoaded, alerts]);
+  }, [geojson, mapLoaded, mapPoints]);
 
-  // ── 4. Realtime subscription ─────────────────────────────────────────────
-  useEffect(() => {
-    const channel = supabase
-      .channel('threat-map-alerts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['alerts'] });
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [queryClient]);
-
-  // ── Sidebar click → fly to alert on map ──────────────────────────────────
-  const flyToAlert = useCallback((alert: AlertWithOrg) => {
-    const coords = getAlertCoords(alert);
-    if (!coords || !mapRef.current) return;
-    mapRef.current.flyTo({ center: coords, zoom: 10, duration: 800 });
-  }, []);
-
-  const sidebarAlerts = alerts.slice(0, 8);
   const hasAlerts = geojson.features.length > 0;
 
   return (
@@ -395,7 +339,7 @@ const ThreatMap: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Threat Map</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {isLoading ? 'Loading...' : `${alerts.length} alerts · ${geojson.features.length} mapped`}
+            {isLoading ? 'Loading...' : `${totalAlerts} open alerts · ${geojson.features.length} mapped · Public view`}
           </p>
         </div>
         {/* Live severity counters */}
@@ -403,7 +347,7 @@ const ThreatMap: React.FC = () => {
           {SEVERITY_ORDER.map((sev) => (
             <div key={sev} className="glass-card rounded-lg px-3 py-1.5 border border-border flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full" style={{ background: SEVERITY_COLORS[sev] }} />
-              <span className="text-xs font-mono font-bold" style={{ color: SEVERITY_COLORS[sev] }}>{counts[sev]}</span>
+              <span className="text-xs font-mono font-bold" style={{ color: SEVERITY_COLORS[sev] }}>{severityCounts[sev] ?? 0}</span>
               <span className="text-xs text-muted-foreground capitalize">{sev}</span>
             </div>
           ))}
@@ -412,23 +356,6 @@ const ThreatMap: React.FC = () => {
 
       {/* ── Filter bar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2 flex-shrink-0" role="group" aria-label="Alert filters">
-        <div className="flex gap-1 p-1 bg-muted rounded-lg" role="radiogroup" aria-label="Status filter">
-          {(['all', 'open', 'ack', 'closed'] as StatusFilter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              aria-pressed={statusFilter === f}
-              className={cn(
-                'px-3 py-1.5 text-xs font-medium rounded transition-all capitalize',
-                statusFilter === f
-                  ? 'bg-primary text-primary-foreground font-bold'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
         <div className="flex gap-1 p-1 bg-muted rounded-lg" role="radiogroup" aria-label="Severity filter">
           {(['all', 'critical', 'high', 'medium', 'low'] as SeverityFilter[]).map((s) => (
             <button
@@ -446,9 +373,9 @@ const ThreatMap: React.FC = () => {
             </button>
           ))}
         </div>
-        {(sevFilter !== 'all' || statusFilter !== 'all') && (
+        {sevFilter !== 'all' && (
           <button
-            onClick={() => { setSevFilter('all'); setStatusFilter('all'); }}
+            onClick={() => setSevFilter('all')}
             className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded-lg border border-border bg-muted transition-colors"
           >
             <X className="w-3 h-3" /> Clear
@@ -509,7 +436,7 @@ const ThreatMap: React.FC = () => {
                     />
                     <span className="text-muted-foreground capitalize">{sev}</span>
                   </div>
-                  <span className="font-mono font-bold text-foreground">{counts[sev]}</span>
+                  <span className="font-mono font-bold text-foreground">{severityCounts[sev] ?? 0}</span>
                 </div>
               ))}
               <div className="pt-1.5 border-t border-border flex items-center gap-1.5">
@@ -524,73 +451,50 @@ const ThreatMap: React.FC = () => {
 
         {/* Sidebar */}
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
-          {/* Alert feed */}
+          {/* Alert summary feed */}
           <div className="glass-card rounded-xl border border-border flex flex-col flex-1 min-h-0">
             <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
               <Activity className="w-4 h-4 text-destructive" />
-              <h3 className="text-sm font-semibold">Alert Feed</h3>
+              <h3 className="text-sm font-semibold">Alert Hotspots</h3>
               {isLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />}
               {!isLoading && (
-                <span className="ml-auto text-xs font-mono text-muted-foreground">{alerts.length} total</span>
+                <span className="ml-auto text-xs font-mono text-muted-foreground">{totalAlerts} total</span>
               )}
             </div>
             <div className="overflow-y-auto flex-1 divide-y divide-border/50">
-              {sidebarAlerts.length === 0 ? (
+              {mapPoints.length === 0 && !isLoading ? (
                 <div className="p-6 text-center text-muted-foreground text-xs">
-                  No alerts for current filters
+                  No alert data available
                 </div>
               ) : (
-                sidebarAlerts.map((alert) => {
-                  const coords = getAlertCoords(alert);
-                  const canFly = !!coords;
-                  return (
-                    <div
-                      key={alert.id}
-                      role="listitem"
-                      aria-label={`${alert.severity} alert in ${alert.organizations?.region ?? 'unknown'} — ${alert.title}`}
-                      className={cn(
-                        'p-3 transition-colors',
-                        canFly && 'cursor-pointer hover:bg-accent/30',
-                      )}
-                      onClick={() => canFly && flyToAlert(alert)}
-                    >
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span
-                          className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded font-mono border"
-                          style={{
-                            color: SEVERITY_COLORS[alert.severity],
-                            borderColor: `${SEVERITY_COLORS[alert.severity]}40`,
-                            background: `${SEVERITY_COLORS[alert.severity]}18`,
-                          }}
-                        >
-                          {alert.severity}
-                        </span>
-                        <span className={cn(
-                          'text-[10px] font-mono px-1.5 py-0.5 rounded',
-                          alert.status === 'open'
-                            ? 'bg-destructive/10 text-destructive'
-                            : alert.status === 'ack'
-                            ? 'text-amber-400 bg-amber-400/10'
-                            : 'text-muted-foreground bg-muted',
-                        )}>
-                          {alert.status}
-                        </span>
-                        {!canFly && (
-                          <span className="ml-auto text-[10px] text-muted-foreground/50 font-mono">no coords</span>
-                        )}
-                      </div>
-                      <p className="text-xs font-medium text-foreground leading-tight line-clamp-2">{alert.title}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {alert.organizations?.name ?? '—'} · {alert.organizations?.region ?? '—'}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                        {alert.created_at
-                          ? formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })
-                          : ''}
-                      </p>
+                mapPoints.slice(0, 12).map((point, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3"
+                  >
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span
+                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded font-mono border"
+                        style={{
+                          color: SEVERITY_COLORS[point.severity],
+                          borderColor: `${SEVERITY_COLORS[point.severity]}40`,
+                          background: `${SEVERITY_COLORS[point.severity]}18`,
+                        }}
+                      >
+                        {point.severity}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {point.count} alert{point.count !== 1 ? 's' : ''}
+                      </span>
                     </div>
-                  );
-                })
+                    <p className="text-xs font-medium text-foreground">
+                      {point.region ?? 'Somalia'}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">
+                      {point.sector ?? 'government'}
+                    </p>
+                  </div>
+                ))
               )}
             </div>
           </div>
@@ -604,14 +508,14 @@ const ThreatMap: React.FC = () => {
                   <div className="flex justify-between text-[11px] mb-1">
                     <span className="text-muted-foreground capitalize">{sev}</span>
                     <span className="font-mono font-bold" style={{ color: SEVERITY_COLORS[sev] }}>
-                      {counts[sev]}
+                      {severityCounts[sev] ?? 0}
                     </span>
                   </div>
                   <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
-                        width: alerts.length > 0 ? `${(counts[sev] / alerts.length) * 100}%` : '0%',
+                        width: totalAlerts > 0 ? `${((severityCounts[sev] ?? 0) / totalAlerts) * 100}%` : '0%',
                         background: SEVERITY_COLORS[sev],
                       }}
                     />
