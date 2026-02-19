@@ -1,144 +1,105 @@
 
-# Plan: Live Attack Feed Sidebar on /cyber-map + Login Logo
+# Mobile-Friendly Overhaul
 
-## Summary of Changes
+## Problem Summary
 
-Two focused changes:
-1. Restructure `/cyber-map` from a single full-screen overlay into a split layout with a visible map left and a live attack feed sidebar right, plus severity count cards at the bottom that reflect live data
-2. Replace the Shield icon on `/login` with the uploaded Somalia Cyber Defence logo image
+The application has six distinct mobile problem areas, each needing a targeted fix:
 
-Also: synchronize the `todayCount` across all hook instances so both maps always show the same number.
+1. **CyberMap (`/cyber-map`)** — Uses `w-screen h-screen` with a hard-coded `w-64 xl:w-72` sidebar that stacks alongside the map. On phones the map shrinks to ~60% width, the live feed sidebar eats remaining space, the bottom bar with severity cards overflows horizontally, and the absolute overlays (header title, nav buttons, toggle) all collide.
 
----
+2. **Landing page (`/public`)** — The `iframe` of the cyber-map is shown at a fixed `height: 560px` and tries to render the full map+sidebar at phone width, creating a broken embedded view. The nav header hides the "Live Attack Map" link on small screens (`hidden sm:flex`). The CTA section has `p-10` which is very wide on phones.
 
-## Change 1 — Live Feed Sidebar + Severity Cards (CyberMap.tsx)
+3. **Dashboard (`/`)** — The alert sidebar (`hidden xl:flex`) only shows on extra-large screens which is fine, but the `grid grid-cols-4` severity breakdown cards are too small on phones. The trend chart is readable but `xl:grid-cols-4` means the National Score card and stats are stacked correctly — mostly OK but needs minor tweaks.
 
-### Current Layout
+4. **ThreatMap (`/threat-map`)** — Uses `grid-cols-1 lg:grid-cols-[1fr_280px]` so the sidebar stacks below the map on mobile — this is actually decent. The map height is calculated `calc(100vh - 100px)` which works. Severity counters row wraps with `flex-wrap`. The country panel overlays may need size constraints.
 
-The entire page is `relative w-screen h-screen overflow-hidden` with:
-- A fullscreen `<div ref={mapContainer} className="absolute inset-0 w-full h-full" />`  
-- All UI floating as absolute overlays on top
+5. **Alerts/Incidents/etc. pages** — Use `overflow-x-auto` tables which scroll horizontally on mobile — acceptable behaviour, but filter rows with many buttons need `flex-wrap`.
 
-This means no sidebar is possible without covering the map.
+6. **AppLayout / Sidebar** — The sidebar already has a mobile hamburger menu (`lg:hidden` mobile header). This works, but the sidebar could use better touch targets.
 
-### New Layout Structure
+## Fixes Per File
 
-```text
-┌──────────────────────────────────┬───────────────────┐
-│                                  │  LIVE FEED        │
-│    WORLD MAP  (flex-1)           │  header + count   │
-│    (arcs, dots, animations)      │  ─────────────    │
-│                                  │  🔴 Russia        │
-│                                  │  DDoS · CRITICAL  │
-│                                  │  2s ago           │
-│                                  │  ─────────────    │
-│                                  │  🟡 China         │
-│                                  │  Malware · HIGH   │
-│                                  │  5s ago           │
-├──────────────────────────────────┴───────────────────┤
-│  [● 2 Critical] [● 5 High] [● 3 Medium] [● 1 Low]   │
-│  Legend: ● Malware ● Phishing ● Exploit ● DDoS ...  │
-└──────────────────────────────────────────────────────┘
-```
+### 1. `src/pages/CyberMap.tsx` — Full mobile layout
 
-The wrapper becomes a `flex flex-col h-screen w-screen bg-black`:
-- **Top row**: `flex flex-1 min-h-0` containing:
-  - **Left (map area)**: `relative flex-1 min-w-0` — the `mapContainer` div fills this absolutely, all existing overlays (header, nav, toggle, hint, panels) stay inside here
-  - **Right (feed sidebar)**: `w-64 xl:w-72 flex-shrink-0 flex flex-col bg-[#08080f] border-l border-white/10`
-- **Bottom bar**: `flex-shrink-0 bg-black border-t border-white/10 px-4 py-3` — severity cards + legend
+**Current:** `flex flex-row` with fixed-width sidebar always visible  
+**Fix:** On mobile (`< lg`), hide the sidebar and show a floating "Feed" toggle button instead. The feed opens as a bottom drawer/sheet. The bottom severity bar switches to a 2×2 grid on mobile.
 
-### Live Feed Sidebar Content
+- Wrapper: `w-screen h-screen bg-black flex flex-col overflow-hidden` (unchanged)
+- Top row map container: add `<div className="relative flex-1 min-w-0">` (unchanged)
+- Sidebar: add `hidden lg:flex` to make it desktop-only
+- Add mobile feed toggle button (bottom-right floating, above severity bar) — appears on `lg:hidden`
+- Add `feedOpen` state for mobile drawer
+- Mobile feed drawer: `fixed inset-x-0 bottom-0 z-50 flex flex-col` with height `60vh`, slides up from bottom when `feedOpen === true`
+- Bottom severity bar: change `flex items-center gap-2` to `grid grid-cols-2 lg:flex gap-2` so cards go 2×2 on mobile
+- Legend: `hidden lg:flex` (hide on mobile to save space)
+- Header overlay text: reduce font sizes on mobile using `text-xs sm:text-base`
+- Nav buttons (top-left): hide "Public Dashboard" label on mobile, show only icons — use `gap-1 text-[10px] sm:text-xs`
+- CountryPanel & SomaliaPanel: add `max-h-[80vh] overflow-y-auto` and `w-[calc(100vw-32px)] max-w-sm` so they don't overflow on phones
 
-**Header row:**
-```
-⚡ LIVE ATTACK FEED    [badge: count of threats in buffer]
-```
+### 2. `src/pages/Landing.tsx` — Iframe + nav
 
-**Each entry** (newest first, max 50 shown, `overflow-y-auto`):
-- Left color bar border matching attack type color
-- Flag emoji or `flagcdn` img + country name → Somalia
-- Attack type label + severity badge (colored pill)
-- Time ago (`formatDistanceToNow` from `date-fns`)
+- **Nav:** The "Live Attack Map" button is `hidden sm:flex` — change to always show but with a shorter label on xs: show icon only below sm
+- **Iframe section:** Replace the fixed `height: 560px` iframe with a responsive height. On mobile show a static preview card instead of an iframe (iframes with maps are very heavy on phones and break layout). Use a `<div className="aspect-video sm:h-[400px] lg:h-[560px]">` wrapping the iframe, and add `pointer-events-none` on mobile so it doesn't intercept scroll. Or simply replace with a link-card on mobile using `block sm:hidden` / `hidden sm:block`.
+- **CTA section:** Change `p-10` to `p-6 sm:p-10`
+- **Hero:** Already uses `text-4xl sm:text-6xl`, mostly fine
+- **Stats grid:** `grid-cols-2 sm:grid-cols-3` — already responsive
 
-```
-┌─ [red bar] ──────────────────────────┐
-│  🇷🇺 Russia → Somalia               │
-│  Malware          [● CRITICAL]       │
-│  2 seconds ago                       │
-└──────────────────────────────────────┘
-```
+**Best approach for iframe:** Show the iframe only on `sm:` and above. On mobile show a "View Live Map →" card instead, avoiding iframe performance issues on phones entirely.
 
-### Severity Count Cards (Bottom Bar)
+### 3. `src/pages/Dashboard.tsx` — Minor tweaks
 
-4 cards derived from `threats.filter(t => t.severity === 'critical').length` etc.:
+- Alert severity cards: `grid grid-cols-2 sm:grid-cols-4 gap-3` (change from `grid-cols-4`)
+- Chart container: already responsive with `ResponsiveContainer`
+- Header: already uses `flex-wrap`
+- National Score section: `grid-cols-1 xl:grid-cols-4` already stacks on mobile
 
-```
-[ ● 2 CRITICAL ] [ ● 7 HIGH ] [ ● 4 MEDIUM ] [ ● 1 LOW ]
-```
+### 4. `src/pages/ThreatMap.tsx` — Minor tweaks
 
-Colors: Critical = `#ef4444`, High = `#f97316`, Medium = `#facc15`, Low = `#22d3ee`
+- Severity counters row: already uses `flex gap-2 flex-wrap` — OK
+- Map height: `height: calc(100vh - 100px)` may be too tall on mobile after header. Change to `calc(100vh - 140px)` on mobile
+- CountryPanel: add responsive width `w-[calc(100%-32px)] max-w-sm` instead of fixed `w-80`
+- The `lg:grid-cols-[1fr_280px]` already collapses to 1 col on mobile
 
-These numbers come from the in-memory `threats` ring buffer (last 100 threats), which reflects what's currently visible on the map — so they are always in sync.
+### 5. `src/pages/Alerts.tsx` — Filter bar
 
-### Live Counter Sync
+- Filter buttons row: ensure `flex-wrap gap-2` is used
+- Bulk action buttons: use `flex-wrap`
 
-The `todayCount` currently uses isolated component state — so CyberMap and ThreatMap each show different numbers. Fix this by promoting to module-level in `useLiveAttacks.ts`:
+### 6. `src/components/layout/AppLayout.tsx` — Already has mobile sidebar
 
-```typescript
-// Module-level singleton — shared across all hook instances in the tab
-const BASE_COUNT = Math.floor(3_000 + Math.random() * 12_000);
-let sharedTodayCount = BASE_COUNT;
-const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
-
-function incrementSharedCount() {
-  sharedTodayCount += 1;
-  todayListeners.forEach(fn => fn(sharedTodayCount));
-}
-```
-
-Each hook instance registers its `setTodayCount` into `todayListeners` on mount and unregisters on unmount. Calling `incrementSharedCount()` instead of `setTodayCount(c => c + 1)` notifies all subscribers simultaneously.
-
-### SomaliaPanel and CountryPanel Position Adjustment
-
-Currently both panels use `right: 16`. With the new sidebar taking 256-288px on the right, these panels will render underneath the sidebar. They need to move to `right: 16` within the map container (which is now `flex-1`, not full-screen) — since they're `absolute` children of the map container div, they will naturally stay inside it. No position change needed.
-
-### Live Toggle Button
-
-Currently positioned at `right-16` (absolute) to avoid overlapping a scrollbar. With the sidebar now occupying the right, the toggle moves to `right-4` within the map container.
+The mobile header and hamburger already work. No major changes needed, but ensure `main` padding is appropriate: `p-4 lg:p-6` — this is already set.
 
 ---
 
-## Change 2 — Logo on Login Page (Login.tsx)
+## Technical File Changes
 
-The uploaded `image-7.png` is the Somalia Cyber Defence circular emblem.
-
-- Save it as `src/assets/logo-emblem.png`
-- Import it: `import logoEmblem from '@/assets/logo-emblem.png'`
-- Replace the `Shield` icon div:
-
-```tsx
-// Before:
-<div className="inline-flex items-center justify-center w-20 h-20 rounded-full border-2 border-neon-cyan mb-4 glow-cyan">
-  <Shield className="w-10 h-10 text-neon-cyan" />
-</div>
-
-// After:
-<img
-  src={logoEmblem}
-  alt="Somalia Cyber Defence"
-  className="w-28 h-28 object-contain mb-4 drop-shadow-[0_0_24px_rgba(34,211,238,0.45)]"
-/>
-```
-
-- Remove `Shield` from the lucide-react import (it's still used in other places on other pages, so only remove from Login.tsx)
-
----
-
-## Files Changed
-
-| File | What |
+| File | Changes |
 |---|---|
-| `src/hooks/useLiveAttacks.ts` | Module-level `sharedTodayCount` + `todayListeners` set — sync counter across all pages |
-| `src/pages/CyberMap.tsx` | Restructure layout to split (map + sidebar); add LiveFeedSidebar component inline; add severity cards + legend in bottom bar; adjust toggle button position |
-| `src/pages/Login.tsx` | Import `logo-emblem.png`, replace Shield icon with `<img>`, remove Shield import |
-| `src/assets/logo-emblem.png` | New asset — the uploaded Somalia Cyber Defence logo |
+| `src/pages/CyberMap.tsx` | Hide sidebar on mobile (`hidden lg:flex`); add floating feed toggle button + bottom drawer for mobile; 2×2 severity grid on mobile; responsive font sizes in header; CountryPanel/SomaliaPanel responsive width |
+| `src/pages/Landing.tsx` | Replace iframe with mobile-only link card (`sm:hidden`); hide iframe on mobile (`hidden sm:block`); responsive CTA padding; nav always shows icon |
+| `src/pages/Dashboard.tsx` | Severity cards: `grid-cols-2 sm:grid-cols-4` |
+| `src/pages/ThreatMap.tsx` | CountryPanel responsive width; minor header spacing |
+| `src/pages/Alerts.tsx` | Filter row flex-wrap fix |
+
+---
+
+## Visual Result (Mobile — 390px width)
+
+**`/cyber-map`:**
+- Map fills full screen width
+- Top header: compact title + counter, no overflow
+- Nav buttons: small icons, no overflow
+- Bottom bar: 2×2 severity grid (Critical/High on top row, Medium/Low below), no legend (hidden on mobile)
+- Floating ⚡ button (bottom-right above the severity bar): taps to open a bottom drawer showing the live feed with up to 30 recent attacks
+
+**`/public` (Landing):**
+- Nav shows icon buttons that fit on one line
+- Hero text scales properly
+- Map section shows a "View Live Map →" full-width card instead of a broken iframe
+- Stat cards in 2-column grid
+- CTA section uses tighter padding
+
+**Dashboard, Alerts, ThreatMap:**
+- Severity cards wrap to 2 columns
+- Tables scroll horizontally (already implemented)
+- Panels don't overflow screen edges
