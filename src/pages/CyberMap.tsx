@@ -39,13 +39,18 @@ const ATTACK_LABELS: Record<AttackType, string> = {
   intrusion: 'Intrusion',
 };
 
-const DEFAULT_PERCENTAGES: Record<AttackType, number> = {
-  malware:   31.2,
-  phishing:  18.7,
-  exploit:   14.3,
-  ddos:       9.8,
-  intrusion:  5.1,
-};
+// Per-country default percentages generated from a seeded PRNG — unique per country
+function genCountryDefaultPercentages(country: string): Record<AttackType, number> {
+  let seed = 0;
+  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  const rand = seededRand(Math.abs(seed) ^ 0xc0ffee);
+  const types: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
+  const weights = types.map(() => 5 + rand() * 40);
+  const total = weights.reduce((a, b) => a + b, 0);
+  const result = {} as Record<AttackType, number>;
+  types.forEach((t, i) => { result[t] = Math.round((weights[i] / total) * 1000) / 10; });
+  return result;
+}
 
 const TRAVEL_DURATION  = 2.0;   // faster travel
 const VISIBLE_DURATION = 15;   // long persistence → stacking effect
@@ -71,22 +76,28 @@ function gen30DayData() {
   }));
 }
 
-function genSparkline(seed: number, color: string) {
-  const rand = seededRand(seed);
+function genSparklineForCountry(country: string, type: string): { i: number; v: number }[] {
+  let seed = 0;
+  for (const c of country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  for (const c of type)    seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  const rand = seededRand(Math.abs(seed) || 0x9e3779b9);
   return Array.from({ length: 15 }, (_, i) => ({
     i,
     v: Math.round(20 + rand() * 80 + Math.sin(i / 2.5) * 25),
   }));
 }
 
+function genCountrySparklines(country: string): Record<AttackType, { i: number; v: number }[]> {
+  return {
+    malware:   genSparklineForCountry(country, 'malware'),
+    phishing:  genSparklineForCountry(country, 'phishing'),
+    exploit:   genSparklineForCountry(country, 'exploit'),
+    ddos:      genSparklineForCountry(country, 'ddos'),
+    intrusion: genSparklineForCountry(country, 'intrusion'),
+  };
+}
+
 const TREND_30 = gen30DayData();
-const SPARKLINES: Record<AttackType, { i: number; v: number }[]> = {
-  malware:   genSparkline(111, '#ef4444'),
-  phishing:  genSparkline(222, '#a855f7'),
-  exploit:   genSparkline(333, '#f97316'),
-  ddos:      genSparkline(444, '#facc15'),
-  intrusion: genSparkline(555, '#22d3ee'),
-};
 
 // ── Somalia Panel ─────────────────────────────────────────────────────────────
 
@@ -96,9 +107,10 @@ interface SomaliaPanelProps {
 }
 
 const SomaliaPanel: React.FC<SomaliaPanelProps> = ({ threats, onClose }) => {
-  // Compute live percentages from threat stream, fall back to defaults
+  const somaliDefaults = React.useMemo(() => genCountryDefaultPercentages('Somalia'), []);
+  const somaliaSparklines = React.useMemo(() => genCountrySparklines('Somalia'), []);
   const percentages = React.useMemo<Record<AttackType, number>>(() => {
-    if (threats.length < 10) return DEFAULT_PERCENTAGES;
+    if (threats.length < 10) return somaliDefaults;
     const counts: Record<string, number> = {};
     for (const t of threats) counts[t.attack_type] = (counts[t.attack_type] || 0) + 1;
     const total = threats.length;
@@ -183,7 +195,7 @@ const SomaliaPanel: React.FC<SomaliaPanelProps> = ({ threats, onClose }) => {
               {/* Sparkline */}
               <div style={{ width: 60, height: 28, flexShrink: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={SPARKLINES[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
+                  <LineChart data={somaliaSparklines[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
                     <Line
                       type="monotone"
                       dataKey="v"
@@ -230,11 +242,13 @@ interface CountryPanelProps {
 const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }) => {
   const iso = COUNTRY_ISO[country] ?? 'un';
   const trendData = React.useMemo(() => genCountry30DayData(country), [country]);
+  const sparklines = React.useMemo(() => genCountrySparklines(country), [country]);
+  const defaultPercentages = React.useMemo(() => genCountryDefaultPercentages(country), [country]);
 
   const countryThreats = threats.filter(t => t.source.country === country);
 
   const percentages = React.useMemo<Record<AttackType, number>>(() => {
-    if (countryThreats.length < 5) return DEFAULT_PERCENTAGES;
+    if (countryThreats.length < 5) return defaultPercentages;
     const counts: Record<string, number> = {};
     for (const t of countryThreats) counts[t.attack_type] = (counts[t.attack_type] || 0) + 1;
     const total = countryThreats.length;
@@ -243,7 +257,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }
       result[type] = Math.round(((counts[type] || 0) / total) * 100 * 10) / 10;
     }
     return result;
-  }, [countryThreats]);
+  }, [countryThreats, defaultPercentages]);
 
   return (
     <div
@@ -323,7 +337,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }
               <span className="text-xs text-slate-300 w-20 flex-shrink-0">{ATTACK_LABELS[type]}</span>
               <div style={{ width: 60, height: 28, flexShrink: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={SPARKLINES[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
+                  <LineChart data={sparklines[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
                     <Line
                       type="monotone"
                       dataKey="v"
