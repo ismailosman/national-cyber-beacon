@@ -1,83 +1,91 @@
 
-# Three Changes in One Pass
+# Two New Features: Add Alert to Organization + Threat Map
 
-## Summary of Work
+## Feature 1 — Add Alert to Any Organization
 
-1. **Replace the logo** — copy the newly uploaded image to `src/assets/logo.png` (replaces the existing one, both Sidebar and AppLayout automatically pick it up since they already import from that path)
-2. **Delete Organization** — add a red "Delete" button on the OrgDetail page, visible only to SuperAdmin, that opens an `AlertDialog` confirmation before calling `supabase.from('organizations').delete()` and navigating back
-3. **Add Organization** — add an "Add Organization" button on the Organizations page header (visible to SuperAdmin only) that opens a `Dialog` modal with a full creation form
+### Where the button appears
+- **OrgDetail page** (`src/pages/OrgDetail.tsx`): Add a "Create Alert" button in the header actions row, visible to SuperAdmin and Analyst roles. Opens a `Dialog` modal.
+- **Alerts page** (`src/pages/Alerts.tsx`): Add a "+ New Alert" button in the top-right header, also visible to SuperAdmin and Analyst. Same modal with an extra organization dropdown.
 
----
-
-## 1. Logo Replacement
-
-**File operation:** `lov-copy user-uploads://D0473B6E-F138-4642-839B-4104AE36A62A.png src/assets/logo.png`
-
-No code changes needed — both `src/components/layout/Sidebar.tsx` and `src/components/layout/AppLayout.tsx` already import `logoImg from '@/assets/logo.png'`. Replacing the file is sufficient.
-
----
-
-## 2. Delete Organization — `src/pages/OrgDetail.tsx`
-
-**Visibility:** Only `userRole?.role === 'SuperAdmin'`
-
-**UI:** A red "Delete" button next to the Edit button in the header action row.
-
-**Behavior:**
-- Clicking opens a `AlertDialog` confirmation ("This will permanently delete the organization and all associated data. This cannot be undone.")
-- On confirm: calls `supabase.from('organizations').delete().eq('id', id)`
-- On success: shows a toast, navigates to `/organizations`
-- On error: shows error toast
-
-**Imports to add:** `AlertDialog`, `AlertDialogContent`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogCancel`, `AlertDialogAction` from `@/components/ui/alert-dialog`, and `Trash2` from `lucide-react`
-
-**New state:** `const [deleteOpen, setDeleteOpen] = useState(false);`
-
-**DB call:**
-```ts
-const { error } = await supabase.from('organizations').delete().eq('id', id);
-```
-RLS already grants SuperAdmin `ALL` access on `organizations`, so no migration needed.
-
----
-
-## 3. Add Organization — `src/pages/Organizations.tsx`
-
-**Visibility:** SuperAdmin only (requires reading `userRole` from `useAuth()`)
-
-**UI:** A "Add Organization" button with a `+` icon in the top-right of the page header.
-
-**Modal form fields:**
-| Field | Input type | Required |
+### Modal form fields (both locations)
+| Field | Type | Required |
 |---|---|---|
-| Name | text | Yes |
-| Domain | text | Yes |
-| Sector | select (government/bank/telecom/health/education/other) | Yes |
-| Region | text | Yes |
-| Contact Email | email | No |
+| Title | text input | Yes |
+| Description | textarea | No |
+| Severity | select: critical / high / medium / low | Yes |
+| Source | text (default: "manual") | No |
+| Organization | select (list of all orgs) | Yes (only on Alerts page — pre-filled on OrgDetail) |
 
-**Behavior:**
-- On submit: calls `supabase.from('organizations').insert(...)` with default `risk_score: 50`, `status: 'Warning'`
-- On success: shows toast, invalidates `organizations` query to refresh the list
-- On error: shows error toast
-
-**Imports to add:** `Dialog`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogFooter` from `@/components/ui/dialog`; `Button` from `@/components/ui/button`; `Input` from `@/components/ui/input`; `Label` from `@/components/ui/label`; `Plus` from `lucide-react`; `useQueryClient` from `@tanstack/react-query`; `useAuth` from `@/contexts/AuthContext`; `toast` from `sonner`
-
-**New state:**
+### DB operation
 ```ts
-const [addOpen, setAddOpen] = useState(false);
-const [addForm, setAddForm] = useState({ name: '', domain: '', sector: 'government', region: 'Banaadir', contact_email: '' });
-const [addSaving, setAddSaving] = useState(false);
+await supabase.from('alerts').insert({
+  title, description, severity, source: 'manual',
+  organization_id, status: 'open', is_read: false
+});
 ```
+RLS already allows SuperAdmin `ALL` and Analyst `ALL` on the `alerts` table — no migration needed.
 
 ---
 
-## Files Changed
+## Feature 2 — Threat Map Page
+
+### Overview
+A new `/threat-map` route showing an interactive map of Somalia with:
+- **Organization markers** — color-coded dots by status (green = Secure, amber = Warning, red = Critical)
+- **Threat event heatmap** — semi-transparent circles at lat/lng coordinates from the `threat_events` table
+
+### Tech approach
+Since `mapbox-gl` is not currently installed, there are two options:
+
+**Option A (Mapbox):** Install `mapbox-gl` + `react-map-gl`, fetch the public token from a lightweight edge function that returns `MAPBOX_PUBLIC_TOKEN` to authenticated users.
+
+**Option B (No extra install):** Use `react-simple-maps` or an SVG-based Somalia map with organization pin overlays — works entirely with existing packages.
+
+Given we already have `MAPBOX_PUBLIC_TOKEN` stored as a secret, **Option A** is the right choice for a production-quality map. The plan:
+
+1. Install packages: `mapbox-gl` and `react-map-gl` 
+2. Create edge function `get-map-token` that returns the public token to authenticated users
+3. Create `src/pages/ThreatMap.tsx` with:
+   - Map centered on Somalia (lng: 46, lat: 5.5, zoom: 5)
+   - Organization markers (dots) loaded from `organizations` table, color-coded by status
+   - Threat event circles from `threat_events` table
+   - Sidebar panel showing active threat count and org status breakdown
+4. Add `/threat-map` route in `src/App.tsx`
+5. Add "Threat Map" nav item in `src/components/layout/Sidebar.tsx` (using `Map` icon from lucide-react)
+
+### Edge function: `get-map-token`
+```ts
+// supabase/functions/get-map-token/index.ts
+// Returns MAPBOX_PUBLIC_TOKEN to authenticated requests only
+```
+
+### Map page layout
+```
+┌────────────────────────────────────────────────────┐
+│  Threat Map header (org count, threat count)       │
+├──────────────────────────────┬─────────────────────┤
+│                              │ Side panel:         │
+│   Mapbox map of Somalia      │ - Secure orgs: N    │
+│   with org markers +         │ - Warning orgs: N   │
+│   threat event circles       │ - Critical orgs: N  │
+│                              │ - Recent threats    │
+└──────────────────────────────┴─────────────────────┘
+```
+
+Organizations without lat/lng coordinates will be given default coordinates based on their region (Banaadir → 2.05, 45.34 / Puntland → 8.4, 49.0 / Somaliland → 9.56, 44.06).
+
+---
+
+## Files to Change
 
 | File | Change |
 |---|---|
-| `src/assets/logo.png` | Replace with new uploaded logo |
-| `src/pages/OrgDetail.tsx` | Add delete state + AlertDialog + Trash2 button |
-| `src/pages/Organizations.tsx` | Add add-org state + Dialog + Plus button + form |
+| `src/pages/OrgDetail.tsx` | Add "Create Alert" button + Dialog |
+| `src/pages/Alerts.tsx` | Add "+ New Alert" button + Dialog with org select |
+| `src/App.tsx` | Add `/threat-map` route |
+| `src/components/layout/Sidebar.tsx` | Add "Threat Map" nav item |
+| `src/pages/ThreatMap.tsx` | New file — full map page |
+| `supabase/functions/get-map-token/index.ts` | New edge function — returns public token |
+| `package.json` | Add `mapbox-gl` and `react-map-gl` |
 
-No database migrations required — all operations are covered by existing RLS policies.
+No database migrations required. All alert inserts are covered by existing RLS. The map reads `organizations` and `threat_events` — both already have RLS policies for all roles.
