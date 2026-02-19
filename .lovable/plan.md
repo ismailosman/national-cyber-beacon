@@ -1,229 +1,156 @@
 
-# Three Changes: Live Attack Feed Sidebar, Traveling Projectile Dot, Landing Page Redesign + Routing
+# Three Focused Changes
 
-## Summary of All Changes
+## 1. Persistent Full Arc Lines — "Lines That End in Somalia"
 
-### 1. `/threat-map` — Live Attack Feed Sidebar
-Replace the current "Alert Hotspots" sidebar with a **live scrolling attack feed** matching the Check Point reference layout. Each row shows:
-- Colored circle dot (attack type color)
-- Timestamp (HH:MM:SS)
-- Source country → 🇸🇴 Somalia
-- Attack type label + severity badge
+### What the User Wants
+Looking at the reference image (Brazil → target), the user wants: **the full arc line drawn completely from source to Somalia**, with the glowing dot sitting at the target end. Currently, arcs are progressively drawn during travel, then fade. The user wants a **persistent backbone line** that is always visible — once an arc is established, the full line from that source to Somalia is shown, with the animated projectile running over the top of it.
 
-The feed auto-scrolls as new attacks come in, keeping the most recent 40 entries, with a smooth fade-in animation on each new row.
+### Implementation
+Add a new GeoJSON source `attack-full-arcs-source` that renders **complete arcs** (all 50 coords, no slicing) for every active threat. This creates the "full line from source to Somalia" backbone. Reduce this layer's opacity significantly (e.g., 0.25) so it appears as a dim "track" behind the bright progressive arc. Apply this to **both** `CyberMap.tsx` and `ThreatMap.tsx`.
 
-### 2. `/threat-map` — Traveling Projectile Dot
-Add a **moving dot** (small glowing circle) that travels along the arc path at the tip of each arc as it draws. When it reaches Somalia (progress ≥ 0.98), it triggers a brief flash/explosion effect at the target.
+```
+Layer order (bottom to top):
+1. attack-full-arcs    (full line, dim, 0.25 opacity) ← NEW
+2. attack-arcs-glow    (fat blur glow, progressive)
+3. attack-arcs         (bright progressive line)
+4. attack-projectile-glow (glow ring at tip)
+5. attack-projectile   (bright dot at tip)
+6. attack-ring         (pulsing rings at source)
+7. attack-impact-*     (Somalia bullseye)
+```
 
-**How it works:**
-- New Mapbox source: `attack-projectile-source` — GeoJSON `Point` features at the current "tip" position of each active arc
-- New layer: `attack-projectile` — `circle` layer, 4px radius, colored by attack type, with a 2px bright white stroke
-- New layer: `attack-projectile-glow` — larger 10px transparent stroke-only ring behind it for a glow effect
-- In the RAF tick: compute the current tip coordinate from `arcCoords[sliceEnd - 1]` for arcs with `progress < 1`
-- A separate flash source/layer (`attack-flash-source`, `attack-flash`) renders a bright expanding ring at Somalia targets for 0.5s after impact, driven by `impactFlashRef` tracking `{ id, startTime }` entries
-
-### 3. Landing Page Redesign + Route to `/` (root)
-
-**Route change in `App.tsx`:** Move the Landing page to the root `/` path (currently protected). The ProtectedRoutes wrapper currently catches `/*` — the root `/` will now resolve to `Landing` before hitting `ProtectedRoutes`. Update:
-
+The `buildFullArcsGeoJSON` function:
 ```typescript
-// Current:
-<Route path="/public" element={<Landing />} />
-
-// New:
-<Route path="/" element={<Landing />} />
-// And ProtectedRoutes only handles /dashboard, /organizations, etc.
-// or keep /* but ensure / resolves to Landing before auth check
-```
-
-The cleanest approach: add `<Route path="/" element={<Landing />} />` as a public route alongside `/login` and `/cyber-map`, and change ProtectedRoutes' internal default from `path="/"` to `path="/dashboard"`.
-
-**Landing Page Redesign** — Transform from a plain info page into a dramatic full-screen hero landing page:
-
-**Layout (top to bottom):**
-```
-┌─────────────────────────────────────────────────────┐
-│  NAV: Logo | Live Attack Map btn | Sign In btn      │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  HERO SECTION (full viewport height)                │
-│  Dark background with subtle grid pattern           │
-│                                                     │
-│  ● LIVE  Somalia National Cyber Observatory         │
-│  "National Cyber Defense                            │
-│   Command Center"                                   │
-│  Subtitle text                                      │
-│                                                     │
-│  [Live Attack Map ⚡]  [Sign In →]  buttons        │
-│                                                     │
-│  ━━━ 4 animated stat counters (border cards) ━━━   │
-│  [Orgs Monitored] [Open Alerts] [Regions] [Attacks] │
-│                                                     │
-├─────────────────────────────────────────────────────┤
-│  MAP SECTION — large, full-width dark map           │
-│  Somalia highlighted in LIGHT BLUE (#38bdf8)        │
-│  Region dots with severity colors                   │
-│  Live severity breakdown cards below map            │
-├─────────────────────────────────────────────────────┤
-│  CTA SECTION — dark gradient                        │
-│  "Secure access for authorized personnel"           │
-│  [Sign In to Full Platform] button                  │
-├─────────────────────────────────────────────────────┤
-│  FOOTER                                             │
-└─────────────────────────────────────────────────────┘
-```
-
-**Somalia light blue on the map:** Use Mapbox's `setPaintProperty` on the `country-fills` layer to highlight Somalia (`name_en = 'Somalia'`) in `#38bdf8` (sky blue). This requires using a `fill` layer filter on the map style:
-
-```typescript
-// After map load:
-map.addLayer({
-  id: 'somalia-highlight',
-  type: 'fill',
-  source: { type: 'vector', url: 'mapbox://mapbox.country-boundaries-v1' },
-  'source-layer': 'country_boundaries',
-  filter: ['==', ['get', 'name_en'], 'Somalia'],
-  paint: {
-    'fill-color': '#38bdf8',
-    'fill-opacity': 0.35,
-  },
-});
-
-map.addLayer({
-  id: 'somalia-outline',
-  type: 'line',
-  source: { type: 'vector', url: 'mapbox://mapbox.country-boundaries-v1' },
-  'source-layer': 'country_boundaries',
-  filter: ['==', ['get', 'name_en'], 'Somalia'],
-  paint: {
-    'line-color': '#38bdf8',
-    'line-width': 1.5,
-    'line-opacity': 0.8,
-  },
-});
-```
-
-This same Somalia highlight is also applied to the **ThreatMap** to fulfill the "light blue" request there too.
-
-## Technical File Changes
-
-| File | What Changes |
-|---|---|
-| `src/App.tsx` | Add `<Route path="/" element={<Landing />} />` as public route; change ProtectedRoutes default from `/` to `/dashboard` |
-| `src/pages/Landing.tsx` | Full redesign: hero section, animated counters, improved map with Somalia highlight, better CTA |
-| `src/pages/ThreatMap.tsx` | Replace sidebar with live attack feed; add projectile dot + flash layers and logic; add Somalia blue highlight |
-
-## Detailed: Live Attack Feed (ThreatMap Sidebar)
-
-The current sidebar has two sections: "Alert Hotspots" and "Severity Breakdown". The new layout:
-
-**Top section (scrolling feed):**
-- Header: `⚡ Live Attack Feed` with `• LIVE` badge pulsing green
-- Each row (auto-added when new threat arrives):
-  ```
-  ● [HH:MM:SS]  China → 🇸🇴 Somalia
-    [malware]  [CRITICAL]
-  ```
-- Rows fade in from the top using CSS animation
-- Max 40 rows kept, oldest removed automatically
-- Row color-coded by attack type on the left border
-
-**Bottom section (kept from current):**
-- Severity breakdown with progress bars (unchanged)
-
-## Detailed: Traveling Projectile Dot
-
-**New sources and layers added in `map.on('load')` in ThreatMap:**
-
-```typescript
-// Projectile (moving dot at arc tip)
-map.addSource('attack-projectile-source', { type: 'geojson', data: emptyFC });
-
-map.addLayer({
-  id: 'attack-projectile-glow',
-  type: 'circle',
-  source: 'attack-projectile-source',
-  paint: {
-    'circle-radius': 10,
-    'circle-color': 'transparent',
-    'circle-stroke-width': 3,
-    'circle-stroke-color': ['get', 'color'],
-    'circle-stroke-opacity': 0.4,
-  },
-});
-
-map.addLayer({
-  id: 'attack-projectile',
-  type: 'circle',
-  source: 'attack-projectile-source',
-  paint: {
-    'circle-radius': 4,
-    'circle-color': ['get', 'color'],
-    'circle-opacity': 1,
-    'circle-stroke-width': 1.5,
-    'circle-stroke-color': '#ffffff',
-    'circle-stroke-opacity': 0.9,
-  },
-});
-
-// Impact flash (explodes on arrival)
-map.addSource('attack-flash-source', { type: 'geojson', data: emptyFC });
-
-map.addLayer({
-  id: 'attack-flash',
-  type: 'circle',
-  source: 'attack-flash-source',
-  paint: {
-    'circle-radius': ['get', 'radius'],
-    'circle-color': 'transparent',
-    'circle-stroke-width': 2,
-    'circle-stroke-color': '#f472b6',
-    'circle-stroke-opacity': ['get', 'flashOpacity'],
-  },
-});
-```
-
-**New `buildProjectileGeoJSON` function:**
-```typescript
-function buildProjectileGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+function buildFullArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const seen = new Set<string>(); // deduplicate per source country for cleaner look
   const features: GeoJSON.Feature[] = [];
   for (const state of states.values()) {
-    if (state.progress >= 1 || state.progress <= 0) continue; // only while traveling
-    const sliceEnd = Math.max(2, Math.ceil(state.progress * state.arcCoords.length));
-    const tip = state.arcCoords[sliceEnd - 1];
+    if (state.opacity <= 0) continue;
+    // Draw full arc for each unique source country (most recent one)
     features.push({
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: tip },
-      properties: { color: ATTACK_COLORS[state.threat.attack_type] },
+      geometry: { type: 'LineString', coordinates: state.arcCoords }, // ALL coords
+      properties: {
+        color: ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
     });
   }
   return { type: 'FeatureCollection', features };
 }
 ```
 
-**Flash tracking ref:**
+Mapbox layer:
 ```typescript
-const flashStatesRef = useRef<Map<string, { lng: number; lat: number; startTime: number }>>(new Map());
+map.addLayer({
+  id: 'attack-full-arcs',
+  type: 'line',
+  source: 'attack-full-arcs-source',
+  paint: {
+    'line-color': ['get', 'color'],
+    'line-width': 1,
+    'line-opacity': ['*', ['get', 'opacity'], 0.3],
+    'line-dasharray': [3, 2],   // subtle dashed ghost trail
+  },
+});
 ```
 
-In the RAF tick: when an arc's progress transitions from `< 1` to `>= 1`, add an entry to `flashStatesRef`. In `buildFlashGeoJSON`, compute `t = (now - startTime) / 500` (500ms flash), radius `5 + t * 30`, opacity `(1 - t) * 0.9`. Remove entries where `t >= 1`.
+### Files Changed
+- `src/pages/CyberMap.tsx` — Add `attack-full-arcs-source` + `attack-full-arcs` layer; add `buildFullArcsGeoJSON`; call it in `updateMapSources`
+- `src/pages/ThreatMap.tsx` — Same additions
 
-The `updateMapSources` callback is extended to also call `buildProjectileGeoJSON` and `buildFlashGeoJSON`.
+---
 
-## Detailed: Landing Page
+## 2. Replace Landing Page Map Section with /cyber-map
 
-**Hero section visual design:**
-- Full-screen dark background (`bg-[#030711]`) with subtle dot-grid CSS pattern
-- Animated scan-line effect (moving gradient) using CSS keyframe
-- Center-aligned hero text with large bold heading
-- Cyan/pink accent colors matching the platform's SOC aesthetic
+### What the User Wants
+Replace the current static Mapbox map section in the landing page (which shows region markers on a static Somalia-centered map) with the full live `/cyber-map` experience — animated arcs, projectiles, pulsing rings, Somalia bullseye, and the attack counter.
 
-**CSS dot grid pattern (applied via inline style):**
-```css
-backgroundImage: 'radial-gradient(circle, rgba(0,229,255,0.15) 1px, transparent 1px)',
-backgroundSize: '28px 28px'
+### Implementation: Iframe Embed
+
+The cleanest approach is to embed `/cyber-map` as an `<iframe>` in the landing page. The CyberMap is a fully self-contained page that handles its own token fetching, Mapbox init, and RAF animation loop.
+
+Replace the entire "Map Section" in `Landing.tsx` (the `<section>` containing the Mapbox map container, severity cards, and markers) with:
+
+```tsx
+{/* ── Live Attack Map Section ───────────────────────────────── */}
+<section className="px-6 pb-12 max-w-7xl mx-auto w-full">
+  <div className="mb-4 flex items-center justify-between">
+    <div className="flex items-center gap-2">
+      <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+      <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+        Live Cyber Attack Map · Somalia National CERT
+      </span>
+    </div>
+    <Link to="/cyber-map" className="text-xs text-primary hover:underline flex items-center gap-1">
+      <Zap className="w-3 h-3" /> Open Full Screen
+    </Link>
+  </div>
+
+  <div
+    className="glass-card rounded-2xl border border-border overflow-hidden relative"
+    style={{ height: '560px' }}
+  >
+    <iframe
+      src="/cyber-map"
+      title="Live Cyber Attack Map"
+      className="w-full h-full border-0"
+      loading="lazy"
+    />
+  </div>
+</section>
 ```
 
-**Animated stat counters:** Use `useEffect` + `setInterval` to count up from 0 to final value over 1.5s when the section scrolls into view (or on mount). The four counters: organizations, open alerts, active regions, attacks today (from `useLiveAttacks`).
+**Benefits:**
+- The full animated CyberMap experience (arcs, projectiles, pulsing rings, Somalia bullseye, attack counter, dark background) is embedded directly
+- No duplicate code — the CyberMap component handles all its own logic
+- Interactive elements in CyberMap still work within the iframe (the Somalia panel click, the Live toggle)
+- The iframe is sandboxed by the browser and avoids React state conflicts
 
-**Map section:** Same Mapbox map as current Landing, but with the Somalia fill layer added (light blue `#38bdf8` at 35% opacity) and the border is brighter blue. The map height increases to `480px` and gets a more dramatic dark overlay gradient at edges.
+**Remove from Landing.tsx:**
+- The `mapToken`, `mapError`, `mapLoaded` state variables related to the static map
+- The `mapContainer` ref, `mapRef`, `markersRef`, `mapboxglRef` refs
+- The `useEffect` for fetching map token (keep `get-map-token` removal, keep only `public-stats` for stats)
+- The `useEffect` for Mapbox init
+- The `useEffect` for placing region markers
+- The `REGION_COORDS` constant
+- The severity stat cards above the map (the iframe already has the attack counter built in)
+
+**Keep in Landing.tsx:**
+- The `public-stats` fetch for the hero stat counters (orgs, alerts, regions)
+- The `useCountUp` hook
+- The `SEVERITY_COLORS` constant (used by `SEVERITY_ORDER` cards? — remove if no longer needed)
+- All nav, hero, CTA, footer sections
+
+### Clean Up Imports
+Remove `Loader2` if no longer used for the map spinner. Keep `Zap`, `Shield`, `Globe`, `Lock`, `ChevronRight`, `AlertTriangle`, `RefreshCw`.
+
+---
+
+## 3. Severity Stat Cards Redesign (Optional Enhancement)
+Since the severity breakdown above the map is removed (it was tied to the static map section), replace it with a simpler 2-row stat bar above the iframe showing `totalAlerts`, `totalOrgs`, and `regionsCount` — which are already computed from `public-stats`.
+
+---
+
+## Files Changed
+
+| File | Changes |
+|---|---|
+| `src/pages/CyberMap.tsx` | Add `attack-full-arcs-source` + `attack-full-arcs` layer; `buildFullArcsGeoJSON`; update `updateMapSources`; update layer visibility toggle |
+| `src/pages/ThreatMap.tsx` | Same: `attack-full-arcs-source` + layer + `buildFullArcsGeoJSON`; update `updateMapSources` |
+| `src/pages/Landing.tsx` | Replace static Mapbox map section with `<iframe src="/cyber-map">` at 560px height; remove unused map state/refs/effects; remove severity stat cards; clean up imports |
+
+## Visual Result After Changes
+
+**On `/cyber-map` and `/threat-map`:**
+- Every active attack shows a **dim dashed full-length arc** (the "rail") from source country to Somalia as soon as it starts
+- The bright progressive arc draws over the top of the rail
+- The glowing projectile dot travels along the full route
+- Result: visually matches the reference image where a complete line is visible with a glowing dot at the end
+
+**On Landing Page (`/`):**
+- The map section now shows the full `/cyber-map` page in an iframe
+- Users see the live animated attack arcs, pulsing rings, projectile dots, Somalia bullseye, and the "ATTACKS ON THIS DAY" counter
+- A "Open Full Screen" link routes to `/cyber-map` for immersive view
+- The hero section stat counters (orgs, alerts, regions) remain from `public-stats`
