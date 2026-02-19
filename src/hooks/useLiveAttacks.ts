@@ -5,8 +5,9 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface LiveThreat {
   id: string;
-  source: { lat: number; lng: number; country: string };
-  target: { lat: number; lng: number; country: string };
+  name: string;
+  source: { lat: number; lng: number; country: string; state: string };
+  target: { lat: number; lng: number; country: string; state: string };
   attack_type: AttackType;
   severity: Severity;
   timestamp: number;
@@ -29,77 +30,110 @@ function createSeededRand(seed: number) {
   };
 }
 
-const DAY_STRING = new Date().toISOString().slice(0, 10); // e.g. "2026-02-19"
+const DAY_STRING = new Date().toISOString().slice(0, 10);
 const DAY_SEED = hashStr(DAY_STRING);
 
 // Real global sources with known cyber-threat actor presence
-const THREAT_SOURCES: { country: string; lat: number; lng: number }[] = [
-  { country: 'China', lat: 35.86, lng: 104.19 },
-  { country: 'Russia', lat: 61.52, lng: 105.31 },
-  { country: 'Iran', lat: 32.43, lng: 53.68 },
-  { country: 'North Korea', lat: 40.33, lng: 127.51 },
-  { country: 'USA', lat: 39.38, lng: -100.44 },
-  { country: 'Netherlands', lat: 52.13, lng: 5.29 },
-  { country: 'Germany', lat: 51.16, lng: 10.45 },
-  { country: 'Ukraine', lat: 48.37, lng: 31.17 },
-  { country: 'Brazil', lat: -14.23, lng: -51.92 },
-  { country: 'India', lat: 20.59, lng: 78.96 },
-  { country: 'Nigeria', lat: 9.08, lng: 8.67 },
-  { country: 'Pakistan', lat: 30.37, lng: 69.34 },
-  { country: 'Vietnam', lat: 14.05, lng: 108.27 },
-  { country: 'Romania', lat: 45.94, lng: 24.96 },
-  { country: 'Turkey', lat: 38.96, lng: 35.24 },
-  { country: 'South Korea', lat: 35.90, lng: 127.76 },
-  { country: 'Indonesia', lat: -0.78, lng: 113.92 },
-  { country: 'France', lat: 46.23, lng: 2.21 },
-  { country: 'UK', lat: 55.37, lng: -3.43 },
-  { country: 'Saudi Arabia', lat: 23.88, lng: 45.07 },
-  { country: 'Egypt', lat: 26.82, lng: 30.80 },
-  { country: 'Singapore', lat: 1.35, lng: 103.81 },
-  { country: 'Canada', lat: 56.13, lng: -106.34 },
-  { country: 'Japan', lat: 36.20, lng: 138.25 },
-  { country: 'Israel', lat: 31.04, lng: 34.85 },
-  { country: 'Kenya', lat: -1.29, lng: 36.82 },
-  { country: 'Ethiopia', lat: 9.14, lng: 40.49 },
+const THREAT_SOURCES: { country: string; state: string; lat: number; lng: number }[] = [
+  { country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 },
+  { country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 },
+  { country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 },
+  { country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 },
+  { country: 'USA', state: 'VA', lat: 39.38, lng: -100.44 },
+  { country: 'Netherlands', state: 'Amsterdam', lat: 52.13, lng: 5.29 },
+  { country: 'Germany', state: 'Berlin', lat: 51.16, lng: 10.45 },
+  { country: 'Ukraine', state: 'Kyiv', lat: 48.37, lng: 31.17 },
+  { country: 'Brazil', state: 'São Paulo', lat: -14.23, lng: -51.92 },
+  { country: 'India', state: 'Mumbai', lat: 20.59, lng: 78.96 },
+  { country: 'Nigeria', state: 'Lagos', lat: 9.08, lng: 8.67 },
+  { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
+  { country: 'Vietnam', state: 'Hanoi', lat: 14.05, lng: 108.27 },
+  { country: 'Romania', state: 'Bucharest', lat: 45.94, lng: 24.96 },
+  { country: 'Turkey', state: 'Istanbul', lat: 38.96, lng: 35.24 },
+  { country: 'South Korea', state: 'Seoul', lat: 35.90, lng: 127.76 },
+  { country: 'Indonesia', state: 'Jakarta', lat: -0.78, lng: 113.92 },
+  { country: 'France', state: 'Paris', lat: 46.23, lng: 2.21 },
+  { country: 'UK', state: 'London', lat: 55.37, lng: -3.43 },
+  { country: 'Saudi Arabia', state: 'Riyadh', lat: 23.88, lng: 45.07 },
+  { country: 'Egypt', state: 'Cairo', lat: 26.82, lng: 30.80 },
+  { country: 'Singapore', state: 'Singapore', lat: 1.35, lng: 103.81 },
+  { country: 'Canada', state: 'Toronto', lat: 56.13, lng: -106.34 },
+  { country: 'Japan', state: 'Tokyo', lat: 36.20, lng: 138.25 },
+  { country: 'Israel', state: 'Tel Aviv', lat: 31.04, lng: 34.85 },
+  { country: 'Kenya', state: 'Nairobi', lat: -1.29, lng: 36.82 },
+  { country: 'Ethiopia', state: 'Addis Ababa', lat: 9.14, lng: 40.49 },
 ];
 
-// Weighted sources — major threat actors appear more frequently for bundled arc effect
-const WEIGHTED_SOURCES: { country: string; lat: number; lng: number }[] = [
-  ...Array(4).fill({ country: 'China', lat: 35.86, lng: 104.19 }),
-  ...Array(4).fill({ country: 'Russia', lat: 61.52, lng: 105.31 }),
-  ...Array(3).fill({ country: 'Iran', lat: 32.43, lng: 53.68 }),
-  ...Array(3).fill({ country: 'USA', lat: 39.38, lng: -100.44 }),
-  ...Array(2).fill({ country: 'North Korea', lat: 40.33, lng: 127.51 }),
-  ...Array(2).fill({ country: 'Israel', lat: 31.04, lng: 34.85 }),
-  ...Array(2).fill({ country: 'Ukraine', lat: 48.37, lng: 31.17 }),
-  ...Array(2).fill({ country: 'Kenya', lat: -1.29, lng: 36.82 }),
-  ...Array(2).fill({ country: 'Ethiopia', lat: 9.14, lng: 40.49 }),
+// Weighted sources — major threat actors appear more frequently
+const WEIGHTED_SOURCES: { country: string; state: string; lat: number; lng: number }[] = [
+  ...Array(4).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+  ...Array(4).fill({ country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 }),
+  ...Array(3).fill({ country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 }),
+  ...Array(3).fill({ country: 'USA', state: 'VA', lat: 39.38, lng: -100.44 }),
+  ...Array(2).fill({ country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 }),
+  ...Array(2).fill({ country: 'Israel', state: 'Tel Aviv', lat: 31.04, lng: 34.85 }),
+  ...Array(2).fill({ country: 'Ukraine', state: 'Kyiv', lat: 48.37, lng: 31.17 }),
+  ...Array(2).fill({ country: 'Kenya', state: 'Nairobi', lat: -1.29, lng: 36.82 }),
+  ...Array(2).fill({ country: 'Ethiopia', state: 'Addis Ababa', lat: 9.14, lng: 40.49 }),
   ...THREAT_SOURCES,
 ];
 
-// Somalia target locations (Mogadishu area government buildings + real org coordinates)
+// Somalia target locations
 const SOMALIA_TARGETS = [
-  { lat: 2.046, lng: 45.342, country: 'Somalia' },
-  { lat: 2.059, lng: 45.321, country: 'Somalia' },
-  { lat: 2.039, lng: 45.358, country: 'Somalia' },
-  { lat: 2.068, lng: 45.333, country: 'Somalia' },
-  { lat: 2.025, lng: 45.346, country: 'Somalia' },
-  { lat: 2.050, lng: 45.370, country: 'Somalia' },
+  { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
+  { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
+  { lat: 2.039, lng: 45.358, country: 'Somalia', state: 'Mogadishu' },
+  { lat: 2.068, lng: 45.333, country: 'Somalia', state: 'Hodan' },
+  { lat: 2.025, lng: 45.346, country: 'Somalia', state: 'Wadajir' },
+  { lat: 2.050, lng: 45.370, country: 'Somalia', state: 'Hamar Weyne' },
 ];
 
 const ATTACK_TYPES: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
 const SEVERITIES: Severity[] = ['critical', 'high', 'high', 'medium', 'medium', 'low'];
+
+// ── Attack Signature Names ───────────────────────────────────────────────────
+const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
+  malware: [
+    'DONUT HUSKY', 'Cobalt Strike Beacon', 'Agent Tesla Keylogger',
+    'Emotet Dropper Detected', 'Qakbot Payload Delivery', 'Raccoon Stealer v2',
+    'AsyncRAT C2 Callback', 'IcedID Banking Trojan',
+  ],
+  phishing: [
+    'DNS MX record null prefix', 'Credential Harvest Form', 'OAuth Token Phish Attempt',
+    'Spear Phish PDF Lure', 'Homograph Domain Spoof', 'MFA Fatigue Push Attack',
+    'QR Code Phish Redirect', 'Brand Impersonation Kit',
+  ],
+  exploit: [
+    'NULL Encoding detected within a HT...', 'Apache Log4j RCE', 'SMB EternalBlue Exploit',
+    'ProxyShell Exchange RCE', 'Spring4Shell Remote Code', 'MOVEit SQL Injection',
+    'Citrix Bleed Overflow', 'FortiOS Path Traversal',
+  ],
+  ddos: [
+    'SYN Flood Volumetric Attack', 'DNS Amplification Detected', 'HTTP Slowloris Connection',
+    'NTP Monlist Reflection', 'CLDAP Reflection Flood', 'TCP RST Storm Detected',
+    'UDP Fragmentation Flood', 'Memcached Amplification',
+  ],
+  intrusion: [
+    'Brute Force SSH Login', 'Lateral Movement via WMI', 'Pass-the-Hash NTLM Relay',
+    'Kerberoasting AS-REP', 'DCSync Replication Attack', 'Golden Ticket Forged',
+    'BloodHound AD Recon', 'RDP Tunnel Persistence',
+  ],
+};
 
 // Generate the Nth threat of the day deterministically
 function generateDayThreat(index: number): LiveThreat {
   const rand = createSeededRand(DAY_SEED + index * 7919);
   const source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
   const target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
+  const attack_type = ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)];
+  const signatures = ATTACK_SIGNATURES[attack_type];
+  const name = signatures[Math.floor(rand() * signatures.length)];
   return {
     id: `${DAY_STRING}-${index}`,
-    source: { ...source },
-    target: { ...target },
-    attack_type: ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)],
+    name,
+    source: { lat: source.lat, lng: source.lng, country: source.country, state: source.state },
+    target: { lat: target.lat, lng: target.lng, country: target.country, state: target.state },
+    attack_type,
     severity: SEVERITIES[Math.floor(rand() * SEVERITIES.length)],
     timestamp: Date.now(),
   };
