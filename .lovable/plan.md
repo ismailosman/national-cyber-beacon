@@ -1,108 +1,127 @@
 
-# Plan: Cyber Map Mobile Polish + Login Logo Replacement
+# Animate Attack Lines: Traveling Beam + Projectile Dots
 
-## Current State Analysis
+## What's Happening Now vs. What the User Wants
 
-Reading the full `CyberMap.tsx` reveals the mobile layout is already partially implemented from the previous round, but it has issues compared to the reference screenshot:
+**Current behavior:**
+- The "full arc backbone" (`attack-full-arcs`) renders the **entire dashed path immediately** when a threat appears. This makes every line look static — you can see the whole path from India → Somalia before any animation happens.
+- The progressive arc (`attack-arcs`) draws from source → Somalia over 2 seconds, but because the full dashed rail is already visible underneath, the motion is barely perceptible.
+- No projectile dot travels along the path.
 
-1. **Bottom severity bar is always visible on mobile** — this takes ~80px of vertical space away from the map, which should be fullscreen on phones. The reference screenshot shows the map filling the full screen with only the floating Feed button visible.
-2. **Feed button is positioned `bottom-12`** inside the map container — but `bottom-12` (48px) puts it right above the severity bar, making it awkwardly placed. The reference shows it should be at the very bottom-right, floating cleanly over the map.
-3. **Severity cards should move into the feed drawer on mobile** — when the user taps "Feed", they see both the live threat list AND the severity breakdown, not just the list.
-4. **Login logo** needs to be replaced: currently using `logo-emblem.png` (old asset), needs to use the newly uploaded `login-logo.png`.
+**What the user wants (matching the reference screenshot):**
+- Lines visibly travel **from source country DOWN TO Somalia** — like a moving beam/missile
+- The animation is clear and dynamic — you can see it moving
+- Multiple arcs from different countries converging on Somalia simultaneously
 
-## Changes Required
+## Solution: Three-Part Change
 
-### 1. `src/pages/CyberMap.tsx` — Three targeted fixes
+### Part 1 — Change `buildArcsGeoJSON`: Traveling Head Segment
 
-**Fix A: Hide bottom bar on mobile, show it only on desktop**
+Instead of drawing the arc from the origin all the way to the current progress position (which creates a growing trail), only show a **short tail segment** (last ~15% of the traveled path) while the attack is in flight. This makes it look like a bright beam flying through space rather than a line being drawn.
 
-Change the bottom severity/legend bar to `hidden lg:flex` (or equivalent). On mobile this bar disappears entirely, giving the map full screen height.
+After arrival (`progress = 1`), switch back to showing the full arc path so it persists and fades as a "trace" of the hit.
 
-```tsx
-// Before
-<div className="flex-shrink-0 px-3 sm:px-4 py-2" ...>
-  <div className="grid grid-cols-2 lg:flex ...">
+```typescript
+// DURING travel (progress < 1): show only tail segment = moving beam
+const TAIL_FRACTION = 0.15;
+const tailLength = Math.max(3, Math.floor(sliceEnd * TAIL_FRACTION));
+const sliceStart = Math.max(0, sliceEnd - tailLength);
+coords = state.arcCoords.slice(sliceStart, sliceEnd)  // ← short moving segment
 
-// After — entire bottom bar hidden on mobile
-<div className="hidden lg:flex flex-shrink-0 px-4 py-2" ...>
-  <div className="flex items-center gap-2">
+// AFTER arrival (progress = 1): show full arc, fades over FADE_DURATION
+coords = state.arcCoords  // ← full path persists then fades
 ```
 
-**Fix B: Reposition the mobile Feed button**
+### Part 2 — Add `buildProjectilesGeoJSON`: Bright Traveling Dot
 
-Move the Feed button from `bottom-12` (which was above the now-hidden bar, creating dead space) to `bottom-4`. Style it to match the reference screenshot — larger, with a red badge for the count:
+A new GeoJSON builder that places a **bright glowing dot** at the current tip of each in-flight arc. The dot only exists while `progress > 0 && progress < 1` (while traveling). It disappears upon impact.
 
-```tsx
-// Current (inside map div):
-className="lg:hidden absolute bottom-12 right-4 z-20 ..."
-
-// Fix:
-className="lg:hidden absolute bottom-4 right-4 z-20 ..."
-// Also increase size slightly to match screenshot — text-sm, px-4 py-2.5
+```typescript
+function buildProjectilesGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const state of states.values()) {
+    if (state.progress <= 0 || state.progress >= 1) continue;
+    const idx = Math.min(
+      Math.floor(state.progress * (state.arcCoords.length - 1)),
+      state.arcCoords.length - 1
+    );
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: state.arcCoords[idx] },
+      properties: {
+        color: ATTACK_COLORS[state.threat.attack_type],
+        opacity: state.opacity,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
 ```
 
-**Fix C: Add severity cards into the mobile feed drawer**
+### Part 3 — New Mapbox Layers for Projectile
 
-The mobile drawer currently only shows the threat list. Add a mini severity row at the top of the drawer (4 colored pills in a horizontal row) so users can see the counts when they open the feed:
+Two new Mapbox layers added to the map after load, above the arc layers:
 
-```tsx
-// Inside the mobile drawer, before the scrollable list:
-<div className="flex gap-2 px-4 py-2 border-b border-white/5 flex-shrink-0">
-  {[
-    { label: 'Crit', key: 'critical', color: '#ef4444' },
-    { label: 'High', key: 'high',     color: '#f97316' },
-    { label: 'Med',  key: 'medium',   color: '#facc15' },
-    { label: 'Low',  key: 'low',      color: '#22d3ee' },
-  ].map(({ label, key, color }) => (
-    <div key={key} className="flex-1 flex flex-col items-center py-1.5 rounded-lg" style={{ background: `${color}0d`, border: `1px solid ${color}33` }}>
-      <span className="text-sm font-mono font-bold" style={{ color }}>{severityCounts[key]}</span>
-      <span className="text-[9px] uppercase font-mono" style={{ color: `${color}99` }}>{label}</span>
-    </div>
-  ))}
-</div>
+```typescript
+// Outer glow halo
+map.addSource('attack-projectiles-source', { type: 'geojson', data: emptyFC });
+map.addLayer({
+  id: 'attack-projectiles-glow',
+  type: 'circle',
+  source: 'attack-projectiles-source',
+  paint: {
+    'circle-radius': 12,
+    'circle-color': ['get', 'color'],
+    'circle-opacity': ['*', ['get', 'opacity'], 0.25],
+    'circle-blur': 1,
+  },
+});
+// Core bright dot
+map.addLayer({
+  id: 'attack-projectiles-core',
+  type: 'circle',
+  source: 'attack-projectiles-source',
+  paint: {
+    'circle-radius': 3.5,
+    'circle-color': ['get', 'color'],
+    'circle-opacity': ['get', 'opacity'],
+    'circle-stroke-width': 1.5,
+    'circle-stroke-color': 'rgba(255,255,255,0.95)',
+    'circle-stroke-opacity': ['get', 'opacity'],
+  },
+});
 ```
 
-### 2. Login Page Logo Replacement
+### Supporting Changes
 
-**Current:** `src/pages/Login.tsx` imports `logo-emblem.png` from `src/assets/`
+- **`updateMapSources`**: Add the projectiles source update alongside the existing sources
+- **Layer visibility toggle**: Add `attack-projectiles-glow` and `attack-projectiles-core` to the `liveOn` visibility toggle list
+- **RAF loop**: The projectiles update every frame since they move continuously (already covered by the existing `updateMapSources(now)` call in the RAF tick)
 
-**New:** Copy `user-uploads://login-logo.png` → `src/assets/login-logo.png` and update the import.
+## Visual Result
 
-The new logo is a detailed circular emblem with "SOMALIA CYBER DEFENCE" text on a banner. It should render at a slightly larger size than before to show the detail properly — `w-32 h-32` instead of `w-28 h-28`. Keep the cyan drop shadow glow effect.
+```text
+Before:
+  [India] ------dashed full line------- [Somalia]
+                                          ^ whole line visible immediately, looks static
 
-```tsx
-// Before:
-import logoEmblem from '@/assets/logo-emblem.png';
-// ...
-<img src={logoEmblem} className="w-28 h-28 object-contain mb-4 mx-auto drop-shadow-[0_0_24px_rgba(34,211,238,0.45)]" />
-
-// After:
-import loginLogo from '@/assets/login-logo.png';
-// ...
-<img src={loginLogo} className="w-32 h-32 object-contain mb-4 mx-auto drop-shadow-[0_0_30px_rgba(34,211,238,0.5)]" />
+After:
+  [India]             •━━━             [Somalia]
+              ^ dim rail        ^ bright dot + short tail traveling at speed
+  
+  When it hits:
+  [India] ════════════════════════════ [Somalia]  (full arc appears, fades over 3s)
+                                       💥 (impact rings pulse)
 ```
+
+- Multiple country arcs travel simultaneously at different progress states
+- Each has a color-coded traveling dot (red for Malware, purple for Phishing, etc.)
+- Upon impact: full arc appears and fades, impact bullseye pulses at Somalia
 
 ## Files Changed
 
-| File | What Changes |
+| File | What |
 |---|---|
-| `src/assets/login-logo.png` | New file — copied from `user-uploads://login-logo.png` |
-| `src/pages/Login.tsx` | Import `login-logo.png`; update img src and size (`w-32 h-32`) |
-| `src/pages/CyberMap.tsx` | Hide bottom bar on mobile (`hidden lg:flex`); fix Feed button position to `bottom-4`; add severity summary row inside the mobile feed drawer |
+| `src/pages/CyberMap.tsx` | Add `buildProjectilesGeoJSON`; modify `buildArcsGeoJSON` for traveling beam; add projectile Mapbox source + 2 layers; update `updateMapSources`; add new layer IDs to visibility toggle |
 
-## Visual Result on Mobile (390px)
-
-- Map fills the entire screen — no bottom bar eating vertical space
-- Top header: logo + "LIVE CYBER THREAT MAP" + attacks count — compact and centered
-- Top-left: two icon-only nav buttons (Globe, Shield)  
-- Top-right: "⚡ Live •" toggle button
-- Bottom-right: "⚡ Feed [48]" floating button with red badge — exactly matching the reference screenshot
-- Tap Feed → bottom drawer slides up (60vh) showing:
-  - 4 severity count pills (Critical / High / Medium / Low) in a horizontal row
-  - Scrolling list of 30 most recent threats
-
-## Login Page
-
-- Same layout and background effects
-- New official Somalia Cyber Defence emblem logo (larger, more detailed circular seal) at `w-32 h-32`
-- Cyan glow drop shadow preserved
+Only **one file changes** — all modifications are self-contained within the animation engine in `CyberMap.tsx`.
