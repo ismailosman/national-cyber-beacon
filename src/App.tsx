@@ -15,6 +15,7 @@ import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
 import Compliance from "@/pages/Compliance";
 import CertAdvisories from "@/pages/CertAdvisories";
+import ThreatMap from "@/pages/ThreatMap";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,7 @@ const ProtectedRoutes = () => {
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/cert" element={<CertAdvisories />} />
+        <Route path="/threat-map" element={<ThreatMap />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

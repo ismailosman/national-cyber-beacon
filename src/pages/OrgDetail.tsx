@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -16,6 +16,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 const checkTypeLabels: Record<string, string> = {
   tls: 'TLS Certificate',
@@ -44,9 +45,13 @@ const OrgDetail: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertForm, setAlertForm] = useState({ title: '', description: '', severity: 'medium', source: 'manual' });
+  const [alertSaving, setAlertSaving] = useState(false);
 
   const canEdit = userRole?.role === 'SuperAdmin' || userRole?.role === 'OrgAdmin';
   const isSuperAdmin = userRole?.role === 'SuperAdmin';
+  const canCreateAlert = userRole?.role === 'SuperAdmin' || userRole?.role === 'Analyst';
 
   const { data: org } = useQuery({
     queryKey: ['org', id],
@@ -183,6 +188,33 @@ const OrgDetail: React.FC = () => {
     }
   };
 
+  const handleCreateAlert = async () => {
+    if (!alertForm.title || !id) { toast.error('Title is required'); return; }
+    setAlertSaving(true);
+    try {
+      const { error } = await supabase.from('alerts').insert({
+        title: alertForm.title,
+        description: alertForm.description,
+        severity: alertForm.severity as any,
+        source: alertForm.source || 'manual',
+        organization_id: id,
+        status: 'open',
+        is_read: false,
+      });
+      if (error) throw error;
+      toast.success('Alert created successfully');
+      queryClient.invalidateQueries({ queryKey: ['org-alerts', id] });
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['active-alerts'] });
+      setAlertOpen(false);
+      setAlertForm({ title: '', description: '', severity: 'medium', source: 'manual' });
+    } catch (err: any) {
+      toast.error('Failed to create alert: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAlertSaving(false);
+    }
+  };
+
   const radarData = [
     { subject: 'TLS', value: checks.find((c: any) => c.check_type === 'tls')?.score ?? 50 },
     { subject: 'Headers', value: checks.find((c: any) => c.check_type === 'headers')?.score ?? 50 },
@@ -229,6 +261,15 @@ const OrgDetail: React.FC = () => {
             Edit
           </button>
         )}
+        {canCreateAlert && (
+          <button
+            onClick={() => setAlertOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-neon-amber/10 text-neon-amber font-bold text-sm rounded-lg border border-neon-amber/30 hover:bg-neon-amber/20 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Create Alert
+          </button>
+        )}
         {isSuperAdmin && (
           <button
             onClick={() => setDeleteOpen(true)}
@@ -269,6 +310,66 @@ const OrgDetail: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Create Alert Dialog */}
+      <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Alert for {org.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="org-alert-title">Title *</Label>
+              <Input
+                id="org-alert-title"
+                value={alertForm.title}
+                onChange={e => setAlertForm({ ...alertForm, title: e.target.value })}
+                placeholder="e.g. Suspicious login attempts detected"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="org-alert-desc">Description</Label>
+              <Textarea
+                id="org-alert-desc"
+                value={alertForm.description}
+                onChange={e => setAlertForm({ ...alertForm, description: e.target.value })}
+                placeholder="Additional details..."
+                rows={3}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="org-alert-severity">Severity *</Label>
+                <select
+                  id="org-alert-severity"
+                  value={alertForm.severity}
+                  onChange={e => setAlertForm({ ...alertForm, severity: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {['critical', 'high', 'medium', 'low'].map(s => (
+                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="org-alert-source">Source</Label>
+                <Input
+                  id="org-alert-source"
+                  value={alertForm.source}
+                  onChange={e => setAlertForm({ ...alertForm, source: e.target.value })}
+                  placeholder="manual"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAlertOpen(false)} disabled={alertSaving}>Cancel</Button>
+            <Button onClick={handleCreateAlert} disabled={alertSaving || !alertForm.title}>
+              {alertSaving ? 'Creating...' : 'Create Alert'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Organization Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

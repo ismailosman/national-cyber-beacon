@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio, Map
 } from 'lucide-react';
 import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/incidents', icon: AlertOctagon, label: 'Incidents' },
   { to: '/compliance', icon: CheckSquare, label: 'Compliance' },
   { to: '/cert', icon: Radio, label: 'CERT-SO' },
+  { to: '/threat-map', icon: Map, label: 'Threat Map' },
   { to: '/reports', icon: FileText, label: 'Reports' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
