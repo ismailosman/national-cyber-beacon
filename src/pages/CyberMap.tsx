@@ -845,146 +845,282 @@ const CyberMap: React.FC = () => {
     return () => cancelAnimationFrame(rafRef.current);
   }, [mapLoaded, updateMapSources]);
 
+  // ── Time ago helper ──────────────────────────────────────────────────────
+  const timeAgo = (ts: number) => {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 5)  return 'just now';
+    if (sec < 60) return `${sec}s ago`;
+    return `${Math.floor(sec / 60)}m ago`;
+  };
+
+  const SEV_COLORS: Record<string, string> = {
+    critical: '#ef4444',
+    high:     '#f97316',
+    medium:   '#facc15',
+    low:      '#22d3ee',
+  };
+
+  const severityCounts = {
+    critical: threats.filter(t => t.severity === 'critical').length,
+    high:     threats.filter(t => t.severity === 'high').length,
+    medium:   threats.filter(t => t.severity === 'medium').length,
+    low:      threats.filter(t => t.severity === 'low').length,
+  };
+
   // ── UI ────────────────────────────────────────────────────────────────────
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-black flex flex-col">
+    <div className="w-screen h-screen bg-black flex flex-col overflow-hidden">
 
-      {/* ── Header overlay ───────────────────────────────────────────────── */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-6 pb-4 pointer-events-none"
-           style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
+      {/* ── Top row: map + sidebar ───────────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0">
 
-        <div className="flex items-center gap-3 mb-2">
-          <img src={logoSrc} alt="Logo" className="w-8 h-8 object-contain opacity-90" />
-          <div className="text-center">
-            <h1 className="text-white font-bold tracking-[0.25em] uppercase text-base sm:text-lg font-mono"
-                style={{ textShadow: '0 0 20px rgba(34,211,238,0.6)' }}>
-              LIVE CYBER THREAT MAP
-            </h1>
-            <p className="text-[10px] text-slate-400 tracking-widest uppercase">
-              Somalia National Cyber Defense Observatory
-            </p>
+        {/* ── Map container ─────────────────────────────────────────────── */}
+        <div className="relative flex-1 min-w-0">
+
+          {/* ── Header overlay ──────────────────────────────────────────── */}
+          <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-6 pb-4 pointer-events-none"
+               style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
+            <div className="flex items-center gap-3 mb-2">
+              <img src={logoSrc} alt="Logo" className="w-8 h-8 object-contain opacity-90" />
+              <div className="text-center">
+                <h1 className="text-white font-bold tracking-[0.25em] uppercase text-base sm:text-lg font-mono"
+                    style={{ textShadow: '0 0 20px rgba(34,211,238,0.6)' }}>
+                  LIVE CYBER THREAT MAP
+                </h1>
+                <p className="text-[10px] text-slate-400 tracking-widest uppercase">
+                  Somalia National Cyber Defense Observatory
+                </p>
+              </div>
+            </div>
+            <div className="text-center" aria-live="polite">
+              <p className="text-2xl sm:text-3xl font-mono font-bold"
+                 style={{ color: '#f472b6', textShadow: '0 0 20px rgba(244,114,182,0.7)' }}>
+                {todayCount.toLocaleString()}
+              </p>
+              <p className="text-[10px] tracking-[0.3em] text-slate-400 uppercase mt-0.5">
+                ATTACKS ON THIS DAY
+              </p>
+            </div>
           </div>
+
+          {/* ── Nav buttons top-left ──────────────────────────────────────── */}
+          <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
+            <Link
+              to="/public"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
+            >
+              <Globe className="w-3 h-3" /> Public Dashboard
+            </Link>
+            <Link
+              to="/login"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
+            >
+              <Shield className="w-3 h-3" /> Analyst Login
+            </Link>
+          </div>
+
+          {/* ── Live toggle top-right ─────────────────────────────────────── */}
+          <div className="absolute top-4 right-4 z-20 pointer-events-auto">
+            <button
+              onClick={() => setLiveOn(v => !v)}
+              aria-pressed={liveOn}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
+              style={{
+                background: liveOn ? 'rgba(34,211,238,0.15)' : 'rgba(0,0,0,0.7)',
+                border: `1px solid ${liveOn ? '#22d3ee' : 'rgba(255,255,255,0.15)'}`,
+                color: liveOn ? '#22d3ee' : '#94a3b8',
+              }}
+            >
+              <Zap className={`w-3 h-3 ${liveOn ? 'text-[#22d3ee]' : 'text-slate-500'}`} />
+              Live
+              <span className={`w-1.5 h-1.5 rounded-full ${liveOn ? 'bg-[#22d3ee] animate-pulse' : 'bg-slate-600'}`} />
+            </button>
+          </div>
+
+          {/* ── Click-to-open hint ────────────────────────────────────────── */}
+          {mapLoaded && !somaliaPanel && !selectedCountry && (
+            <div
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
+              style={{
+                background: 'rgba(0,0,0,0.7)',
+                border: '1px solid rgba(244,114,182,0.3)',
+                borderRadius: 6,
+                padding: '4px 12px',
+              }}
+            >
+              <p className="text-[10px] font-mono text-pink-300 tracking-widest uppercase">
+                🌐 Click Somalia or any source for stats
+              </p>
+            </div>
+          )}
+
+          {/* ── Mapbox canvas ─────────────────────────────────────────────── */}
+          <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+
+          {/* ── Somalia Panel Overlay ─────────────────────────────────────── */}
+          {somaliaPanel && !selectedCountry && (
+            <SomaliaPanel threats={threats} onClose={() => setSomaliaPanel(false)} />
+          )}
+
+          {/* ── Country Panel Overlay ─────────────────────────────────────── */}
+          {selectedCountry && (
+            <CountryPanel
+              country={selectedCountry}
+              threats={threats}
+              onClose={() => setSelectedCountry(null)}
+            />
+          )}
+
+          {/* Loading overlay */}
+          {!mapToken && !mapError && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#22d3ee' }} />
+                <p className="text-sm font-mono text-slate-400 tracking-widest">INITIALIZING MAP...</p>
+              </div>
+            </div>
+          )}
+          {mapError && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90">
+              <p className="text-sm text-slate-400 font-mono">{mapError}</p>
+            </div>
+          )}
         </div>
 
-        <div className="text-center" aria-live="polite" aria-label={`Live attacks today: ${todayCount.toLocaleString()}`}>
-          <p className="text-2xl sm:text-3xl font-mono font-bold"
-             style={{ color: '#f472b6', textShadow: '0 0 20px rgba(244,114,182,0.7)' }}>
-            {todayCount.toLocaleString()}
-          </p>
-          <p className="text-[10px] tracking-[0.3em] text-slate-400 uppercase mt-0.5">
-            ATTACKS ON THIS DAY
-          </p>
-        </div>
-      </div>
-
-      {/* ── Nav buttons top-left ─────────────────────────────────────────── */}
-      <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
-        <Link
-          to="/public"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
-          style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
-        >
-          <Globe className="w-3 h-3" /> Public Dashboard
-        </Link>
-        <Link
-          to="/login"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
-          style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
-        >
-          <Shield className="w-3 h-3" /> Analyst Login
-        </Link>
-      </div>
-
-      {/* ── Live toggle top-right ────────────────────────────────────────── */}
-      <div className="absolute top-4 right-16 z-20 pointer-events-auto">
-        <button
-          onClick={() => setLiveOn(v => !v)}
-          aria-pressed={liveOn}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
-          style={{
-            background: liveOn ? 'rgba(34,211,238,0.15)' : 'rgba(0,0,0,0.7)',
-            border: `1px solid ${liveOn ? '#22d3ee' : 'rgba(255,255,255,0.15)'}`,
-            color: liveOn ? '#22d3ee' : '#94a3b8',
-          }}
-        >
-          <Zap className={`w-3 h-3 ${liveOn ? 'text-[#22d3ee]' : 'text-slate-500'}`} />
-          Live Attack Layer
-          <span className={`w-1.5 h-1.5 rounded-full ${liveOn ? 'bg-[#22d3ee] animate-pulse' : 'bg-slate-600'}`} />
-        </button>
-      </div>
-
-      {/* ── Click-to-open hint ───────────────────────────────────────────── */}
-      {mapLoaded && !somaliaPanel && !selectedCountry && (
+        {/* ── Live Attack Feed Sidebar ───────────────────────────────────── */}
         <div
-          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-          style={{
-            background: 'rgba(0,0,0,0.7)',
-            border: '1px solid rgba(244,114,182,0.3)',
-            borderRadius: 6,
-            padding: '4px 12px',
-          }}
+          className="w-64 xl:w-72 flex-shrink-0 flex flex-col overflow-hidden"
+          style={{ background: '#07070f', borderLeft: '1px solid rgba(255,255,255,0.08)' }}
         >
-          <p className="text-[10px] font-mono text-pink-300 tracking-widest uppercase">
-            🌐 Click Somalia or any attack source for stats
-          </p>
-        </div>
-      )}
+          {/* Sidebar header */}
+          <div
+            className="flex items-center justify-between px-3 py-3 flex-shrink-0"
+            style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5" style={{ color: '#22d3ee' }} />
+              <span className="text-xs font-bold font-mono tracking-widest uppercase" style={{ color: '#22d3ee' }}>
+                Live Feed
+              </span>
+            </div>
+            <span
+              className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full"
+              style={{ background: 'rgba(239,68,68,0.2)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}
+            >
+              {threats.length}
+            </span>
+          </div>
 
-      {/* ── Mapbox canvas ─────────────────────────────────────────────────── */}
-      <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+          {/* Feed entries */}
+          <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
+            {threats.slice(0, 50).map((t) => {
+              const iso = COUNTRY_ISO[t.source.country] ?? 'un';
+              const attackColor = ATTACK_COLORS[t.attack_type];
+              const sevColor = SEV_COLORS[t.severity];
+              return (
+                <div
+                  key={t.id}
+                  className="flex flex-col gap-0.5 px-3 py-2.5 cursor-default"
+                  style={{
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    borderLeft: `3px solid ${attackColor}`,
+                  }}
+                >
+                  {/* Country row */}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <img
+                      src={`https://flagcdn.com/w40/${iso}.png`}
+                      alt={t.source.country}
+                      className="w-4 h-3 object-cover rounded-sm flex-shrink-0"
+                    />
+                    <span className="text-xs text-white font-mono truncate">{t.source.country}</span>
+                    <span className="text-[10px] text-slate-500 flex-shrink-0">→ 🇸🇴</span>
+                  </div>
 
-      {/* ── Somalia Panel Overlay ─────────────────────────────────────────── */}
-      {somaliaPanel && !selectedCountry && (
-        <SomaliaPanel threats={threats} onClose={() => setSomaliaPanel(false)} />
-      )}
+                  {/* Attack type + severity */}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wide"
+                      style={{ color: attackColor }}
+                    >
+                      {ATTACK_LABELS[t.attack_type]}
+                    </span>
+                    <span
+                      className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0"
+                      style={{
+                        background: `${sevColor}22`,
+                        color: sevColor,
+                        border: `1px solid ${sevColor}44`,
+                      }}
+                    >
+                      {t.severity}
+                    </span>
+                  </div>
 
-      {/* ── Country Panel Overlay ─────────────────────────────────────────── */}
-      {selectedCountry && (
-        <CountryPanel
-          country={selectedCountry}
-          threats={threats}
-          onClose={() => setSelectedCountry(null)}
-        />
-      )}
-
-      {/* Loading overlay */}
-      {!mapToken && !mapError && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
-          <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#22d3ee' }} />
-            <p className="text-sm font-mono text-slate-400 tracking-widest">INITIALIZING MAP...</p>
+                  {/* Time */}
+                  <p className="text-[10px] text-slate-600 font-mono">{timeAgo(t.timestamp)}</p>
+                </div>
+              );
+            })}
+            {threats.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-32 gap-2">
+                <span className="text-slate-600 text-xs font-mono">Awaiting threats...</span>
+              </div>
+            )}
           </div>
         </div>
-      )}
-      {mapError && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90">
-          <p className="text-sm text-slate-400 font-mono">{mapError}</p>
-        </div>
-      )}
+      </div>
 
-      {/* ── Bottom legend ─────────────────────────────────────────────────── */}
+      {/* ── Bottom bar: severity cards + legend ───────────────────────────── */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-8 pointer-events-none"
-        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)' }}
+        className="flex-shrink-0 flex items-center gap-2 px-4 py-2"
+        style={{ background: '#050508', borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
-        <div className="flex flex-wrap justify-center gap-x-5 gap-y-2">
+        {/* Severity cards */}
+        {([
+          { label: 'Critical', key: 'critical' as const },
+          { label: 'High',     key: 'high'     as const },
+          { label: 'Medium',   key: 'medium'   as const },
+          { label: 'Low',      key: 'low'       as const },
+        ]).map(({ label, key }) => (
+          <div
+            key={key}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+            style={{
+              background: `${SEV_COLORS[key]}0d`,
+              border: `1px solid ${SEV_COLORS[key]}33`,
+            }}
+          >
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: SEV_COLORS[key], boxShadow: `0 0 5px ${SEV_COLORS[key]}` }} />
+            <span className="text-lg font-mono font-bold tabular-nums" style={{ color: SEV_COLORS[key] }}>
+              {severityCounts[key]}
+            </span>
+            <span className="text-[10px] font-mono uppercase tracking-wide" style={{ color: `${SEV_COLORS[key]}99` }}>
+              {label}
+            </span>
+          </div>
+        ))}
+
+        {/* Divider */}
+        <div className="w-px h-6 mx-2 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.1)' }} />
+
+        {/* Attack type legend */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
           {(Object.entries(ATTACK_LABELS) as [AttackType, string][]).map(([type, label]) => (
-            <div key={type} className="flex items-center gap-1.5">
-              <span
-                className="w-2.5 h-2.5 rounded-full"
-                style={{ background: ATTACK_COLORS[type], boxShadow: `0 0 6px ${ATTACK_COLORS[type]}` }}
-              />
-              <span className="text-xs font-mono text-slate-300 tracking-wide">{label}</span>
+            <div key={type} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={{ background: ATTACK_COLORS[type] }} />
+              <span className="text-[10px] font-mono text-slate-400">{label}</span>
             </div>
           ))}
         </div>
 
+        {/* Live indicator */}
         {liveOn && (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-[10px] font-mono text-slate-500 tracking-widest uppercase">
-              Live simulation active
-            </span>
+            <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Live</span>
           </div>
         )}
       </div>

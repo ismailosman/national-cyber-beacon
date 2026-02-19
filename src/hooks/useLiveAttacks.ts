@@ -83,17 +83,30 @@ function generateMockThreat(): LiveThreat {
 }
 
 const RING_BUFFER_SIZE = 100;
-// Seed with a credible daily count for a national CERT context (3K–15K range)
+// Module-level singleton — shared across all hook instances in the tab
 const BASE_COUNT = Math.floor(3_000 + Math.random() * 12_000);
+let sharedTodayCount = BASE_COUNT;
+const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
+
+function incrementSharedCount() {
+  sharedTodayCount += 1;
+  todayListeners.forEach(fn => fn(sharedTodayCount));
+}
 
 export function useLiveAttacks(enabled: boolean) {
   const [threats, setThreats] = useState<LiveThreat[]>([]);
-  const [todayCount, setTodayCount] = useState(BASE_COUNT);
+  const [todayCount, setTodayCount] = useState(sharedTodayCount);
   const lastRealEventRef = useRef<number>(0);
+
+  // Register/unregister this instance's setter so all hooks stay in sync
+  useEffect(() => {
+    todayListeners.add(setTodayCount);
+    return () => { todayListeners.delete(setTodayCount); };
+  }, []);
 
   const addThreat = useCallback((threat: LiveThreat) => {
     setThreats(prev => [threat, ...prev].slice(0, RING_BUFFER_SIZE));
-    setTodayCount(c => c + 1);
+    incrementSharedCount();
   }, []);
 
   // Mock generator — runs when enabled, pauses automatically if real events flow
