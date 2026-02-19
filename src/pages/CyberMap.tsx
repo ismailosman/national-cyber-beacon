@@ -9,6 +9,18 @@ import {
   XAxis, YAxis, Tooltip,
 } from 'recharts';
 
+// ── Country ISO codes for flag CDN ────────────────────────────────────────────
+
+const COUNTRY_ISO: Record<string, string> = {
+  'China': 'cn', 'Russia': 'ru', 'Iran': 'ir', 'North Korea': 'kp',
+  'USA': 'us', 'Netherlands': 'nl', 'Germany': 'de', 'Ukraine': 'ua',
+  'Brazil': 'br', 'India': 'in', 'Nigeria': 'ng', 'Pakistan': 'pk',
+  'Vietnam': 'vn', 'Romania': 'ro', 'Turkey': 'tr', 'South Korea': 'kr',
+  'Indonesia': 'id', 'France': 'fr', 'UK': 'gb', 'Saudi Arabia': 'sa',
+  'Egypt': 'eg', 'Singapore': 'sg', 'Canada': 'ca', 'Japan': 'jp',
+  'Israel': 'il', 'Somalia': 'so',
+};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ATTACK_COLORS: Record<AttackType, string> = {
@@ -115,7 +127,7 @@ const SomaliaPanel: React.FC<SomaliaPanelProps> = ({ threats, onClose }) => {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
         <div className="flex items-center gap-2">
-          <span className="text-xl">🇸🇴</span>
+          <img src="https://flagcdn.com/w40/so.png" alt="Somalia flag" className="w-6 h-4 object-cover rounded-sm" />
           <span className="text-white font-bold text-sm tracking-wide">Somalia</span>
         </div>
         <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1 rounded">
@@ -185,6 +197,144 @@ const SomaliaPanel: React.FC<SomaliaPanelProps> = ({ threats, onClose }) => {
               </div>
 
               {/* Percentage */}
+              <span className="text-xs font-mono font-bold ml-auto flex-shrink-0" style={{ color: ATTACK_COLORS[type] }}>
+                {percentages[type].toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Country Panel (Source of Attacks) ─────────────────────────────────────────
+
+function genCountry30DayData(country: string) {
+  // Use a unique seed per country name
+  let seed = 0;
+  for (let i = 0; i < country.length; i++) seed = (seed * 31 + country.charCodeAt(i)) | 0;
+  const rand = seededRand(Math.abs(seed) || 0xabcdef);
+  return Array.from({ length: 30 }, (_, i) => ({
+    day: i + 1,
+    value: Math.round(200 + Math.sin(i / 3.5) * 400 + rand() * 600 + (i > 15 ? rand() * 900 : 0)),
+  }));
+}
+
+interface CountryPanelProps {
+  country: string;
+  threats: LiveThreat[];
+  onClose: () => void;
+}
+
+const CountryPanel: React.FC<CountryPanelProps> = ({ country, threats, onClose }) => {
+  const iso = COUNTRY_ISO[country] ?? 'un';
+  const trendData = React.useMemo(() => genCountry30DayData(country), [country]);
+
+  const countryThreats = threats.filter(t => t.source.country === country);
+
+  const percentages = React.useMemo<Record<AttackType, number>>(() => {
+    if (countryThreats.length < 5) return DEFAULT_PERCENTAGES;
+    const counts: Record<string, number> = {};
+    for (const t of countryThreats) counts[t.attack_type] = (counts[t.attack_type] || 0) + 1;
+    const total = countryThreats.length;
+    const result = {} as Record<AttackType, number>;
+    for (const type of Object.keys(ATTACK_LABELS) as AttackType[]) {
+      result[type] = Math.round(((counts[type] || 0) / total) * 100 * 10) / 10;
+    }
+    return result;
+  }, [countryThreats]);
+
+  return (
+    <div
+      className="absolute z-30 flex flex-col overflow-y-auto"
+      style={{
+        right: 16,
+        top: 80,
+        width: 320,
+        maxHeight: 'calc(80vh)',
+        background: 'rgba(10,10,20,0.96)',
+        backdropFilter: 'blur(14px)',
+        borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderLeft: '3px solid #f97316',
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        <div className="flex items-center gap-2">
+          <img
+            src={`https://flagcdn.com/w40/${iso}.png`}
+            alt={`${country} flag`}
+            className="w-6 h-4 object-cover rounded-sm"
+          />
+          <div>
+            <span className="text-white font-bold text-sm tracking-wide">{country}</span>
+            <p className="text-[10px] text-slate-500 leading-none mt-0.5">Source of Attacks</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1 rounded">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Attack Volume Trend */}
+      <div className="px-4 pt-4 pb-3">
+        <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-0.5" style={{ color: '#f97316' }}>
+          ATTACK VOLUME
+        </p>
+        <p className="text-[10px] text-slate-500 mb-3">Last 30 days</p>
+        <div style={{ height: 120, width: '100%' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={trendData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id={`countryGrad-${iso}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f97316" stopOpacity={0.55} />
+                  <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="#f97316"
+                strokeWidth={1.5}
+                fill={`url(#countryGrad-${iso})`}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '0 16px' }} />
+
+      {/* Attack Types */}
+      <div className="px-4 pt-3 pb-4">
+        <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-0.5" style={{ color: '#f97316' }}>
+          ATTACK TYPES FROM THIS COUNTRY
+        </p>
+        <p className="text-[10px] text-slate-500 mb-3">Live from this source</p>
+
+        <div className="flex flex-col gap-3">
+          {(Object.keys(ATTACK_LABELS) as AttackType[]).map((type) => (
+            <div key={type} className="flex items-center gap-2">
+              <span className="text-xs text-slate-300 w-20 flex-shrink-0">{ATTACK_LABELS[type]}</span>
+              <div style={{ width: 60, height: 28, flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={SPARKLINES[type]} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
+                    <Line
+                      type="monotone"
+                      dataKey="v"
+                      stroke={ATTACK_COLORS[type]}
+                      strokeWidth={1.5}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
               <span className="text-xs font-mono font-bold ml-auto flex-shrink-0" style={{ color: ATTACK_COLORS[type] }}>
                 {percentages[type].toFixed(1)}%
               </span>
@@ -340,11 +490,12 @@ function buildRingsGeoJSON(states: Map<string, ArcState>, now: number): GeoJSON.
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 const CyberMap: React.FC = () => {
-  const [mapToken, setMapToken]       = useState<string | null>(null);
-  const [mapError, setMapError]       = useState<string | null>(null);
-  const [mapLoaded, setMapLoaded]     = useState(false);
-  const [liveOn, setLiveOn]             = useState(true);
-  const [somaliaPanel, setSomaliaPanel] = useState(false);
+  const [mapToken, setMapToken]           = useState<string | null>(null);
+  const [mapError, setMapError]           = useState<string | null>(null);
+  const [mapLoaded, setMapLoaded]         = useState(false);
+  const [liveOn, setLiveOn]               = useState(true);
+  const [somaliaPanel, setSomaliaPanel]   = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<any>(null);
@@ -388,9 +539,15 @@ const CyberMap: React.FC = () => {
         zoom: 2,
         projection: 'mercator',
         pitchWithRotate: false,
-        dragRotate: false,
         attributionControl: false,
-        interactive: false,
+        interactive: true,
+        scrollZoom: false,
+        boxZoom: false,
+        dragPan: false,
+        dragRotate: false,
+        doubleClickZoom: false,
+        touchZoomRotate: false,
+        touchPitch: false,
       });
 
       map.on('load', () => {
@@ -533,10 +690,27 @@ const CyberMap: React.FC = () => {
           },
         });
 
+        // Source country dot click → open CountryPanel
+        map.on('click', 'attack-sources-dot', (e: any) => {
+          const props = e.features?.[0]?.properties;
+          if (!props?.country) return;
+          setSelectedCountry(props.country);
+          setSomaliaPanel(false);
+        });
+
+        // Cursor affordance on source dots
+        map.on('mouseenter', 'attack-sources-dot', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'attack-sources-dot', () => {
+          map.getCanvas().style.cursor = '';
+        });
+
         // Somalia click detection (bounding box: Lat 0–12°N, Lng 41–51°E)
         map.on('click', (e: any) => {
           const { lat, lng } = e.lngLat;
           if (lat >= 0 && lat <= 12 && lng >= 41 && lng <= 51) {
+            setSelectedCountry(null);
             setSomaliaPanel(true);
           }
         });
@@ -725,8 +899,8 @@ const CyberMap: React.FC = () => {
         </button>
       </div>
 
-      {/* ── Click-to-open Somalia hint ───────────────────────────────────── */}
-      {mapLoaded && !somaliaPanel && (
+      {/* ── Click-to-open hint ───────────────────────────────────────────── */}
+      {mapLoaded && !somaliaPanel && !selectedCountry && (
         <div
           className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
           style={{
@@ -737,7 +911,7 @@ const CyberMap: React.FC = () => {
           }}
         >
           <p className="text-[10px] font-mono text-pink-300 tracking-widest uppercase">
-            🇸🇴 Click Somalia for attack stats
+            🌐 Click Somalia or any attack source for stats
           </p>
         </div>
       )}
@@ -746,8 +920,17 @@ const CyberMap: React.FC = () => {
       <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
 
       {/* ── Somalia Panel Overlay ─────────────────────────────────────────── */}
-      {somaliaPanel && (
+      {somaliaPanel && !selectedCountry && (
         <SomaliaPanel threats={threats} onClose={() => setSomaliaPanel(false)} />
+      )}
+
+      {/* ── Country Panel Overlay ─────────────────────────────────────────── */}
+      {selectedCountry && (
+        <CountryPanel
+          country={selectedCountry}
+          threats={threats}
+          onClose={() => setSelectedCountry(null)}
+        />
       )}
 
       {/* Loading overlay */}
