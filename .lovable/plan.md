@@ -1,185 +1,132 @@
 
 
-## Threat Intelligence and Prevention Dashboard
+## Fix Threat Intelligence Accuracy and Real-Time Updates
 
 ### Overview
 
-Add a new standalone "/threat-intelligence" page with 4 new edge functions, 3 new database tables, and a tabbed UI for comprehensive threat intelligence covering global threat feeds, technology fingerprinting, phishing domain monitoring, data breach checks, and security scorecards.
+Fix 7 interrelated issues with the Threat Intelligence page: inaccurate scoring of pending checks, silent edge function failures, lack of scheduling, no real-time UI updates, missing URL verification, fragile edge functions, and no confidence indicator. Also create a `check_errors` logging table.
 
 ---
 
-### 1. New Edge Functions
+### 1. Database: `check_errors` Table
 
-**A. `fetch-threat-intel`** (`supabase/functions/fetch-threat-intel/index.ts`)
-- Aggregates data from free public threat intelligence sources:
-  - **CISA KEV**: Fetches `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` -- filters latest 50 entries, matches affected vendors against detected technologies in our organizations
-  - **Abuse.ch URLhaus**: Fetches `https://urlhaus-api.abuse.ch/v1/urls/recent/` -- filters for .so domains or those targeting Somalia
-  - **NIST NVD**: Fetches `https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=20` -- filters for CVSS >= 7.0 and common web technologies (Nginx, Apache, PHP, WordPress, PostgreSQL, Node.js)
-- AlienVault OTX skipped initially (requires API key); can be added later if user provides one
-- Results cached for 30 minutes to avoid rate limits
-- Returns: `{ cisaKEV: [...], maliciousUrls: [...], latestCVEs: [...], fetchedAt }`
+Create a new table to log all check failures for debugging:
 
-**B. `fingerprint-tech`** (`supabase/functions/fingerprint-tech/index.ts`)
-- For each URL, fetches the website and inspects:
-  - `Server` header for web server name/version
-  - `X-Powered-By` header for language/framework
-  - HTML content for `<meta name="generator">` tag (WordPress, Joomla, Drupal)
-  - Known CMS paths: tries HEAD requests to `/wp-login.php`, `/administrator`, `/user/login`
-  - Cookie names in `Set-Cookie` header: `PHPSESSID`, `ASP.NET_SessionId`, `JSESSIONID`
-  - HTML body for JS library signatures (jQuery, React, Vue, Angular)
-- Returns: `{ url, technologies: { webServer, language, cms, framework, cdn, jsLibraries }, checkedAt }`
+| Column | Type |
+|---|---|
+| id | uuid PK, gen_random_uuid() |
+| organization_id | uuid, nullable |
+| organization_name | text |
+| url | text |
+| check_type | text |
+| error_type | text (CONNECTION_TIMEOUT, DNS_FAILED, SSL_ERROR, CONNECTION_REFUSED, EDGE_FUNCTION_ERROR, RATE_LIMITED, UNKNOWN) |
+| error_message | text |
+| retry_count | integer, default 0 |
+| checked_at | timestamptz, default now() |
 
-**C. `check-phishing-domains`** (`supabase/functions/check-phishing-domains/index.ts`)
-- For each organization domain, generates typosquat variations:
-  - Letter substitution (o to 0, l to 1, i to 1)
-  - Missing/extra letters, hyphenated versions, different TLDs (.com, .net, .org, .io)
-- For each variation, does a DNS lookup via Google DNS API (`dns.google/resolve`)
-- If domain resolves, flags as existing; optionally attempts HTTP fetch to check for active website
-- Returns: `{ organization, domain, lookalikeDomains: [{ domain, exists, ip, hasWebsite, risk }], totalFound }`
-
-**D. `check-breaches`** (`supabase/functions/check-breaches/index.ts`)
-- Checks organization email domains against free breach data sources
-- Uses the HIBP public breaches list (`https://haveibeenpwned.com/api/v3/breaches`) to get known breach names and metadata
-- Cross-references organization domains (note: full domain search requires paid HIBP API key; function will check public breach list and flag if organization's sector/type matches known breach targets)
-- Returns: `{ domain, breachesFound, breaches: [{ name, date, recordCount, dataTypes }] }`
-
-All functions set `verify_jwt = false` in config.toml.
+RLS: Authenticated SELECT, SuperAdmin/Analyst ALL, Auditor SELECT. Auto-delete entries older than 7 days via a scheduled SQL or client-side cleanup.
 
 ---
 
-### 2. New Database Tables
+### 2. Fix Score Calculation (Problem 1 + Problem 7)
 
-**Table: `threat_intelligence_logs`**
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | gen_random_uuid() |
-| organization_id | uuid, nullable | null for global threats |
-| organization_name | text, nullable | |
-| check_type | text | threat_feed, tech_fingerprint, phishing_domain, data_breach, scorecard |
-| risk_level | text | info, low, medium, high, critical |
-| details | jsonb | Full check result |
-| is_acknowledged | boolean | default false |
-| checked_at | timestamptz | default now() |
+**File:** `src/pages/ThreatIntelligence.tsx` -- `calculateScorecards` function
 
-**Table: `tech_fingerprints`**
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | gen_random_uuid() |
-| organization_id | uuid, nullable | |
-| url | text | |
-| web_server | text, nullable | |
-| web_server_version | text, nullable | |
-| language | text, nullable | |
-| language_version | text, nullable | |
-| cms | text, nullable | |
-| cms_version | text, nullable | |
-| cdn | text, nullable | |
-| js_libraries | text[] | default '{}' |
-| outdated_count | integer | default 0 |
-| vulnerabilities_count | integer | default 0 |
-| checked_at | timestamptz | default now() |
+Current logic assigns 0 to checks without data. Change to:
 
-**Table: `phishing_domains`**
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | gen_random_uuid() |
-| organization_id | uuid, nullable | |
-| organization_name | text | |
-| original_domain | text | |
-| lookalike_domain | text | |
-| is_active | boolean | default false |
-| ip_address | text, nullable | |
-| has_website | boolean | default false |
-| risk_level | text | default 'low' |
-| first_detected | timestamptz | default now() |
-| last_checked | timestamptz | default now() |
-| is_acknowledged | boolean | default false |
+- Track which checks have completed data vs pending
+- Only sum points and max-possible for checks that have actual data
+- Calculate percentage as `earnedPoints / completedMaxPoints * 100`
+- Add to `OrgScorecard` type: `completedChecks: number; totalChecks: number; confidence: number`
+- Display score as "X / Y (Z%)" with "N/10 checks completed"
+- Grade display becomes "A (5/10 checks)"
+- Confidence indicator: below 50% = yellow warning, 50-80% = blue "Partial", above 80% = green "High Confidence"
 
-RLS on all 3 tables: Authenticated SELECT, SuperAdmin/Analyst ALL, Auditor SELECT.
+The `breakdown` object values will use `null` for pending instead of `0`.
 
 ---
 
-### 3. New Page: `src/pages/ThreatIntelligence.tsx`
+### 3. Edge Function Timeout + Retry (Problem 2 + Problem 6)
 
-A large tabbed page following the same patterns as EarlyWarning.tsx and DdosMonitor.tsx.
+**File:** `src/pages/ThreatIntelligence.tsx`
 
-**Layout:**
-1. Page header with Crosshair icon, "Threat Intelligence Center" title, "Run Full Scan" button
-2. National Threat Level Banner (red/orange/yellow/green based on worst organization grade)
-3. 5-tab layout using existing Tabs component:
+Create a helper function `invokeWithRetry(fnName, body, maxRetries=2)`:
+- Wraps `supabase.functions.invoke()` with a 15-second timeout (AbortController)
+- On failure, retries up to 2 more times with 5-second delay
+- On final failure, logs to `check_errors` table and returns a structured error object
+- Classifies errors: CONNECTION_TIMEOUT, DNS_FAILED, SSL_ERROR, CONNECTION_REFUSED, EDGE_FUNCTION_ERROR, RATE_LIMITED, UNKNOWN
 
-**Tab 1: Security Scorecards**
-- Grid of organization cards with circular score gauge (reusing CircularGauge component pattern)
-- Score 0-100 calculated by pulling latest data from: uptime_logs, ssl_logs, ddos_risk_logs, early_warning_logs, tech_fingerprints
-- Grade letters A+ through F with color coding
-- Mini pass/fail icons for each category
-- Filters: grade, sector. Sort: worst first (default)
+**Edge Functions** (`fingerprint-tech`, `fetch-threat-intel`, `check-breaches`, `check-phishing-domains`, `check-security-headers`):
+- Increase HTTP request timeout from 10s to 20s
+- Add structured error response: `{ success: false, error: "CONNECTION_TIMEOUT", errorMessage: "...", url, checkedAt }`
+- Classify fetch errors by message content (cert/ssl, DNS, timeout, refused)
 
-**Tab 2: Global Threat Feed**
-- Scrolling feed from CISA KEV, NVD, URLhaus
-- Severity badges, CVE IDs, affected technology
-- Yellow "AFFECTS OUR ORGS" highlight when matching detected tech stack
-- Auto-refresh every 30 minutes
-
-**Tab 3: Technology Stack Map**
-- Table: Organization, Web Server, Version, Language, CMS, CDN, JS Libraries
-- Red badges on outdated software
-- Vulnerability count per org
-- Click to expand full vulnerability details
-
-**Tab 4: Phishing Domains**
-- Table of detected lookalike domains with status, IP, risk level
-- Red rows for active phishing sites
-- Green banner if none found
-
-**Tab 5: Data Breaches**
-- Table of breach data per organization domain
-- Red rows for recent breaches, yellow for older
-- Green banner if none found
-
-**State management:**
-- Separate state for each section's results
-- Client-side scheduling: threat feeds every 30min, fingerprinting every 12h, phishing/breach checks every 24h, scorecard recalculation every 1h
-- "Run Full Scan" triggers all checks immediately
-
-**Alert integration:**
-- Critical/high findings inserted into existing `alerts` table with 24h de-duplication
-
-**Mobile responsive:**
-- Cards instead of tables on mobile
-- Summary cards scroll horizontally
-- Tabs remain accessible
+Update the UI to show:
+- "Check Failed" in orange with specific error type instead of "~" forever
+- "Retry" button next to failed checks
+- "X/Y checks succeeded" indicator at page top
 
 ---
 
-### 4. Navigation Updates
+### 4. Queue-Based Scanning with Progress (Problem 3)
 
-**`src/components/layout/Sidebar.tsx`:**
-- Add `Crosshair` to lucide-react imports
-- Add nav item `{ to: '/threat-intelligence', icon: Crosshair, label: 'Threat Intel' }` between Early Warning and Reports
+**File:** `src/pages/ThreatIntelligence.tsx`
 
-**`src/App.tsx`:**
-- Import ThreatIntelligence component
-- Add route `<Route path="/threat-intelligence" element={<ThreatIntelligence />} />` inside AppLayout routes
+Replace `runFullScan` with a queue system:
+- Process organizations one at a time with 2-second delay between each
+- Show progress bar: "Scanning organizations... 5/35 complete"
+- Track `scanProgress: { current: number; total: number; currentOrg: string }` state
+
+Add client-side scheduling via `useEffect` with intervals:
+- Threat feed: 30 minutes
+- Tech fingerprinting: 12 hours
+- Phishing domains: 24 hours
+- Data breaches: 24 hours
+- Scorecard recalculation: 1 hour
+
+Use `useRef` for last-check timestamps to avoid re-renders. Stagger org checks within each interval.
 
 ---
 
-### 5. Config Update
+### 5. Realtime UI Updates (Problem 4)
 
-Add to `supabase/config.toml`:
-```text
-[functions.fetch-threat-intel]
-verify_jwt = false
+**File:** `src/pages/ThreatIntelligence.tsx`
 
-[functions.fingerprint-tech]
-verify_jwt = false
+Add Supabase Realtime subscriptions in a `useEffect`:
+- Subscribe to `uptime_logs`, `ssl_logs`, `ddos_risk_logs`, `early_warning_logs`, `threat_intelligence_logs` tables
+- On new INSERT, update the relevant organization's scorecard data
+- Recalculate score live as new results arrive
+- Add CSS transition/animation: brief green glow on score improvement, red glow on degradation
+- Show "Last updated: X seconds ago" live counter per card (1-second tick interval)
+- Show global "Last scan: X minutes ago" in the page header
 
-[functions.check-phishing-domains]
-verify_jwt = false
-
-[functions.check-breaches]
-verify_jwt = false
+Enable realtime on relevant tables via migration:
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE uptime_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE ssl_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE ddos_risk_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE early_warning_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE threat_intelligence_logs;
 ```
+
+---
+
+### 6. URL Verification (Problem 5)
+
+This is specifically about the Organizations page, not the Threat Intelligence page. However, since the prompt says "do NOT change existing pages", this will be handled minimally:
+
+- On the Threat Intelligence page's scorecard cards, show URL status (reachable/unreachable) based on the latest uptime_logs data
+- If an org's URL is failing all checks, show a yellow "URL may be incorrect" warning on the card
+- Common Somali URL correction suggestions shown in a tooltip
+
+---
+
+### 7. Score Confidence Display (Problem 7)
+
+Already covered in the scorecard fix (section 2). Add a small bar or badge next to each score:
+- Below 50% confidence: yellow "Low Confidence -- more checks needed"
+- 50-80%: blue "Partial -- some checks pending"
+- Above 80%: green "High Confidence"
 
 ---
 
@@ -187,27 +134,20 @@ verify_jwt = false
 
 | File | Action |
 |---|---|
-| `supabase/functions/fetch-threat-intel/index.ts` | Create |
-| `supabase/functions/fingerprint-tech/index.ts` | Create |
-| `supabase/functions/check-phishing-domains/index.ts` | Create |
-| `supabase/functions/check-breaches/index.ts` | Create |
-| `src/pages/ThreatIntelligence.tsx` | Create |
-| `src/components/layout/Sidebar.tsx` | Edit (add nav item + Crosshair import) |
-| `src/App.tsx` | Edit (add import + route) |
-| Migration SQL | Create 3 tables + RLS policies |
-
----
+| Migration SQL | Create `check_errors` table + RLS + enable realtime on 5 tables |
+| `src/pages/ThreatIntelligence.tsx` | Major edit -- fix scoring, add retry/queue/realtime/confidence/progress |
+| `supabase/functions/fingerprint-tech/index.ts` | Edit -- increase timeout to 20s, structured error responses |
+| `supabase/functions/fetch-threat-intel/index.ts` | Edit -- increase timeout to 20s, structured error responses |
+| `supabase/functions/check-breaches/index.ts` | Edit -- increase timeout to 20s, structured error responses |
+| `supabase/functions/check-phishing-domains/index.ts` | Edit -- increase timeout to 20s, structured error responses |
+| `supabase/functions/check-security-headers/index.ts` | Edit -- increase timeout to 20s, structured error responses |
 
 ### Technical Notes
 
-- All API calls go through edge functions, never from the browser
-- CISA KEV and NVD are fully free with no API key required
-- URLhaus (abuse.ch) is free with no API key
-- HIBP public breach list is free; full domain search requires paid API (noted in UI)
-- AlienVault OTX requires a free API key -- skipped initially, can be added later via Settings
-- Results are cached client-side and in the database to avoid hitting rate limits
-- Errors in any check show "Check Failed" or "Pending" in gray, never crash
-- Security scorecard pulls from ALL existing monitoring tables (uptime_logs, ssl_logs, ddos_risk_logs, early_warning_logs) plus the new tech_fingerprints table
-- Existing pages, edge functions, and tables are NOT modified (except Sidebar and App.tsx for navigation)
-- The page component will be large (~1200-1500 lines) following the same single-file pattern as EarlyWarning.tsx and DdosMonitor.tsx
+- No existing pages other than ThreatIntelligence.tsx are modified
+- Realtime subscriptions are cleaned up on component unmount
+- Queue processing stops if user navigates away (cleanup via ref)
+- Edge function error classification uses string matching on error messages
+- Progress bar uses existing UI components (Progress from radix)
+- All intervals cleared on unmount to prevent memory leaks
 
