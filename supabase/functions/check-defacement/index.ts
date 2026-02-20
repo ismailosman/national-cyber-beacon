@@ -16,8 +16,6 @@ const DEFACEMENT_PHRASES = [
   'greetz to',
   'greetings from',
   'cyber army',
-  'we are anonymous',
-  'expect us',
   'tango down',
   'ops by ',
   'r.i.p website',

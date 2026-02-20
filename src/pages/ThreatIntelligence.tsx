@@ -644,8 +644,8 @@ const ThreatIntelligence: React.FC = () => {
           }, { onConflict: 'url' });
         }
 
-        // Only alert on confirmed defacement (2+ indicators)
-        if (r.status === 'defaced') {
+        // Only alert on high-confidence defacement (3+ indicators)
+        if (r.status === 'defaced' && r.indicatorCount >= 3) {
           await generateAlert('critical', `Website Defaced: ${org.name}`, `Defacement detected on ${r.url} (${r.indicatorCount} indicators). Keywords: ${r.defacementKeywordsFound?.join(', ') || 'none'}`);
         }
       }
