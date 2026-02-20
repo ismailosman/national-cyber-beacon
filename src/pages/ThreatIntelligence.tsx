@@ -205,6 +205,9 @@ const ThreatIntelligence: React.FC = () => {
   const [phishingResults, setPhishingResults] = useState<PhishingResult[]>([]);
   const [breachResults, setBreachResults] = useState<BreachResult[]>([]);
   const [checkErrors, setCheckErrors] = useState<Record<string, { type: string; message: string }>>({});
+  const [techScanning, setTechScanning] = useState(false);
+  const [phishingScanning, setPhishingScanning] = useState(false);
+  const [breachScanning, setBreachScanning] = useState(false);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -765,6 +768,26 @@ const ThreatIntelligence: React.FC = () => {
     if (!loading && orgs.length > 0 && !initialRun.current) {
       initialRun.current = true;
 
+      // Load tech fingerprints from DB
+      supabase.from('tech_fingerprints' as any).select('*').then(({ data: techData }: any) => {
+        if (techData && techData.length > 0) {
+          const fp: Record<string, TechFingerprint> = {};
+          for (const t of techData) {
+            fp[t.url] = {
+              url: t.url,
+              technologies: {
+                webServer: t.web_server, webServerVersion: t.web_server_version,
+                language: t.language, languageVersion: t.language_version,
+                cms: t.cms, cmsVersion: t.cms_version,
+                cdn: t.cdn, jsLibraries: t.js_libraries || [],
+              },
+              error: null, checkedAt: t.checked_at,
+            };
+          }
+          setTechFingerprints(fp);
+        }
+      });
+
       // Load phishing from DB
       supabase.from('phishing_domains').select('*').then(({ data: phishingData }) => {
         if (phishingData && phishingData.length > 0) {
@@ -1206,7 +1229,28 @@ const ThreatIntelligence: React.FC = () => {
         {/* ─── Tab 3: Tech Stack ─── */}
         <TabsContent value="tech" className="space-y-4">
           {Object.keys(techFingerprints).length === 0 && !scanning && (
-            <p className="text-center text-muted-foreground py-8">No tech data yet. Run a scan to fingerprint organizations.</p>
+            <Card className="border-border">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Wrench className="w-12 h-12 text-muted-foreground/50" />
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-semibold">No Tech Stack Data Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Scan all {orgs.length} organizations to detect web servers, CMS platforms, programming languages, and CDN providers.
+                  </p>
+                </div>
+                <Button
+                  onClick={async () => {
+                    setTechScanning(true);
+                    try { await runFingerprinting(orgs); } finally { setTechScanning(false); }
+                  }}
+                  disabled={techScanning}
+                  className="gap-2"
+                >
+                  {techScanning ? <><RefreshCw className="w-4 h-4 animate-spin" /> Scanning...</> : <><Wrench className="w-4 h-4" /> Scan Tech Stack</>}
+                </Button>
+                <p className="text-xs text-muted-foreground">Or click "Run Full Scan" above to run all checks at once.</p>
+              </CardContent>
+            </Card>
           )}
           {Object.keys(techFingerprints).length > 0 && (
             <Card className="border-border">
@@ -1267,7 +1311,28 @@ const ThreatIntelligence: React.FC = () => {
         {/* ─── Tab 4: Phishing ─── */}
         <TabsContent value="phishing" className="space-y-4">
           {phishingResults.length === 0 && !scanning && (
-            <p className="text-center text-muted-foreground py-8">No phishing data yet. Run a scan to check for lookalike domains.</p>
+            <Card className="border-border">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Fish className="w-12 h-12 text-muted-foreground/50" />
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-semibold">No Phishing Data Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Scan for lookalike/typosquat domains targeting {orgs.length} monitored organizations.
+                  </p>
+                </div>
+                <Button
+                  onClick={async () => {
+                    setPhishingScanning(true);
+                    try { await runPhishingCheck(orgs); } finally { setPhishingScanning(false); }
+                  }}
+                  disabled={phishingScanning}
+                  className="gap-2"
+                >
+                  {phishingScanning ? <><RefreshCw className="w-4 h-4 animate-spin" /> Scanning...</> : <><Fish className="w-4 h-4" /> Scan for Phishing Domains</>}
+                </Button>
+                <p className="text-xs text-muted-foreground">Or click "Run Full Scan" above to run all checks at once.</p>
+              </CardContent>
+            </Card>
           )}
 
           {phishingResults.length > 0 && totalPhishing === 0 && (
@@ -1328,7 +1393,28 @@ const ThreatIntelligence: React.FC = () => {
         {/* ─── Tab 5: Breaches ─── */}
         <TabsContent value="breaches" className="space-y-4">
           {breachResults.length === 0 && !scanning && (
-            <p className="text-center text-muted-foreground py-8">No breach data yet. Run a scan to check for data breaches.</p>
+            <Card className="border-border">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Database className="w-12 h-12 text-muted-foreground/50" />
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-semibold">No Breach Data Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Check if any of the {orgs.length} monitored organization domains appear in known data breach databases.
+                  </p>
+                </div>
+                <Button
+                  onClick={async () => {
+                    setBreachScanning(true);
+                    try { await runBreachCheck(orgs); } finally { setBreachScanning(false); }
+                  }}
+                  disabled={breachScanning}
+                  className="gap-2"
+                >
+                  {breachScanning ? <><RefreshCw className="w-4 h-4 animate-spin" /> Checking...</> : <><Database className="w-4 h-4" /> Check for Breaches</>}
+                </Button>
+                <p className="text-xs text-muted-foreground">Or click "Run Full Scan" above to run all checks at once.</p>
+              </CardContent>
+            </Card>
           )}
 
           {breachResults.length > 0 && totalBreaches === 0 && (
