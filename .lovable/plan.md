@@ -1,82 +1,147 @@
 
 
-## Fix All 7 Pending Security Checks
+## Fix False Defacement Detection + Populate Threat Feed, Phishing & Breaches
 
-### Root Cause
+### Overview
 
-The edge functions for security headers, DNS, blacklist, defacement, and ports already exist. The `fingerprint-tech` function also exists. However, `runFullScan` in `ThreatIntelligence.tsx` never calls these functions and never saves their results to `early_warning_logs`. That is why all 7 checks remain "Pending" forever.
-
-### Solution
-
-Add a new scan phase in `runFullScan` that calls all 7 check functions for each organization and saves results to `early_warning_logs`. Also create a simple `check-ports` edge function (HTTP-based port probing).
+Two major fixes: (1) Overhaul defacement detection to eliminate false positives from legitimate websites like fisheries.gov.so and hormuud.com. (2) Ensure Threat Feed, Phishing, and Breaches tabs display real data from free public APIs.
 
 ---
 
-### 1. New Edge Function: `check-ports`
+### Part A: Fix False Defacement Detection
 
-Create `supabase/functions/check-ports/index.ts` that attempts HTTP HEAD requests to common dangerous ports (3306, 5432, 3389, 8080, 8443, 27017, 21, 22) with a 3-second timeout per port. Returns list of open ports.
+#### 1. Rewrite `check-defacement` Edge Function
 
-Add to `supabase/config.toml`:
+**File:** `supabase/functions/check-defacement/index.ts`
+
+Replace the current aggressive detection logic with a multi-indicator confirmation system:
+
+**Keyword changes:**
+- Replace the 16-keyword list (which includes generic terms like "anonymous", "security breach", "was here") with 18 high-confidence defacement phrases that require context (e.g., "hacked by ", "defaced by ", "you have been hacked")
+- Match keywords only in visible page content -- strip `<script>`, `<style>`, `<meta>` tags before keyword search
+
+**New HTML cleaning function:**
+- Strip scripts, styles, comments, CSRF tokens, nonces, timestamps (unix and ISO), session IDs, cache-busting query strings, inline event handlers
+- Normalize all whitespace before hashing
+- This prevents dynamic content from causing false hash changes
+
+**Multi-indicator confirmation (new):**
+Instead of `isDefaced = keywords.length > 0 || (hashChanged && (titleChanged || sizeAnomaly))`, use a scoring system with 5 indicators:
+1. Defacement phrase found in visible content (not in scripts/meta)
+2. Page title does NOT contain expected org-related text
+3. Page size under 5KB (defaced pages are tiny)
+4. Missing normal HTML structure (no `<nav>`, `<footer>`, `<header>`)
+5. Fewer than 3 internal links
+
+Result classification:
+- 0 indicators = "clean"
+- 1 indicator = "review_needed" (yellow, not red)
+- 2+ indicators = "defaced" (high confidence)
+
+**Calibration period (new):**
+Accept a `checkCount` parameter from the caller. On check 1 (no baseline), mark as "baseline_set". On checks 2-3, mark as "calibrating" and update baseline if structurally similar. From check 4+, start real comparison.
+
+**Return enhanced data:**
+```typescript
+{
+  url, currentHash, currentTitle, currentSize,
+  hashChanged, titleChanged, sizeAnomaly,
+  defacementKeywordsFound,
+  indicators: { phraseFound, titleMismatch, smallPage, missingStructure, fewLinks },
+  indicatorCount,
+  status: "clean" | "baseline_set" | "calibrating" | "review_needed" | "defaced" | "error",
+  internalLinkCount, hasNormalStructure,
+  checkedAt
+}
 ```
-[functions.check-ports]
-verify_jwt = false
-```
+
+#### 2. Update Frontend Defacement Handling
+
+**File:** `src/pages/ThreatIntelligence.tsx` -- `runDefacementCheck` function
+
+- Track check count per org by querying existing `early_warning_logs` with `check_type = 'defacement'` before calling the edge function
+- Pass `checkCount` to the edge function for each URL
+- Map the new `status` field to risk levels:
+  - "clean" / "baseline_set" / "calibrating" = 'safe'
+  - "review_needed" = 'warning'
+  - "defaced" = 'critical'
+- Only generate alerts for "defaced" status (2+ indicators), not "review_needed"
+- Only update baseline on first 3 checks or when user manually resets
+- Store enhanced details (indicators, internalLinkCount, etc.) in the `early_warning_logs.details` column
+
+#### 3. UI Status Display
+
+In the scorecard detail modal, show defacement status with the new categories:
+- "Clean" (green check)
+- "Baseline Set" (blue)
+- "Calibrating" (blue)
+- "Content Changed" (yellow) -- hash changed but no defacement phrases
+- "Review Needed" (yellow) -- 1 indicator
+- "DEFACED" (red pulsing) -- 2+ indicators
+- "Check Failed" (gray)
+
+Add a "Details" expandable section showing which indicators triggered and the surrounding text context for any matched phrases.
+
+Add "Mark as Clean" and "Reset Baseline" actions per organization (upserts to `baselines` table and inserts a new `early_warning_logs` entry with 'safe' status).
 
 ---
 
-### 2. Major Update: `src/pages/ThreatIntelligence.tsx`
+### Part B: Populate Threat Feed, Phishing & Breaches
 
-Add 5 new check runner functions that call the existing edge functions and save results to `early_warning_logs`:
+#### 4. Fix `fetch-threat-intel` Edge Function
 
-**A. `runSecurityHeadersCheck(orgList)`**
-- Calls `check-security-headers` with `{ urls: [org.url, ...] }`
-- Saves each result to `early_warning_logs` with `check_type = 'security_headers'`
-- Risk level: score >= 5 = 'safe', 3-4 = 'warning', below 3 = 'critical'
+**File:** `supabase/functions/fetch-threat-intel/index.ts`
 
-**B. `runEmailDnsCheck(orgList)`**
-- Calls `check-dns` with `{ domains: [domain, ...] }`
-- Saves DNS result to `early_warning_logs` with `check_type = 'dns'`
-- Saves email security data to `early_warning_logs` with `check_type = 'email_security'` (extracting SPF/DMARC/DKIM from the DNS response's `emailSecurity` field -- the existing `check-dns` function already returns this)
-- Compares DNS records against baselines for integrity checking
+The function already exists and fetches CISA KEV, URLhaus, and NVD data. Issues to fix:
+- URLhaus endpoint uses POST which may be less reliable -- add fallback to GET endpoint `https://urlhaus-api.abuse.ch/v1/urls/recent/limit/50/`
+- Add Feodo Tracker as a third source: `https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.json`
+- Increase timeout to 20s
+- Return combined `threats` array alongside the existing separate fields for backward compatibility
 
-**C. `runBlacklistCheck(orgList)`**
-- Calls `check-blacklist` with `{ urls: [org.url, ...] }`
-- Saves to `early_warning_logs` with `check_type = 'blacklist'`
-- Risk level: blacklisted = 'critical', clean = 'safe'
+The frontend already renders CISA KEV, NVD CVEs, and URLhaus in the Threat Feed tab. Add Feodo Tracker rendering in a new card section.
 
-**D. `runDefacementCheck(orgList)`**
-- Calls `check-defacement` with `{ urls: [{ url, baselineHash, baselineTitle, baselineSize }, ...] }`
-- Reads baselines from `baselines` table first
-- Saves to `early_warning_logs` with `check_type = 'defacement'`
-- On first run, upserts baseline hash/title/size into `baselines` table
-- Risk level: defaced = 'critical', hash changed = 'warning', clean = 'safe'
+Add a "Feodo Tracker" filter option to the threat filter dropdown.
 
-**E. `runPortsCheck(orgList)`**
-- Calls new `check-ports` with `{ hostnames: [hostname, ...] }`
-- Saves to `early_warning_logs` with `check_type = 'open_ports'`
-- Risk level: critical ports open = 'critical', medium only = 'warning', none = 'safe'
-- If edge function reports ports unavailable, saves with risk_level = 'safe' and a note
+#### 5. Fix `check-phishing-domains` Edge Function
 
-**Update `runFullScan`** to add Phase 2 (between current Fingerprinting and Global feeds):
-- Process organizations in batches of 5
-- For each batch, call all 5 check functions
-- 2-second delay between batches
-- Update progress bar to show the new phases
+**File:** `supabase/functions/check-phishing-domains/index.ts`
 
-**Update scorecard calculation**:
-- The `email` check currently reads from `check_type = 'dns'` but should read from `check_type = 'email_security'` for the email score (separate log entry)
-- The `headers` check reads from `check_type = 'security_headers'` -- this is correct, just needs data
-- All other check_types are already correctly mapped
+The function already exists and works. No changes needed to the edge function itself -- it already generates typosquat variations and checks DNS via Google DNS API.
 
----
+The frontend already calls it and renders results. The only issue is if the edge function times out for large org lists. Already handled by `invokeWithRetry` with 2 retries.
 
-### 3. Scorecard Email Fix
+No changes needed here -- this tab should already populate after a full scan.
 
-Currently (line 281), the email check looks for `check_type === 'dns'` and reads `emailSecurity` from it. This is fine since `check-dns` returns both DNS and email data. We will save two separate `early_warning_logs` entries:
-- One with `check_type = 'dns'` containing DNS records
-- One with `check_type = 'email_security'` containing SPF/DMARC/DKIM
+#### 6. Fix `check-breaches` Edge Function
 
-Then update the scorecard to read email from `check_type === 'email_security'` instead of `check_type === 'dns'`.
+**File:** `supabase/functions/check-breaches/index.ts`
+
+The function already exists and fetches the HIBP breach catalog. Issues to fix:
+- Cross-reference breaches with detected tech stacks from `tech_fingerprints` table
+- The current matching logic is too broad (matches on partial domain substrings). Improve to match on exact service names
+- Add the `relevantServices` list for better matching
+- Split the response into "relevant breaches" (matching org tech) and "global breaches" for the two-section UI
+
+Update the Breaches tab UI to show two sections:
+- Section A: "Breaches Affecting Our Organizations" -- filtered by tech stack match
+- Section B: "Recent Global Breaches" -- all significant recent breaches
+
+#### 7. Frontend: Threat Feed Tab Enhancements
+
+- Add Feodo Tracker card rendering
+- Add "Feodo" to the filter dropdown
+- Add "Affects Our Organizations" filter option that checks CISA KEV vendor/product against `tech_fingerprints`
+- Add search box for filtering threats
+- Show "Last updated" timestamp from `threatFeed.fetchedAt`
+- Add "Refresh" button that calls `fetchThreatFeed()` independently
+
+#### 8. Frontend: Breaches Tab Enhancements
+
+- Add two-section layout (relevant + global)
+- Show "Recommend password reset" action for relevant breaches
+- Add note about HIBP API key for domain-specific searches
+- Show "Last updated" timestamp
+- Add yellow "Relevant" badge for breaches matching org tech
 
 ---
 
@@ -84,15 +149,18 @@ Then update the scorecard to read email from `check_type === 'email_security'` i
 
 | File | Action |
 |---|---|
-| `supabase/functions/check-ports/index.ts` | Create -- HTTP-based port probing |
-| `src/pages/ThreatIntelligence.tsx` | Edit -- add 5 check runner functions, update runFullScan, fix email scorecard lookup |
-| `supabase/config.toml` | Edit -- add check-ports config |
+| `supabase/functions/check-defacement/index.ts` | Major rewrite -- multi-indicator detection, calibration, better cleaning |
+| `supabase/functions/fetch-threat-intel/index.ts` | Edit -- add Feodo Tracker, URLhaus fallback, better error handling |
+| `supabase/functions/check-breaches/index.ts` | Edit -- improve matching, add relevant/global split |
+| `src/pages/ThreatIntelligence.tsx` | Major edit -- defacement UI, threat feed enhancements, breaches two-section layout, mark as clean / reset baseline actions |
 
 ### Technical Notes
 
-- All existing edge functions already work and have proper CORS, timeouts, and error handling
-- The `check-dns` function already returns `emailSecurity` with SPF, DMARC, and DKIM data
-- No database schema changes needed -- `early_warning_logs` and `baselines` tables already exist
-- The `tech_fingerprints` table already exists and is already being populated
-- Port scanning via HTTP is best-effort; if Deno blocks non-standard ports, the check gracefully returns empty results with full points awarded
+- No database schema changes needed -- all existing tables suffice
+- The `baselines` table already has `content_hash`, `page_title`, `page_size`, and `dns_records` columns
+- Defacement check count is derived from existing `early_warning_logs` entries (count where check_type = 'defacement' and organization_id = X)
+- The "Mark as Clean" action upserts baseline and inserts a new early_warning_logs entry
+- Edge functions are deployed automatically after code changes
+- All free APIs used require NO API keys
+- Existing working checks (Uptime, SSL, DDoS, Headers, DNS, Ports, Email, Blacklist) are not modified
 
