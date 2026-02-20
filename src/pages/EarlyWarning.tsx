@@ -164,10 +164,10 @@ const EarlyWarning: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       const [orgsRes, baselinesRes] = await Promise.all([
-        supabase.from('organizations_monitored').select('*').eq('is_active', true),
+        supabase.from('organizations').select('id, name, domain, sector').order('name'),
         supabase.from('baselines').select('*') as any,
       ]);
-      if (orgsRes.data) setOrgs(orgsRes.data);
+      if (orgsRes.data) setOrgs(orgsRes.data.map((d: any) => ({ id: d.id, name: d.name, url: d.domain.startsWith('http') ? d.domain : 'https://' + d.domain, sector: d.sector, is_active: true })));
       if (baselinesRes.data) setBaselines(baselinesRes.data);
       setLoading(false);
     };

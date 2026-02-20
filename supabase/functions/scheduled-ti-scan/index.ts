@@ -15,10 +15,11 @@ Deno.serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, serviceRoleKey)
 
-    const { data: orgs, error } = await supabase
-      .from('organizations_monitored')
-      .select('id, name, url, sector')
-      .eq('is_active', true)
+    const { data: rawOrgs, error } = await supabase
+      .from('organizations')
+      .select('id, name, domain, sector')
+
+    const orgs = (rawOrgs || []).map((o: any) => ({ ...o, url: o.domain.startsWith('http') ? o.domain : `https://${o.domain}` }))
 
     if (error) throw error
 

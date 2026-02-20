@@ -228,8 +228,8 @@ const ThreatIntelligence: React.FC = () => {
   /* ─── Load orgs ─── */
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.from('organizations_monitored').select('*').eq('is_active', true);
-      if (data) setOrgs(data);
+      const { data } = await supabase.from('organizations').select('id, name, domain, sector').order('name');
+      if (data) setOrgs(data.map((d: any) => ({ id: d.id, name: d.name, url: d.domain.startsWith('http') ? d.domain : 'https://' + d.domain, sector: d.sector, is_active: true })));
       setLoading(false);
     };
     load();
