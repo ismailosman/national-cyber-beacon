@@ -1,76 +1,17 @@
 
+## Add Hargeisa as a Target Location on the Cyber Threat Map
 
-# Add Cloudflare Turnstile CAPTCHA Gate to Landing Page
+### What Changes
 
-## What You'll See
+Add Hargeisa (Somalia's second-largest city, capital of Somaliland) as a target in the `SOMALIA_TARGETS` array in `src/hooks/useLiveAttacks.ts`. This means simulated attacks will now randomly target both Mogadishu-area locations and Hargeisa, making the threat map more representative.
 
-When visiting `/`, a clean verification screen appears first -- showing the Somalia Cyber Defence logo, a "Verifying you are human" message, and the Cloudflare Turnstile widget. Once verified, the landing page loads automatically. Returning visitors in the same browser session skip the check.
+### Technical Details
 
-## Setup Steps (before coding)
+**File: `src/hooks/useLiveAttacks.ts`**
 
-1. **Store your Turnstile Secret Key** as a backend secret called `TURNSTILE_SECRET_KEY`
-2. **Store your Turnstile Site Key** as a constant in the frontend code (it's public/safe to expose)
+Add several Hargeisa-area coordinate entries to the `SOMALIA_TARGETS` array (around lines 82-89). Hargeisa coordinates center around lat 9.56, lng 44.06. Multiple slightly varied points will be added (similar to how Mogadishu has several district-level entries) to create natural spread on the map:
 
-## Implementation
+- Hargeisa city center (~9.560, 44.064)
+- Hargeisa district variants (e.g., Ahmed Dhagah, Ga'an Libah, Mohamed Mooge)
 
-### New Files
-
-| File | Purpose |
-|---|---|
-| `src/pages/TurnstileGate.tsx` | Full-screen verification page matching the reference screenshot style: dark background, logo, "Verifying you are human" heading, Turnstile widget, auto-redirect on success |
-| `supabase/functions/verify-turnstile/index.ts` | Backend function that validates the Turnstile token with Cloudflare's siteverify API using the secret key |
-
-### Modified Files
-
-| File | Change |
-|---|---|
-| `index.html` | Add Turnstile script: `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer>` |
-| `src/App.tsx` | Change `/` route from `<Landing />` to `<TurnstileGate />` |
-
-### Flow
-
-```text
-User visits /
-    |
-    v
-TurnstileGate checks sessionStorage for "verified" flag
-    |
-    +-- Already verified? --> Render Landing page directly
-    |
-    +-- Not verified? --> Show verification screen
-            |
-            v
-        Turnstile widget renders and user completes challenge
-            |
-            v
-        Token sent to verify-turnstile backend function
-            |
-            v
-        Backend calls Cloudflare siteverify API with secret key
-            |
-            v
-        Success? --> Set sessionStorage flag, render Landing page
-        Failure? --> Show error with retry option
-```
-
-### Verification Page Design (matching reference)
-
-- Dark background consistent with the app theme
-- Somalia Cyber Defence logo centered at top
-- Heading: "Verifying you are human"
-- Subtitle: "This process is automatic. Your browser will redirect shortly."
-- Turnstile widget centered below
-- Footer: "cyberdefense.so needs to review the security of your connection before proceeding"
-
-### Backend Function
-
-The `verify-turnstile` edge function:
-- Accepts POST with `{ token: string }`
-- Calls `https://challenges.cloudflare.com/turnstile/v0/siteverify` with `TURNSTILE_SECRET_KEY`
-- Returns `{ success: true/false }`
-- Has `verify_jwt = false` in config since it's called before authentication
-
-### Scope
-
-Only the `/` route is gated. `/cyber-map`, `/threat-map`, `/login`, and all authenticated routes remain unaffected.
-
+No other files need to change -- the threat generator already picks randomly from `SOMALIA_TARGETS`, so adding entries automatically distributes attacks across both cities.
