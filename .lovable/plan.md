@@ -1,47 +1,23 @@
 
 
-## Plan: Make CIS Controls Clickable with Requirements and Recommendations
+## Plan: Add ITU National Cybersecurity Index Radar Chart
 
-### Problem
-The compliance table rows are not interactive. When running CIS compliance assessments, users cannot see what each control requires or recommends. The `description` column in the database is empty for all controls.
+### What This Does
+When the ITU National Cybersecurity Index framework is selected on the Compliance page, a radar/spider chart will appear above the controls table showing the 5 pillars scored 0-100% each, giving a visual snapshot of Somalia's national cybersecurity maturity.
 
-### Solution
-Make each control row clickable to expand and show detailed requirements and recommendations inline. Since the database `description` field is null for all controls, we will embed CIS Controls v8 requirement/recommendation text as a static dictionary in the component.
-
----
+### How It Works
+Each of the 5 ITU pillars (Legal, Technical, Organizational, Capacity, Cooperation) gets a score calculated from its assessed controls using the same formula already in use: `(passing x 1.0 + partial x 0.5) / total_assessed x 100`. The radar chart uses the same Recharts RadarChart component already used on the Organization Detail page.
 
 ### Changes
 
-#### 1. Add CIS Controls Reference Data (src/pages/Compliance.tsx)
+**File: `src/pages/Compliance.tsx`**
 
-Add a static `CIS_CONTROL_DETAILS` dictionary near the top of the file containing requirements and recommendations for all 20 CIS controls. Example entries:
+1. Import `RadarChart`, `Radar`, `PolarGrid`, `PolarAngleAxis`, `PolarRadiusAxis`, `ResponsiveContainer`, and `Tooltip` from `recharts`
+2. After the score summary cards (line ~269) and before the domain filter tabs, add a conditional block that only renders when `selectedFrameworkKey === 'itu-nci'`:
+   - Compute per-pillar scores by grouping assessments by their control's domain
+   - Render a glass-card containing a `RadarChart` with the 5 pillars as axes
+   - Show the overall ITU score (average of all 5 pillars) in the center or beside the chart
+   - Include a legend showing each pillar's individual score percentage
+3. Style the chart to match the existing SOC dark theme (cyan stroke, dark polar grid, matching fonts)
 
-- **CIS-1.1**: "Establish and maintain an accurate, detailed, and up-to-date inventory of all enterprise assets..." with recommendations like "Use automated tools for asset discovery" and "Update inventory weekly"
-- **CIS-4.1**: "Establish and maintain a secure configuration process for enterprise assets..." with recommendations for hardening baselines
-- All 20 controls will have entries with `requirements` (string) and `recommendations` (string array)
-
-#### 2. Make Rows Expandable (src/pages/Compliance.tsx)
-
-- Add a `expandedControl` state (string or null) to track which row is expanded
-- Make each table row clickable with a cursor pointer and a chevron indicator
-- When clicked, toggle an expanded detail panel below the row showing:
-  - **Requirements**: Full description of what the control requires
-  - **Recommendations**: Bulleted list of actionable steps
-  - If an assessment exists, also show the **Evidence** details in the expanded view
-- Style the expanded section with a slightly different background to distinguish it from the table
-
-#### 3. Visual Indicators
-
-- Add a small chevron icon (ChevronDown/ChevronRight) in the Code column to indicate expandability
-- Highlight the expanded row with a subtle border accent
-- The expanded panel will have a clean two-column layout: Requirements on the left, Recommendations on the right (stacked on mobile)
-
----
-
-### Technical Details
-
-| File | Changes |
-|---|---|
-| `src/pages/Compliance.tsx` | Add `CIS_CONTROL_DETAILS` dictionary (~20 entries), add `expandedControl` state, make `<tr>` clickable with `onClick` toggle, render conditional expanded row with requirements/recommendations |
-
-No database changes needed -- all reference data is embedded in the component.
+No database changes or new dependencies needed -- Recharts is already installed and RadarChart is already used elsewhere in the project.
