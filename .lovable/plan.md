@@ -1,58 +1,47 @@
 
 
-## Plan: Fix PENDING Scorecards, Replace Logo, and Create Storage Bucket
+## Plan: Make CIS Controls Clickable with Requirements and Recommendations
 
-### Root Cause of PENDING
+### Problem
+The compliance table rows are not interactive. When running CIS compliance assessments, users cannot see what each control requires or recommends. The `description` column in the database is empty for all controls.
 
-The scorecards show "PENDING" because 19 out of 36 organizations have **no early warning or DDoS scan data**. Here's the breakdown:
-
-| Data Source | Orgs with Data | Notes |
-|---|---|---|
-| uptime_logs | 36/36 | All matched (correct IDs from recent scan) |
-| ssl_logs | 36/36 | All matched (correct IDs from recent scan) |
-| early_warning_logs | 17/36 | Only old scan data (matched by name) |
-| ddos_risk_logs | 17/36 | Only old scan data (matched by name) |
-| tech_fingerprints | 0/36 | No data at all |
-
-For the 19 orgs missing early warning data, 8 out of 10 scorecard checks (email, headers, ports, defacement, dns, blacklist, ddos, software) show PENDING -- only uptime and SSL work.
-
-The previous FK constraint fix allows new scans to save data correctly, but no full scan has been completed since. The fix is to **auto-trigger the missing security checks on page load** so users don't have to manually run a full scan.
+### Solution
+Make each control row clickable to expand and show detailed requirements and recommendations inline. Since the database `description` field is null for all controls, we will embed CIS Controls v8 requirement/recommendation text as a static dictionary in the component.
 
 ---
 
 ### Changes
 
-#### 1. Replace Logo
-- Copy uploaded `cyber-logo.png` to `src/assets/logo.png`
+#### 1. Add CIS Controls Reference Data (src/pages/Compliance.tsx)
 
-#### 2. Create Storage Bucket
-- Database migration to create a `media` storage bucket with public access and appropriate RLS policies for authenticated uploads
+Add a static `CIS_CONTROL_DETAILS` dictionary near the top of the file containing requirements and recommendations for all 20 CIS controls. Example entries:
 
-#### 3. Fix PENDING Scorecards (src/pages/ThreatIntelligence.tsx)
+- **CIS-1.1**: "Establish and maintain an accurate, detailed, and up-to-date inventory of all enterprise assets..." with recommendations like "Use automated tools for asset discovery" and "Update inventory weekly"
+- **CIS-4.1**: "Establish and maintain a secure configuration process for enterprise assets..." with recommendations for hardening baselines
+- All 20 controls will have entries with `requirements` (string) and `recommendations` (string array)
 
-**Auto-run missing security checks on page load:**
+#### 2. Make Rows Expandable (src/pages/Compliance.tsx)
 
-After `calculateScorecards` runs on mount (line 1018), check if most orgs have pending early warning data. If so, automatically trigger the security checks (headers, DNS/email, blacklist, defacement, ports) in the background -- the same checks that Phase 2 of the full scan runs.
+- Add a `expandedControl` state (string or null) to track which row is expanded
+- Make each table row clickable with a cursor pointer and a chevron indicator
+- When clicked, toggle an expanded detail panel below the row showing:
+  - **Requirements**: Full description of what the control requires
+  - **Recommendations**: Bulleted list of actionable steps
+  - If an assessment exists, also show the **Evidence** details in the expanded view
+- Style the expanded section with a slightly different background to distinguish it from the table
 
-Changes to the `useEffect` at line 932:
-- After `calculateScorecards(orgs)` completes, check how many orgs have 0 early_warning_logs
-- If more than 50% of orgs are missing data, auto-run security checks in batches of 5 (same as full scan Phase 2)
-- Show a progress toast like "Auto-scanning 19 organizations with missing security data..."
-- After checks complete, recalculate scorecards
-- Also run DDoS check (`check-ddos-risk`) and fingerprinting for orgs missing that data
-- This runs only once per session (use a ref flag)
+#### 3. Visual Indicators
 
-**Increase query limits:**
-- `early_warning_logs` limit from 1000 to 2000 (615 existing + new data for 36 orgs x ~6 check types = ~216 more)
-- `ddos_risk_logs` limit from 500 to 1000
+- Add a small chevron icon (ChevronDown/ChevronRight) in the Code column to indicate expandability
+- Highlight the expanded row with a subtle border accent
+- The expanded panel will have a clean two-column layout: Requirements on the left, Recommendations on the right (stacked on mobile)
 
 ---
 
-### Technical Summary
+### Technical Details
 
 | File | Changes |
 |---|---|
-| `src/assets/logo.png` | Replace with uploaded logo |
-| `src/pages/ThreatIntelligence.tsx` | Add auto-scan for orgs with missing data on page load; increase query limits |
-| Database migration | Create `media` storage bucket with RLS policies |
+| `src/pages/Compliance.tsx` | Add `CIS_CONTROL_DETAILS` dictionary (~20 entries), add `expandedControl` state, make `<tr>` clickable with `onClick` toggle, render conditional expanded row with requirements/recommendations |
 
+No database changes needed -- all reference data is embedded in the component.
