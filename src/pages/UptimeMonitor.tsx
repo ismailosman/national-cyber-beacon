@@ -52,18 +52,25 @@ interface OrgStatus extends MonitoredOrg {
   recentPings: ('up' | 'down')[];
 }
 
-const SECTORS = ['All', 'Government', 'Telecom', 'Banking', 'Education', 'Healthcare'];
+const SECTORS = ['All', 'Government', 'Bank', 'Telecom', 'Health', 'Education', 'Other'];
 const STATUS_FILTERS = ['All', 'Online', 'Offline'];
 const SSL_FILTERS = ['All', 'Secure', 'Expiring Soon', 'Expired/Invalid'];
 const PING_INTERVAL = 60;
 const SSL_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 const sectorColors: Record<string, string> = {
+  government: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   Government: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  telecom: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   Telecom: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  Banking: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  bank: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  Bank: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  education: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
   Education: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  Healthcare: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+  health: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+  Health: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+  other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  Other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
 const UptimeMonitor: React.FC = () => {
@@ -92,11 +99,18 @@ const UptimeMonitor: React.FC = () => {
   // Load orgs
   const loadOrgs = useCallback(async () => {
     const { data } = await supabase
-      .from('organizations_monitored')
-      .select('*')
-      .eq('is_active', true)
+      .from('organizations')
+      .select('id, name, domain, sector')
       .order('name');
-    if (data) setOrgs(data as MonitoredOrg[]);
+    if (data) {
+      setOrgs(data.map(o => ({
+        id: o.id,
+        name: o.name,
+        url: o.domain.startsWith('http') ? o.domain : `https://${o.domain}`,
+        sector: o.sector,
+        is_active: true,
+      })));
+    }
     setLoading(false);
   }, []);
 
@@ -413,10 +427,14 @@ const UptimeMonitor: React.FC = () => {
   // Add org
   const handleAddOrg = async () => {
     if (!newOrg.name || !newOrg.url) return;
-    const { error } = await supabase.from('organizations_monitored').insert({
+    const domain = newOrg.url.replace(/^https?:\/\//, '');
+    const { error } = await supabase.from('organizations').insert({
       name: newOrg.name,
-      url: newOrg.url,
-      sector: newOrg.sector,
+      domain,
+      sector: newOrg.sector.toLowerCase() as any,
+      risk_score: 50,
+      status: 'Warning',
+      region: 'Banaadir',
     });
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -430,7 +448,7 @@ const UptimeMonitor: React.FC = () => {
 
   // Remove org
   const handleRemoveOrg = async (id: string, name: string) => {
-    const { error } = await supabase.from('organizations_monitored').update({ is_active: false }).eq('id', id);
+    const { error } = await supabase.from('organizations').delete().eq('id', id);
     if (!error) {
       toast({ title: 'Removed', description: `${name} removed from monitoring.` });
       loadOrgs();
@@ -453,7 +471,7 @@ const UptimeMonitor: React.FC = () => {
 
   // Filter
   const filtered = displayOrgs.filter(o => {
-    if (sectorFilter !== 'All' && o.sector !== sectorFilter) return false;
+    if (sectorFilter !== 'All' && o.sector.toLowerCase() !== sectorFilter.toLowerCase()) return false;
     if (statusFilter === 'Online' && o.currentStatus !== 'up') return false;
     if (statusFilter === 'Offline' && o.currentStatus !== 'down') return false;
     if (sslFilter !== 'All') {
