@@ -1,5 +1,5 @@
-import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Bell, AlertTriangle, Info, Shield, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,8 @@ const severityConfig = {
 };
 
 const AlertSidebar: React.FC = () => {
+  const queryClient = useQueryClient();
+
   const { data: alerts = [] } = useQuery({
     queryKey: ['alerts-sidebar'],
     queryFn: async () => {
@@ -21,11 +23,20 @@ const AlertSidebar: React.FC = () => {
         .select('*, organizations(name)')
         .eq('status', 'open')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(10);
       return data || [];
     },
     refetchInterval: 30000,
   });
+
+  useEffect(() => {
+    const channel = supabase.channel('alerts-sidebar-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['alerts-sidebar'] });
+      }).subscribe();
+
+    return () => { channel.unsubscribe(); };
+  }, [queryClient]);
 
   return (
     <div className="w-72 flex-shrink-0 glass-card rounded-xl border border-border flex flex-col h-full">
