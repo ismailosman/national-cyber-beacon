@@ -86,6 +86,10 @@ const SOMALIA_TARGETS = [
   { lat: 2.068, lng: 45.333, country: 'Somalia', state: 'Hodan' },
   { lat: 2.025, lng: 45.346, country: 'Somalia', state: 'Wadajir' },
   { lat: 2.050, lng: 45.370, country: 'Somalia', state: 'Hamar Weyne' },
+  { lat: 9.560, lng: 44.064, country: 'Somalia', state: 'Hargeisa' },
+  { lat: 9.558, lng: 44.070, country: 'Somalia', state: 'Ahmed Dhagah' },
+  { lat: 9.565, lng: 44.058, country: 'Somalia', state: "Ga'an Libah" },
+  { lat: 9.553, lng: 44.075, country: 'Somalia', state: 'Mohamed Mooge' },
 ];
 
 const ATTACK_TYPES: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
