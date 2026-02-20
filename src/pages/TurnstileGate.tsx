@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import Landing from "./Landing";
+import CyberMap from "./CyberMap";
 import logoEmblem from "@/assets/logo-emblem.png";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACfqOh5kqOZCLMB6";
@@ -88,7 +88,7 @@ const TurnstileGate = () => {
     };
   }, [verified, handleToken]);
 
-  if (verified) return <Landing />;
+  if (verified) return <CyberMap />;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden">
