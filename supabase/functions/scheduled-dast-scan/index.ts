@@ -166,8 +166,83 @@ serve(async (req) => {
       }
     }
 
+    // --- Email notification for new critical/high findings ---
+    const totalNewAlerts = results.reduce((sum, r) => sum + r.newAlerts, 0);
+    let emailSent = false;
+
+    if (totalNewAlerts > 0) {
+      try {
+        const resendApiKey = Deno.env.get("RESEND_API_KEY");
+        if (resendApiKey) {
+          const orgRows = results
+            .map(
+              (r) =>
+                `<tr><td style="padding:8px 12px;border-bottom:1px solid #333">${r.org}</td><td style="padding:8px 12px;border-bottom:1px solid #333;text-align:center">${r.score}</td><td style="padding:8px 12px;border-bottom:1px solid #333;text-align:center">${r.newAlerts}</td></tr>`
+            )
+            .join("");
+
+          // Query recent DAST alerts for detail
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+          const { data: recentAlerts } = await supabase
+            .from("alerts")
+            .select("title, description, severity, organization_id")
+            .eq("source", "dast-scanner")
+            .gte("created_at", oneHourAgo)
+            .order("created_at", { ascending: false });
+
+          const findingRows = (recentAlerts || [])
+            .map((a) => {
+              const badge =
+                a.severity === "critical"
+                  ? '<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">CRITICAL</span>'
+                  : '<span style="background:#f97316;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">HIGH</span>';
+              return `<tr><td style="padding:8px 12px;border-bottom:1px solid #333">${badge}</td><td style="padding:8px 12px;border-bottom:1px solid #333">${a.title}</td><td style="padding:8px 12px;border-bottom:1px solid #333;font-size:13px">${a.description || ""}</td></tr>`;
+            })
+            .join("");
+
+          const html = `
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#0f1729;color:#e2e8f0;padding:32px;border-radius:8px">
+  <h1 style="color:#f97316;margin:0 0 8px">⚠️ DAST Alert</h1>
+  <p style="margin:0 0 24px;font-size:18px"><strong>${totalNewAlerts}</strong> new critical/high finding(s) detected</p>
+  <h2 style="color:#94a3b8;font-size:14px;text-transform:uppercase;margin:0 0 8px">Organization Summary</h2>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+    <thead><tr style="background:#1e293b"><th style="padding:8px 12px;text-align:left">Organization</th><th style="padding:8px 12px;text-align:center">DAST Score</th><th style="padding:8px 12px;text-align:center">New Alerts</th></tr></thead>
+    <tbody>${orgRows}</tbody>
+  </table>
+  <h2 style="color:#94a3b8;font-size:14px;text-transform:uppercase;margin:0 0 8px">Finding Details</h2>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+    <thead><tr style="background:#1e293b"><th style="padding:8px 12px;text-align:left">Severity</th><th style="padding:8px 12px;text-align:left">Title</th><th style="padding:8px 12px;text-align:left">Details</th></tr></thead>
+    <tbody>${findingRows}</tbody>
+  </table>
+  <p style="color:#64748b;font-size:12px;margin:0">Scanned ${results.length} organization(s) on ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC</p>
+</div>`;
+
+          const emailRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${resendApiKey}`,
+            },
+            body: JSON.stringify({
+              from: "noreply@cyberdefense.so",
+              to: ["osmando@gmail.com"],
+              subject: `DAST Alert: ${totalNewAlerts} new critical/high finding(s) detected`,
+              html,
+            }),
+          });
+          const emailResult = await emailRes.json();
+          console.log("Resend email result:", JSON.stringify(emailResult));
+          emailSent = emailRes.ok;
+        } else {
+          console.warn("RESEND_API_KEY not set, skipping email notification");
+        }
+      } catch (emailErr: any) {
+        console.error("Email notification failed:", emailErr.message);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, scanned: results.length, results }),
+      JSON.stringify({ success: true, scanned: results.length, results, emailSent }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
