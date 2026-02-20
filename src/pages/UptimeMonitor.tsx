@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import {
   Activity, Globe, Wifi, WifiOff, Clock, Plus, Trash2, RefreshCw,
-  ExternalLink, ArrowUpDown, Timer
+  ExternalLink, ArrowUpDown, Timer, Lock, AlertTriangle, ShieldAlert, ShieldCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +32,17 @@ interface PingResult {
   checkedAt: string;
 }
 
+interface SslResult {
+  isValid: boolean;
+  isExpired: boolean;
+  isExpiringSoon: boolean;
+  issuer: string | null;
+  protocol: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+  daysUntilExpiry: number | null;
+}
+
 interface OrgStatus extends MonitoredOrg {
   currentStatus: 'up' | 'down' | 'checking' | 'unknown';
   responseTime: number | null;
@@ -43,7 +54,9 @@ interface OrgStatus extends MonitoredOrg {
 
 const SECTORS = ['All', 'Government', 'Telecom', 'Banking', 'Education', 'Healthcare'];
 const STATUS_FILTERS = ['All', 'Online', 'Offline'];
+const SSL_FILTERS = ['All', 'Secure', 'Expiring Soon', 'Expired/Invalid'];
 const PING_INTERVAL = 60;
+const SSL_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 const sectorColors: Record<string, string> = {
   Government: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
@@ -63,12 +76,18 @@ const UptimeMonitor: React.FC = () => {
   const [countdown, setCountdown] = useState(PING_INTERVAL);
   const [sectorFilter, setSectorFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [sortBy, setSortBy] = useState<'name' | 'status' | 'responseTime' | 'uptime'>('name');
+  const [sslFilter, setSslFilter] = useState('All');
+  const [sortBy, setSortBy] = useState<'name' | 'status' | 'responseTime' | 'uptime' | 'sslExpiry'>('name');
   const [addOpen, setAddOpen] = useState(false);
   const [newOrg, setNewOrg] = useState({ name: '', url: '', sector: 'Government' });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSuperAdmin = userRole?.role === 'SuperAdmin';
+
+  // SSL state
+  const [sslStatuses, setSslStatuses] = useState<Map<string, SslResult>>(new Map());
+  const [sslChecking, setSslChecking] = useState(false);
+  const lastSslCheckRef = useRef<number>(0);
 
   // Load orgs
   const loadOrgs = useCallback(async () => {
@@ -125,13 +144,142 @@ const UptimeMonitor: React.FC = () => {
     });
   }, []);
 
+  // Load latest SSL logs from DB
+  const loadSslHistory = useCallback(async (orgList: MonitoredOrg[]) => {
+    // Get the latest SSL log per org
+    const { data: logs } = await supabase
+      .from('ssl_logs')
+      .select('*')
+      .order('checked_at', { ascending: false })
+      .limit(200);
+
+    if (!logs || logs.length === 0) return;
+
+    const seen = new Set<string>();
+    const map = new Map<string, SslResult>();
+    for (const log of logs) {
+      const orgId = log.organization_id;
+      if (!orgId || seen.has(orgId)) continue;
+      seen.add(orgId);
+      map.set(orgId, {
+        isValid: log.is_valid,
+        isExpired: log.is_expired,
+        isExpiringSoon: log.is_expiring_soon,
+        issuer: log.issuer,
+        protocol: log.protocol,
+        validFrom: log.valid_from,
+        validTo: log.valid_to,
+        daysUntilExpiry: log.days_until_expiry,
+      });
+    }
+    setSslStatuses(map);
+
+    // Check if we need a fresh SSL check (last check > 6 hours ago)
+    if (logs.length > 0) {
+      const latestCheck = new Date(logs[0].checked_at).getTime();
+      lastSslCheckRef.current = latestCheck;
+    }
+  }, []);
+
+  // Check SSL for all orgs
+  const checkAllSsl = useCallback(async (orgList?: MonitoredOrg[]) => {
+    const list = orgList || orgs;
+    if (list.length === 0) return;
+
+    setSslChecking(true);
+    try {
+      const urls = list.map(o => o.url);
+      const { data, error } = await supabase.functions.invoke('check-ssl', {
+        body: { urls },
+      });
+
+      if (error || !data?.results) {
+        toast({ title: 'SSL Check Failed', description: 'Could not reach the SSL check service.', variant: 'destructive' });
+        setSslChecking(false);
+        return;
+      }
+
+      const results = data.results as Array<{ url: string; ssl: SslResult }>;
+      const urlToResult = new Map(results.map(r => [r.url, r.ssl]));
+
+      // Store logs
+      const logsToInsert = list.map(org => {
+        const ssl = urlToResult.get(org.url);
+        return {
+          organization_id: org.id,
+          organization_name: org.name,
+          url: org.url,
+          is_valid: ssl?.isValid ?? false,
+          is_expired: ssl?.isExpired ?? false,
+          is_expiring_soon: ssl?.isExpiringSoon ?? false,
+          issuer: ssl?.issuer || null,
+          protocol: ssl?.protocol || null,
+          valid_from: ssl?.validFrom || null,
+          valid_to: ssl?.validTo || null,
+          days_until_expiry: ssl?.daysUntilExpiry ?? null,
+        };
+      });
+
+      await supabase.from('ssl_logs').insert(logsToInsert);
+
+      // Update state
+      const newMap = new Map<string, SslResult>();
+      for (const org of list) {
+        const ssl = urlToResult.get(org.url);
+        if (ssl) {
+          newMap.set(org.id, ssl);
+        }
+      }
+      setSslStatuses(newMap);
+      lastSslCheckRef.current = Date.now();
+
+      toast({ title: 'SSL Check Complete', description: `Checked ${list.length} certificates.` });
+    } catch {
+      toast({ title: 'SSL Check Error', description: 'An unexpected error occurred.', variant: 'destructive' });
+    }
+
+    setSslChecking(false);
+  }, [orgs, toast]);
+
+  // Check SSL for single org
+  const checkSingleSsl = useCallback(async (org: MonitoredOrg) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('check-ssl', {
+        body: { url: org.url },
+      });
+      if (error || !data?.results?.[0]) return;
+      const ssl: SslResult = data.results[0].ssl;
+
+      await supabase.from('ssl_logs').insert({
+        organization_id: org.id,
+        organization_name: org.name,
+        url: org.url,
+        is_valid: ssl.isValid,
+        is_expired: ssl.isExpired,
+        is_expiring_soon: ssl.isExpiringSoon,
+        issuer: ssl.issuer,
+        protocol: ssl.protocol,
+        valid_from: ssl.validFrom,
+        valid_to: ssl.validTo,
+        days_until_expiry: ssl.daysUntilExpiry,
+      });
+
+      setSslStatuses(prev => {
+        const next = new Map(prev);
+        next.set(org.id, ssl);
+        return next;
+      });
+    } catch {
+      // silently fail for individual checks
+    }
+  }, []);
+
   // Ping all orgs
   const pingAll = useCallback(async (orgList?: MonitoredOrg[]) => {
     const list = orgList || orgs;
     if (list.length === 0) return;
 
     setPinging(true);
-    // Set all to checking
     setStatuses(prev => {
       const next = new Map(prev);
       for (const org of list) {
@@ -164,7 +312,6 @@ const UptimeMonitor: React.FC = () => {
       const results: PingResult[] = data.results;
       const urlToResult = new Map(results.map(r => [r.url, r]));
 
-      // Store logs
       const logsToInsert = list.map(org => {
         const r = urlToResult.get(org.url);
         return {
@@ -180,7 +327,6 @@ const UptimeMonitor: React.FC = () => {
 
       await supabase.from('uptime_logs').insert(logsToInsert);
 
-      // Update statuses
       setStatuses(prev => {
         const next = new Map(prev);
         for (const org of list) {
@@ -198,13 +344,10 @@ const UptimeMonitor: React.FC = () => {
           existing.responseTime = r?.responseTime || null;
           existing.statusCode = r?.statusCode || null;
           existing.lastChecked = r?.checkedAt || new Date().toISOString();
-          // Prepend to recent pings
           existing.recentPings = [r?.status || 'down', ...existing.recentPings].slice(0, 10);
-          // Recalc uptime
           const ups = existing.recentPings.filter(p => p === 'up').length;
           existing.uptimePercent = existing.recentPings.length > 0 ? (ups / existing.recentPings.length) * 100 : null;
 
-          // Alert on transition to down
           if (prevStatus === 'up' && existing.currentStatus === 'down') {
             supabase.from('alerts').insert({
               title: `Website Offline: ${org.name}`,
@@ -236,7 +379,19 @@ const UptimeMonitor: React.FC = () => {
   useEffect(() => {
     if (orgs.length > 0 && loading === false) {
       loadUptimeHistory(orgs);
+      loadSslHistory(orgs);
       pingAll(orgs);
+    }
+  }, [orgs.length, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // SSL check on load (after history is loaded) - check if stale
+  useEffect(() => {
+    if (orgs.length === 0 || loading) return;
+    const timeSinceLastCheck = Date.now() - lastSslCheckRef.current;
+    if (timeSinceLastCheck > SSL_CHECK_INTERVAL || lastSslCheckRef.current === 0) {
+      // Delay slightly so ping goes first
+      const timer = setTimeout(() => checkAllSsl(orgs), 3000);
+      return () => clearTimeout(timer);
     }
   }, [orgs.length, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -301,6 +456,12 @@ const UptimeMonitor: React.FC = () => {
     if (sectorFilter !== 'All' && o.sector !== sectorFilter) return false;
     if (statusFilter === 'Online' && o.currentStatus !== 'up') return false;
     if (statusFilter === 'Offline' && o.currentStatus !== 'down') return false;
+    if (sslFilter !== 'All') {
+      const ssl = sslStatuses.get(o.id);
+      if (sslFilter === 'Secure' && (!ssl || !ssl.isValid || ssl.isExpiringSoon || ssl.isExpired)) return false;
+      if (sslFilter === 'Expiring Soon' && (!ssl || !ssl.isExpiringSoon)) return false;
+      if (sslFilter === 'Expired/Invalid' && (!ssl || (!ssl.isExpired && ssl.isValid))) return false;
+    }
     return true;
   });
 
@@ -310,6 +471,11 @@ const UptimeMonitor: React.FC = () => {
       case 'status': return (a.currentStatus === 'up' ? 0 : 1) - (b.currentStatus === 'up' ? 0 : 1);
       case 'responseTime': return (a.responseTime || 99999) - (b.responseTime || 99999);
       case 'uptime': return (b.uptimePercent || 0) - (a.uptimePercent || 0);
+      case 'sslExpiry': {
+        const aDays = sslStatuses.get(a.id)?.daysUntilExpiry ?? 99999;
+        const bDays = sslStatuses.get(b.id)?.daysUntilExpiry ?? 99999;
+        return aDays - bDays;
+      }
       default: return a.name.localeCompare(b.name);
     }
   });
@@ -318,6 +484,30 @@ const UptimeMonitor: React.FC = () => {
   const online = displayOrgs.filter(o => o.currentStatus === 'up').length;
   const offline = displayOrgs.filter(o => o.currentStatus === 'down').length;
   const avgResponse = displayOrgs.filter(o => o.responseTime).reduce((sum, o) => sum + (o.responseTime || 0), 0) / (displayOrgs.filter(o => o.responseTime).length || 1);
+
+  // SSL Stats
+  const sslValid = displayOrgs.filter(o => {
+    const ssl = sslStatuses.get(o.id);
+    return ssl && ssl.isValid && !ssl.isExpiringSoon && !ssl.isExpired;
+  }).length;
+  const sslExpiringSoon = displayOrgs.filter(o => {
+    const ssl = sslStatuses.get(o.id);
+    return ssl && ssl.isExpiringSoon;
+  }).length;
+  const sslExpiredInvalid = displayOrgs.filter(o => {
+    const ssl = sslStatuses.get(o.id);
+    return ssl && (ssl.isExpired || !ssl.isValid);
+  }).length;
+
+  // SSL Alerts data
+  const expiredOrgs = displayOrgs.filter(o => {
+    const ssl = sslStatuses.get(o.id);
+    return ssl && ssl.isExpired;
+  });
+  const expiringSoonOrgs = displayOrgs.filter(o => {
+    const ssl = sslStatuses.get(o.id);
+    return ssl && ssl.isExpiringSoon;
+  });
 
   if (loading) {
     return (
@@ -349,13 +539,13 @@ const UptimeMonitor: React.FC = () => {
             <span>Next ping: {countdown}s</span>
           </div>
           <Button
-            onClick={() => { setCountdown(PING_INTERVAL); pingAll(); }}
-            disabled={pinging}
+            onClick={() => { setCountdown(PING_INTERVAL); pingAll(); checkAllSsl(); }}
+            disabled={pinging || sslChecking}
             size="sm"
             className="gap-2"
           >
-            <RefreshCw className={cn('w-4 h-4', pinging && 'animate-spin')} />
-            Ping Now
+            <RefreshCw className={cn('w-4 h-4', (pinging || sslChecking) && 'animate-spin')} />
+            Check All
           </Button>
           {isSuperAdmin && (
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -400,7 +590,7 @@ const UptimeMonitor: React.FC = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <Card className="border-border/50">
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground uppercase tracking-wide">Monitored</div>
@@ -436,6 +626,28 @@ const UptimeMonitor: React.FC = () => {
             {pinging && <div className="text-xs text-amber-400 animate-pulse">Pinging...</div>}
           </CardContent>
         </Card>
+        {/* SSL Summary Cards */}
+        <Card className="border-emerald-500/30">
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">SSL Valid</div>
+            <div className="text-2xl font-bold text-emerald-400 mt-1">{sslValid}</div>
+            <Lock className="w-4 h-4 text-emerald-400 mt-1" />
+          </CardContent>
+        </Card>
+        <Card className="border-amber-500/30">
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">SSL Expiring</div>
+            <div className="text-2xl font-bold text-amber-400 mt-1">{sslExpiringSoon}</div>
+            <AlertTriangle className="w-4 h-4 text-amber-400 mt-1" />
+          </CardContent>
+        </Card>
+        <Card className="border-red-500/30">
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">SSL Invalid</div>
+            <div className="text-2xl font-bold text-red-400 mt-1">{sslExpiredInvalid}</div>
+            <ShieldAlert className="w-4 h-4 text-red-400 mt-1" />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -452,6 +664,12 @@ const UptimeMonitor: React.FC = () => {
             {STATUS_FILTERS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={sslFilter} onValueChange={setSslFilter}>
+          <SelectTrigger className="w-[170px]"><SelectValue placeholder="SSL Status" /></SelectTrigger>
+          <SelectContent>
+            {SSL_FILTERS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
           <SelectTrigger className="w-[180px]">
             <div className="flex items-center gap-2">
@@ -464,8 +682,15 @@ const UptimeMonitor: React.FC = () => {
             <SelectItem value="status">Status</SelectItem>
             <SelectItem value="responseTime">Response Time</SelectItem>
             <SelectItem value="uptime">Uptime %</SelectItem>
+            <SelectItem value="sslExpiry">SSL Expiry</SelectItem>
           </SelectContent>
         </Select>
+        {sslChecking && (
+          <div className="flex items-center gap-2 text-xs text-amber-400 animate-pulse">
+            <RefreshCw className="w-3 h-3 animate-spin" />
+            Checking SSL...
+          </div>
+        )}
       </div>
 
       {/* Desktop Table */}
@@ -481,49 +706,69 @@ const UptimeMonitor: React.FC = () => {
                 <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">Response</th>
                 <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">Uptime</th>
                 <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">Last 10</th>
+                <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">SSL Status</th>
+                <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">SSL Expiry</th>
+                <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">SSL Issuer</th>
                 <th className="text-left p-3 text-xs text-muted-foreground font-medium uppercase">Checked</th>
                 {isSuperAdmin && <th className="p-3"></th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(org => (
-                <tr key={org.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                  <td className="p-3">
-                    <StatusDot status={org.currentStatus} />
-                  </td>
-                  <td className="p-3 font-medium text-sm text-foreground">{org.name}</td>
-                  <td className="p-3">
-                    <a href={org.url} target="_blank" rel="noopener noreferrer" className="text-sm text-neon-cyan hover:underline flex items-center gap-1">
-                      {org.url.replace(/^https?:\/\//, '')}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </td>
-                  <td className="p-3">
-                    <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector] || '')}>
-                      {org.sector}
-                    </Badge>
-                  </td>
-                  <td className="p-3 text-sm font-mono text-muted-foreground">
-                    {org.currentStatus === 'up' && org.responseTime ? `${org.responseTime}ms` : '—'}
-                  </td>
-                  <td className="p-3">
-                    <UptimeBadge percent={org.uptimePercent} />
-                  </td>
-                  <td className="p-3">
-                    <MiniPingBar pings={org.recentPings} />
-                  </td>
-                  <td className="p-3 text-xs text-muted-foreground">
-                    {org.lastChecked ? new Date(org.lastChecked).toLocaleTimeString() : '—'}
-                  </td>
-                  {isSuperAdmin && (
+              {filtered.map(org => {
+                const ssl = sslStatuses.get(org.id);
+                return (
+                  <tr key={org.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="p-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveOrg(org.id, org.name)}>
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      <StatusDot status={org.currentStatus} />
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className="p-3 font-medium text-sm text-foreground">{org.name}</td>
+                    <td className="p-3">
+                      <a href={org.url} target="_blank" rel="noopener noreferrer" className="text-sm text-neon-cyan hover:underline flex items-center gap-1">
+                        {org.url.replace(/^https?:\/\//, '')}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </td>
+                    <td className="p-3">
+                      <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector] || '')}>
+                        {org.sector}
+                      </Badge>
+                    </td>
+                    <td className="p-3 text-sm font-mono text-muted-foreground">
+                      {org.currentStatus === 'up' && org.responseTime ? `${org.responseTime}ms` : '—'}
+                    </td>
+                    <td className="p-3">
+                      <UptimeBadge percent={org.uptimePercent} />
+                    </td>
+                    <td className="p-3">
+                      <MiniPingBar pings={org.recentPings} />
+                    </td>
+                    <td className="p-3">
+                      <SslStatusBadge ssl={ssl} />
+                    </td>
+                    <td className="p-3">
+                      <SslExpiryDisplay ssl={ssl} />
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {ssl?.issuer || '—'}
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {org.lastChecked ? new Date(org.lastChecked).toLocaleTimeString() : '—'}
+                    </td>
+                    {isSuperAdmin && (
+                      <td className="p-3">
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-neon-cyan" title="Check SSL" onClick={() => checkSingleSsl(org)}>
+                            <ShieldCheck className="w-3 h-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveOrg(org.id, org.name)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -531,30 +776,83 @@ const UptimeMonitor: React.FC = () => {
 
       {/* Mobile Cards */}
       <div className="md:hidden space-y-3">
-        {filtered.map(org => (
-          <Card key={org.id} className="border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={org.currentStatus} />
-                  <span className="font-medium text-sm text-foreground">{org.name}</span>
+        {filtered.map(org => {
+          const ssl = sslStatuses.get(org.id);
+          return (
+            <Card key={org.id} className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={org.currentStatus} />
+                    <span className="font-medium text-sm text-foreground">{org.name}</span>
+                  </div>
+                  <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector] || '')}>
+                    {org.sector}
+                  </Badge>
                 </div>
-                <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector] || '')}>
-                  {org.sector}
-                </Badge>
-              </div>
-              <a href={org.url} target="_blank" rel="noopener noreferrer" className="text-xs text-neon-cyan hover:underline flex items-center gap-1 mb-2">
-                {org.url} <ExternalLink className="w-3 h-3" />
-              </a>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{org.currentStatus === 'up' && org.responseTime ? `${org.responseTime}ms` : '—'}</span>
-                <UptimeBadge percent={org.uptimePercent} />
-                <MiniPingBar pings={org.recentPings} />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <a href={org.url} target="_blank" rel="noopener noreferrer" className="text-xs text-neon-cyan hover:underline flex items-center gap-1 mb-2">
+                  {org.url} <ExternalLink className="w-3 h-3" />
+                </a>
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                  <span>{org.currentStatus === 'up' && org.responseTime ? `${org.responseTime}ms` : '—'}</span>
+                  <UptimeBadge percent={org.uptimePercent} />
+                  <MiniPingBar pings={org.recentPings} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <SslStatusBadge ssl={ssl} />
+                  <SslExpiryDisplay ssl={ssl} />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
+
+      {/* SSL Certificate Alerts Section */}
+      {(expiredOrgs.length > 0 || expiringSoonOrgs.length > 0) ? (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-red-400" />
+            SSL Certificate Alerts
+          </h2>
+          {expiredOrgs.map(org => {
+            const ssl = sslStatuses.get(org.id);
+            const daysAgo = ssl?.daysUntilExpiry ? Math.abs(ssl.daysUntilExpiry) : 0;
+            return (
+              <div key={org.id} className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+                <div className="flex items-center gap-3">
+                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                  <div>
+                    <span className="text-sm font-medium text-foreground">{org.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{org.url}</span>
+                  </div>
+                </div>
+                <span className="text-xs font-medium text-red-400">Certificate expired {daysAgo} days ago</span>
+              </div>
+            );
+          })}
+          {expiringSoonOrgs.map(org => {
+            const ssl = sslStatuses.get(org.id);
+            return (
+              <div key={org.id} className="flex items-center justify-between p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <span className="text-sm font-medium text-foreground">{org.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{org.url}</span>
+                  </div>
+                </div>
+                <span className="text-xs font-medium text-amber-400">Certificate expires in {ssl?.daysUntilExpiry} days</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : sslStatuses.size > 0 ? (
+        <div className="p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-400" />
+          <span className="text-sm text-emerald-400 font-medium">✓ All SSL certificates are valid and not expiring soon</span>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -592,6 +890,74 @@ const MiniPingBar: React.FC<{ pings: ('up' | 'down')[] }> = ({ pings }) => {
         <div key={i} className={cn('w-2 h-4 rounded-sm', p === 'up' ? 'bg-emerald-500' : 'bg-red-500')} />
       ))}
     </div>
+  );
+};
+
+const SslStatusBadge: React.FC<{ ssl: SslResult | undefined }> = ({ ssl }) => {
+  if (!ssl) {
+    return (
+      <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30 text-xs gap-1">
+        Unknown
+      </Badge>
+    );
+  }
+  if (ssl.isExpired) {
+    return (
+      <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs gap-1">
+        <ShieldAlert className="w-3 h-3" />
+        Expired
+      </Badge>
+    );
+  }
+  if (!ssl.isValid) {
+    return (
+      <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs gap-1">
+        <ShieldAlert className="w-3 h-3" />
+        Invalid
+      </Badge>
+    );
+  }
+  if (ssl.isExpiringSoon) {
+    return (
+      <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs gap-1">
+        <AlertTriangle className="w-3 h-3" />
+        Expiring Soon
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs gap-1">
+      <Lock className="w-3 h-3" />
+      Secure
+    </Badge>
+  );
+};
+
+const SslExpiryDisplay: React.FC<{ ssl: SslResult | undefined }> = ({ ssl }) => {
+  if (!ssl || !ssl.validTo) return <span className="text-xs text-muted-foreground">—</span>;
+
+  const expiryDate = new Date(ssl.validTo);
+  const formatted = expiryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const days = ssl.daysUntilExpiry;
+
+  if (days !== null && days < 0) {
+    return (
+      <span className="text-xs font-bold text-red-400">
+        EXPIRED {Math.abs(days)}d ago
+      </span>
+    );
+  }
+  if (days !== null && days <= 30) {
+    return (
+      <span className="text-xs font-bold text-amber-400">
+        ⚠ {formatted} ({days}d)
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-emerald-400">
+      {formatted} ({days}d)
+    </span>
   );
 };
 

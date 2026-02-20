@@ -600,6 +600,62 @@ export type Database = {
           },
         ]
       }
+      ssl_logs: {
+        Row: {
+          checked_at: string
+          days_until_expiry: number | null
+          id: string
+          is_expired: boolean
+          is_expiring_soon: boolean
+          is_valid: boolean
+          issuer: string | null
+          organization_id: string | null
+          organization_name: string
+          protocol: string | null
+          url: string
+          valid_from: string | null
+          valid_to: string | null
+        }
+        Insert: {
+          checked_at?: string
+          days_until_expiry?: number | null
+          id?: string
+          is_expired?: boolean
+          is_expiring_soon?: boolean
+          is_valid?: boolean
+          issuer?: string | null
+          organization_id?: string | null
+          organization_name: string
+          protocol?: string | null
+          url: string
+          valid_from?: string | null
+          valid_to?: string | null
+        }
+        Update: {
+          checked_at?: string
+          days_until_expiry?: number | null
+          id?: string
+          is_expired?: boolean
+          is_expiring_soon?: boolean
+          is_valid?: boolean
+          issuer?: string | null
+          organization_id?: string | null
+          organization_name?: string
+          protocol?: string | null
+          url?: string
+          valid_from?: string | null
+          valid_to?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ssl_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       threat_events: {
         Row: {
           count: number
