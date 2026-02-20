@@ -1,79 +1,64 @@
 
 
-## Plan: Lightweight DAST Security Scanner
+## Plan: Scheduled DAST Scans + Per-Organization Scanning + Critical Alerts
 
 ### Overview
-Add a new "/dast-scanner" page with 6 backend functions that perform passive security tests against monitored organizations' websites. The scanner checks for information disclosure, dangerous HTTP methods, cookie security, CORS misconfiguration, redirect vulnerabilities, and error handling issues.
+Add a backend function that runs weekly DAST scans for all organizations, compares results with previous scans, and creates alerts for new critical/high findings. Also improve the UI to support scanning one organization at a time more clearly.
+
+---
 
 ### Changes
 
-#### 1. Database: Create `dast_scan_results` table
-- Columns: id (uuid PK), organization_id (uuid, UNIQUE), organization_name (text), url (text), results (jsonb), summary (jsonb), dast_score (integer 0-100), scanned_at (timestamptz)
-- RLS policies matching existing patterns (SuperAdmin/Analyst full, Auditor/OrgAdmin read)
+#### 1. New Edge Function: `scheduled-dast-scan`
 
-#### 2. Backend Functions (6 new)
-Each function accepts `{ url }` and returns `{ success, test, findings[], checkedAt }`. All use safe HTTP methods only (HEAD/GET/OPTIONS).
+A new backend function that:
+- Fetches all organizations from the database
+- For each organization, calls all 6 DAST test functions sequentially (with delays)
+- Calculates the DAST score and summary
+- Loads the previous scan results and compares findings -- identifies **new** critical/high findings that weren't in the last scan
+- Upserts results to `dast_scan_results`
+- Creates alerts in the `alerts` table for any new critical or high findings (e.g., "DAST: Critical finding on Ministry of Finance -- Exposed .env file")
+- Processes organizations one at a time with a 5-second delay between them to avoid overwhelming targets
 
-| Function | What It Tests |
-|---|---|
-| `dast-info-disclosure` | Server version headers, X-Powered-By, exposed paths (/.env, /.git, /phpinfo.php, etc.) |
-| `dast-http-methods` | Dangerous methods (PUT, DELETE, TRACE, CONNECT, PATCH) acceptance |
-| `dast-cookie-security` | Missing Secure, HttpOnly, SameSite flags on cookies |
-| `dast-cors-check` | Wildcard CORS, origin reflection, null origin acceptance |
-| `dast-redirect-check` | HTTP-to-HTTPS redirect, open redirect parameters, redirect chain length |
-| `dast-error-handling` | Verbose error pages, stack traces in 404s, exposed admin panels |
+The function accepts an optional `org_id` parameter. If provided, it scans only that single organization. If omitted, it scans all organizations.
 
-All functions have `verify_jwt = false` in config.toml and include standard CORS headers.
+#### 2. Weekly Cron Job
 
-#### 3. Sidebar Update (src/components/layout/Sidebar.tsx)
-- Add `{ to: '/dast-scanner', icon: Search, label: 'DAST Scanner' }` after the Threat Intel entry
-- Import `Search` from lucide-react
+Set up a `pg_cron` schedule to invoke `scheduled-dast-scan` every Sunday at 2:00 AM UTC. This uses the same pattern as the existing `scheduled-scan` function -- calling via `net.http_post`.
 
-#### 4. Router Update (src/App.tsx)
-- Add `<Route path="/dast-scanner" element={<DastScanner />} />` inside ProtectedRoutes
+#### 3. UI Updates to `src/pages/DastScanner.tsx`
 
-#### 5. New Page: src/pages/DastScanner.tsx
+- **Per-org scan button**: Each organization card in the "Organization Scores" grid gets a small "Scan" button so users can trigger a scan for that specific org without changing the dropdown
+- **Last scheduled scan indicator**: Show when the last automated scan ran (query the most recent `scanned_at` across all `dast_scan_results`)
+- **New findings badge**: When viewing an org's results, highlight findings that are new since the previous scan (compare current results with previously cached results timestamp)
+- **Schedule info banner**: Small info card showing "Automated scans run weekly (Sundays 2:00 AM UTC)" with the count of organizations being monitored
 
-**Header section:**
-- Title "DAST Security Scanner" with disclaimer about passive scanning
-- "Scan All Organizations" button and single-org dropdown selector
-- Progress bar showing current test and organization during scans
+#### 4. Config Updates
 
-**Summary cards:**
-- Total Scans, Critical/High/Medium/Low finding counts, Last Scan timestamp
+- Add `[functions.scheduled-dast-scan]` with `verify_jwt = false` to `supabase/config.toml` (handled automatically)
 
-**Results table:**
-- One row per test category with finding counts by severity
-- Rows are clickable to expand individual findings
-- Each finding shows severity badge, status, ID, detail, evidence, and remediation steps
-
-**Scoring:**
-- DAST score 0-100 calculated as `100 - (critical*25 + high*15 + medium*5 + low*2)`
-- Displayed as a grade (A-F) with color coding
-- CircularGauge component reused for visual display
-
-**Export:**
-- "Export Report" button generates a text/CSV summary of findings
-
-**Scanner logic:**
-- Calls all 6 functions sequentially with 2-second delays between tests
-- Shows real-time progress updates
-- Upserts results to `dast_scan_results` table (one row per org)
-- On page load, displays cached results from previous scans
+---
 
 ### Technical Details
 
 | File | Action |
 |---|---|
-| Database migration | Create `dast_scan_results` table with RLS |
-| `supabase/functions/dast-info-disclosure/index.ts` | New edge function |
-| `supabase/functions/dast-http-methods/index.ts` | New edge function |
-| `supabase/functions/dast-cookie-security/index.ts` | New edge function |
-| `supabase/functions/dast-cors-check/index.ts` | New edge function |
-| `supabase/functions/dast-redirect-check/index.ts` | New edge function |
-| `supabase/functions/dast-error-handling/index.ts` | New edge function |
-| `supabase/config.toml` | Add `verify_jwt = false` for all 6 functions |
-| `src/pages/DastScanner.tsx` | New page component |
-| `src/components/layout/Sidebar.tsx` | Add DAST Scanner nav item |
-| `src/App.tsx` | Add route |
+| `supabase/functions/scheduled-dast-scan/index.ts` | New edge function -- orchestrates DAST scans for all or single org, compares with previous results, creates alerts for new critical/high findings |
+| `src/pages/DastScanner.tsx` | Add per-org scan buttons on org cards, schedule info banner, new findings indicators |
+| Database (via insert tool) | Add `pg_cron` job for weekly execution |
 
+**Alert creation logic:**
+- Before upserting new results, load the existing `dast_scan_results` for that org
+- Extract all `fail` finding IDs from the old scan
+- Compare with new `fail` finding IDs
+- For each new critical/high finding not in the old set, insert an alert with:
+  - `title`: "DAST: [finding title] on [org name]"
+  - `severity`: matching the finding severity
+  - `source`: "dast-scanner"
+  - `organization_id`: the org's ID
+  - `description`: the finding detail + recommendation
+
+**Per-org scan from UI:**
+- The existing `runScan` function already supports scanning a single org
+- Add a small play button on each org card that calls `runScan([org])` directly
+- Also support invoking the backend `scheduled-dast-scan` with `{ org_id }` for server-side execution (more reliable for long scans)
