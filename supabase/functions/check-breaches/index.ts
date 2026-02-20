@@ -5,107 +5,168 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { domains } = await req.json();
-    if (!domains || !Array.isArray(domains)) {
-      return new Response(JSON.stringify({ error: 'domains array required' }), {
+    const { domain, organizationName } = await req.json();
+
+    if (!domain) {
+      return new Response(JSON.stringify({ success: false, error: 'domain is required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Fetch the full HIBP breach catalog
-    let allBreaches: any[] = [];
-    try {
-      const res = await fetchWithTimeout('https://haveibeenpwned.com/api/v3/breaches', {
-        headers: { 'User-Agent': 'SomaliaCERT-Dashboard' },
-      });
-      if (res.ok) {
-        allBreaches = await res.json();
-      }
-    } catch (e) {
-      console.error('HIBP fetch error:', e);
-    }
+    // Extract email domain from URL
+    const emailDomain = domain.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
 
-    // Get significant recent breaches (last 2 years, >10k records)
-    const twoYearsAgo = new Date();
-    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+    const HIBP_API_KEY = Deno.env.get('HIBP_API_KEY') || '';
+    let breaches: any[] = [];
+    let source = '';
+    let note = '';
 
-    const recentGlobalBreaches = allBreaches
-      .filter((b: any) => new Date(b.BreachDate) > twoYearsAgo && b.PwnCount > 10000)
-      .sort((a: any, b: any) => new Date(b.BreachDate).getTime() - new Date(a.BreachDate).getTime())
-      .slice(0, 50)
-      .map((b: any) => ({
-        name: b.Name, title: b.Title, domain: b.Domain,
-        breachDate: b.BreachDate, addedDate: b.AddedDate,
-        pwnCount: b.PwnCount, dataClasses: b.DataClasses || [],
-        description: (b.Description || '').replace(/<[^>]*>/g, '').slice(0, 200),
-        isVerified: b.IsVerified, isSensitive: b.IsSensitive,
-      }));
-
-    const results = [];
-
-    for (const domainEntry of domains) {
-      const domain = typeof domainEntry === 'string' ? domainEntry : domainEntry.domain;
-      const orgName = typeof domainEntry === 'string' ? domain : domainEntry.name;
-      // Per-org technologies array
-      const orgTech: string[] = (typeof domainEntry === 'object' && Array.isArray(domainEntry.technologies))
-        ? domainEntry.technologies.map((t: string) => t.toLowerCase())
-        : [];
-
-      // Match breaches only against THIS org's tech stack and domain
-      const relevantBreaches = recentGlobalBreaches.filter((b: any) => {
-        const bDomain = (b.domain || '').toLowerCase();
-        const bName = (b.name || '').toLowerCase();
-
-        // 1. Exact domain match (org's domain appears in breach domain)
-        if (bDomain && domain.toLowerCase().includes(bDomain)) return true;
-        if (bDomain && bDomain.includes(domain.toLowerCase())) return true;
-
-        // 2. Match against this org's specific detected technologies only
-        if (orgTech.length > 0) {
-          return orgTech.some(tech => {
-            const t = tech.toLowerCase();
-            // Require meaningful match (at least 3 chars to avoid false positives)
-            if (t.length < 3) return false;
-            return bDomain.includes(t) || bName.includes(t);
-          });
+    if (HIBP_API_KEY) {
+      // METHOD 1: HIBP domain search (most accurate)
+      source = 'Have I Been Pwned (Domain Search)';
+      try {
+        const res = await fetch(
+          `https://haveibeenpwned.com/api/v3/breaches?domain=${emailDomain}`,
+          {
+            headers: {
+              'hibp-api-key': HIBP_API_KEY,
+              'User-Agent': 'SomaliaCERT-Dashboard',
+            },
+            signal: AbortSignal.timeout(15000),
+          }
+        );
+        if (res.status === 200) {
+          const data = await res.json();
+          breaches = data.map((b: any) => ({
+            name: b.Name,
+            title: b.Title,
+            domain: b.Domain,
+            breachDate: b.BreachDate,
+            addedDate: b.AddedDate,
+            pwnCount: b.PwnCount,
+            dataClasses: b.DataClasses || [],
+            description: (b.Description || '').replace(/<[^>]*>/g, ''),
+            isVerified: b.IsVerified,
+            isSensitive: b.IsSensitive,
+          }));
+        } else if (res.status === 404) {
+          breaches = []; // No breaches — good
+        } else if (res.status === 429) {
+          note = 'Rate limited by HIBP API. Will retry on next check.';
         }
-
-        return false;
-      });
-
-      results.push({
-        domain, organization: orgName,
-        breachesFound: relevantBreaches.length,
-        breaches: relevantBreaches,
-        allRecentBreaches: recentGlobalBreaches,
-        riskLevel: relevantBreaches.length > 5 ? 'high' : relevantBreaches.length > 2 ? 'medium' : relevantBreaches.length > 0 ? 'low' : 'info',
-        checkedAt: new Date().toISOString(),
-        note: 'Breach data filtered by org-specific tech stack and domain. For domain-specific email breach searches, add a HIBP enterprise API key.',
-      });
+      } catch (e) {
+        console.error('HIBP domain search error:', e);
+        note = 'HIBP API request failed. Using free fallback.';
+      }
     }
 
-    return new Response(JSON.stringify({ results }), {
+    // METHOD 2: Free fallback — exact domain match against HIBP public catalog + Mozilla Monitor
+    if (!HIBP_API_KEY || (breaches.length === 0 && !note)) {
+      source = source || 'Free Breach Check (Exact Domain Match)';
+
+      // A) HIBP public breach catalog — exact domain match only
+      try {
+        const res = await fetch('https://haveibeenpwned.com/api/v3/breaches', {
+          headers: { 'User-Agent': 'SomaliaCERT-Dashboard' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+          const allBreaches = await res.json();
+          const domainMatches = allBreaches.filter((b: any) => {
+            const bDomain = (b.Domain || '').toLowerCase();
+            // Exact domain match only — no fuzzy/keyword matching
+            return bDomain === emailDomain || bDomain === `www.${emailDomain}`;
+          });
+          breaches.push(...domainMatches.map((b: any) => ({
+            name: b.Name,
+            title: b.Title,
+            domain: b.Domain,
+            breachDate: b.BreachDate,
+            addedDate: b.AddedDate,
+            pwnCount: b.PwnCount,
+            dataClasses: b.DataClasses || [],
+            description: (b.Description || '').replace(/<[^>]*>/g, '').slice(0, 300),
+            isVerified: b.IsVerified,
+            isSensitive: b.IsSensitive,
+          })));
+        }
+      } catch (e) {
+        console.error('HIBP public catalog error:', e);
+      }
+
+      // B) Mozilla Monitor breach list — exact domain match
+      try {
+        const res = await fetch('https://monitor.mozilla.org/api/v1/breaches', {
+          headers: { 'User-Agent': 'SomaliaCERT-Dashboard' },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          const mozData = await res.json();
+          const matches = (mozData || []).filter((b: any) => {
+            const bDomain = (b.Domain || '').toLowerCase();
+            return bDomain === emailDomain || bDomain === `www.${emailDomain}`;
+          });
+          breaches.push(...matches.map((b: any) => ({
+            name: b.Name,
+            title: b.Title,
+            domain: b.Domain,
+            breachDate: b.BreachDate,
+            addedDate: b.AddedDate,
+            pwnCount: b.PwnCount,
+            dataClasses: b.DataClasses || [],
+            description: (b.Description || '').replace(/<[^>]*>/g, '').slice(0, 300),
+            isVerified: b.IsVerified,
+          })));
+        }
+      } catch {
+        // Mozilla Monitor unavailable
+      }
+
+      if (breaches.length === 0 && !note) {
+        note = 'No breaches found using free APIs. For comprehensive domain-specific breach search, add a HIBP API key ($3.50/month).';
+      }
+    }
+
+    // Deduplicate by name
+    const uniqueBreaches = breaches.filter((b: any, idx: number, self: any[]) =>
+      idx === self.findIndex(t => t.name === b.name)
+    );
+
+    // Sort by date descending
+    uniqueBreaches.sort((a: any, b: any) =>
+      new Date(b.breachDate || 0).getTime() - new Date(a.breachDate || 0).getTime()
+    );
+
+    const riskLevel = uniqueBreaches.length > 5 ? 'high' : uniqueBreaches.length > 2 ? 'medium' : uniqueBreaches.length > 0 ? 'low' : 'info';
+
+    return new Response(JSON.stringify({
+      success: true,
+      organization: organizationName || emailDomain,
+      domain: emailDomain,
+      source,
+      breachCount: uniqueBreaches.length,
+      breaches: uniqueBreaches,
+      isClean: uniqueBreaches.length === 0,
+      riskLevel,
+      note,
+      checkedAt: new Date().toISOString(),
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({
+      success: false,
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });
