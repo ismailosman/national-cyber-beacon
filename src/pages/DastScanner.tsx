@@ -7,8 +7,20 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CircularGauge from '@/components/dashboard/CircularGauge';
-import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar } from 'lucide-react';
+import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar, FileDown, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+const downloadPdfFromBase64 = (base64: string, filename: string) => {
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArray], { type: 'application/pdf' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
 
 interface Finding {
   id: string;
@@ -96,6 +108,7 @@ const DastScanner: React.FC = () => {
   const [currentResults, setCurrentResults] = useState<TestResult[]>([]);
   const [currentScore, setCurrentScore] = useState<number | null>(null);
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
 
   useEffect(() => {
     loadOrgs();
@@ -169,13 +182,13 @@ const DastScanner: React.FC = () => {
     setScanningOrgId(null);
     toast({ title: 'DAST Scan Complete', description: `Scanned ${orgList.length} organization(s)` });
 
-    // Send email report for each org scanned
+  // Send email report with PDF for each org scanned
     for (const org of orgList) {
       const url = org.domain.startsWith('http') ? org.domain : `https://${org.domain}`;
       const scanData = cachedResults.find(r => r.organization_id === org.id);
       if (scanData) {
         try {
-          await supabase.functions.invoke('send-dast-report', {
+          const { data: reportData } = await supabase.functions.invoke('send-dast-report', {
             body: {
               organizationName: org.name,
               url,
@@ -184,13 +197,17 @@ const DastScanner: React.FC = () => {
               results: scanData.results,
             },
           });
-          toast({ title: 'Report Sent', description: `Email report sent for ${org.name}` });
+          toast({ title: 'Report Sent', description: `PDF report emailed for ${org.name}` });
+          // Auto-download the PDF
+          if (reportData?.pdf) {
+            downloadPdfFromBase64(reportData.pdf, `DAST-Report-${org.name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
+          }
         } catch (emailErr) {
           console.error('Email report failed:', emailErr);
         }
       }
     }
-  }, [toast]);
+  }, [toast, cachedResults]);
 
   const handleScan = () => {
     if (selectedOrgId === 'all') {
@@ -206,6 +223,30 @@ const DastScanner: React.FC = () => {
     if (scanning) return;
     setSelectedOrgId(org.id);
     runScan([org]);
+  };
+
+  const handleDownloadPdf = async (scan: ScanResult) => {
+    setDownloadingPdf(scan.organization_id);
+    try {
+      const { data } = await supabase.functions.invoke('send-dast-report', {
+        body: {
+          organizationName: scan.organization_name,
+          url: scan.url,
+          dastScore: scan.dast_score,
+          summary: scan.summary,
+          results: scan.results,
+        },
+      });
+      if (data?.pdf) {
+        downloadPdfFromBase64(data.pdf, `DAST-Report-${scan.organization_name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date(scan.scanned_at).toISOString().slice(0, 10)}.pdf`);
+        toast({ title: 'PDF Downloaded', description: `Report for ${scan.organization_name}` });
+      }
+    } catch (err) {
+      console.error('PDF download failed:', err);
+      toast({ title: 'PDF Failed', description: 'Could not generate PDF report', variant: 'destructive' });
+    } finally {
+      setDownloadingPdf(null);
+    }
   };
 
   const toggleTest = (name: string) => {
@@ -297,8 +338,21 @@ const DastScanner: React.FC = () => {
             <Play className="w-4 h-4 mr-1" /> {scanning ? 'Scanning...' : selectedOrgId === 'all' ? 'Scan All' : 'Scan Selected'}
           </Button>
           <Button variant="outline" onClick={exportReport} disabled={cachedResults.length === 0}>
-            <Download className="w-4 h-4 mr-1" /> Export Report
+            <Download className="w-4 h-4 mr-1" /> Export TXT
           </Button>
+          {displayResults && (
+            <Button
+              variant="outline"
+              onClick={() => handleDownloadPdf(displayResults)}
+              disabled={downloadingPdf === displayResults.organization_id}
+            >
+              {downloadingPdf === displayResults.organization_id ? (
+                <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Generating...</>
+              ) : (
+                <><FileDown className="w-4 h-4 mr-1" /> Download PDF</>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -494,22 +548,35 @@ const DastScanner: React.FC = () => {
                         {scan.summary?.low > 0 && <span className="text-blue-400">{scan.summary.low}L</span>}
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      disabled={scanning}
-                      onClick={(e) => {
-                        const org = orgs.find(o => o.id === scan.organization_id);
-                        if (org) handleScanSingleOrg(e, org);
-                      }}
-                    >
-                      {isScanningThis ? (
-                        <span className="text-xs">Scanning...</span>
-                      ) : (
-                        <><Play className="w-3 h-3 mr-1" /> Scan</>
-                      )}
-                    </Button>
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={scanning}
+                        onClick={(e) => {
+                          const org = orgs.find(o => o.id === scan.organization_id);
+                          if (org) handleScanSingleOrg(e, org);
+                        }}
+                      >
+                        {isScanningThis ? (
+                          <span className="text-xs">Scanning...</span>
+                        ) : (
+                          <><Play className="w-3 h-3 mr-1" /> Scan</>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={downloadingPdf === scan.organization_id}
+                        onClick={(e) => { e.stopPropagation(); handleDownloadPdf(scan); }}
+                      >
+                        {downloadingPdf === scan.organization_id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <><FileDown className="w-3 h-3 mr-1" /> PDF</>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               );
