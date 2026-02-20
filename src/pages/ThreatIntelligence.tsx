@@ -218,6 +218,7 @@ const ThreatIntelligence: React.FC = () => {
 
   // Detail
   const [detailOrg, setDetailOrg] = useState<OrgScorecard | null>(null);
+  const [selectedBreachOrg, setSelectedBreachOrg] = useState<BreachResult | null>(null);
 
   // Live clock for "ago" labels
   useEffect(() => {
@@ -465,12 +466,16 @@ const ThreatIntelligence: React.FC = () => {
   /* ─── Breach Check ─── */
   const runBreachCheck = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
-      const domains = orgList.map(o => ({ domain: extractDomain(o.url), name: o.name }));
-      // Pass detected technologies for cross-referencing
-      const techNames = Object.values(techFingerprints)
-        .filter(t => t.technologies)
-        .flatMap(t => [t.technologies!.webServer, t.technologies!.cms, t.technologies!.language].filter(Boolean) as string[]);
-      const { data, error } = await invokeWithRetry('check-breaches', { domains, orgTechnologies: techNames });
+      // Send per-org technology arrays for accurate per-org breach matching
+      const domains = orgList.map(o => {
+        const tf = techFingerprints[o.url];
+        const techs = tf?.technologies
+          ? [tf.technologies.webServer, tf.technologies.cms, tf.technologies.language,
+             tf.technologies.cdn, ...(tf.technologies.jsLibraries || [])].filter(Boolean) as string[]
+          : [];
+        return { domain: extractDomain(o.url), name: o.name, technologies: techs };
+      });
+      const { data, error } = await invokeWithRetry('check-breaches', { domains });
       if (error) throw error;
       setBreachResults(data.results || []);
 
@@ -1426,7 +1431,7 @@ const ThreatIntelligence: React.FC = () => {
           )}
 
           {/* Section A: Breaches Affecting Our Organizations */}
-          {totalBreaches > 0 && (
+          {breachResults.filter(r => r.breachesFound > 0).length > 0 && (
             <Card className="border-red-500/20">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -1438,36 +1443,67 @@ const ThreatIntelligence: React.FC = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Organization</TableHead>
-                      <TableHead>Breach</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Records</TableHead>
-                      <TableHead>Data Types</TableHead>
+                      <TableHead>Breaches Found</TableHead>
+                      <TableHead>Risk Level</TableHead>
+                      <TableHead>Top Breach</TableHead>
+                      <TableHead>Total Records</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {breachResults.flatMap(r => r.breaches.map((b, i) => {
-                      const bDate = b.breachDate || b.date || '';
-                      const isRecent = bDate ? new Date(bDate) > new Date(Date.now() - 180 * 24 * 60 * 60 * 1000) : false;
-                      const types = b.dataClasses || b.dataTypes || [];
+                    {breachResults.filter(r => r.breachesFound > 0).map((r, i) => {
+                      const topBreach = r.breaches[0];
+                      const totalRecords = r.breaches.reduce((sum, b) => sum + (b.pwnCount || b.recordCount || 0), 0);
                       return (
-                        <TableRow key={`${r.domain}-${i}`} className={isRecent ? 'bg-red-500/5' : ''}>
+                        <TableRow
+                          key={`${r.domain}-${i}`}
+                          className="cursor-pointer hover:bg-accent/50 transition-colors"
+                          onClick={() => setSelectedBreachOrg(r)}
+                        >
                           <TableCell className="font-medium">{r.organization}</TableCell>
                           <TableCell>
-                            {b.name || b.title}
-                            <Badge className="ml-2 bg-yellow-500/20 text-yellow-400 border-yellow-500/30" variant="outline">Relevant</Badge>
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30" variant="outline">{r.breachesFound}</Badge>
                           </TableCell>
-                          <TableCell className="font-mono text-xs">{bDate}</TableCell>
-                          <TableCell>{(b.pwnCount || b.recordCount)?.toLocaleString() || '?'}</TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {types.slice(0, 4).map((dt: string) => (
-                                <Badge key={dt} variant="outline" className="text-xs">{dt}</Badge>
-                              ))}
-                            </div>
+                            <Badge className={severityBadge(r.riskLevel === 'high' ? 'critical' : r.riskLevel === 'medium' ? 'high' : 'medium')} variant="outline">
+                              {r.riskLevel}
+                            </Badge>
                           </TableCell>
+                          <TableCell className="text-sm">{topBreach?.name || topBreach?.title || '—'}</TableCell>
+                          <TableCell>{totalRecords.toLocaleString()}</TableCell>
                         </TableRow>
                       );
-                    }))}
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Organizations with no breaches */}
+          {breachResults.filter(r => r.breachesFound === 0).length > 0 && (
+            <Card className="border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400" /> Organizations With No Known Breaches
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Organization</TableHead>
+                      <TableHead>Domain</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {breachResults.filter(r => r.breachesFound === 0).map((r, i) => (
+                      <TableRow key={`clean-${r.domain}-${i}`}>
+                        <TableCell className="font-medium">{r.organization}</TableCell>
+                        <TableCell className="font-mono text-xs">{r.domain}</TableCell>
+                        <TableCell><Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30" variant="outline">Clean</Badge></TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -1641,6 +1677,82 @@ const ThreatIntelligence: React.FC = () => {
               </div>
               {detailOrg.lastUpdated && (
                 <p className="text-xs text-muted-foreground text-right">Last updated: {timeAgo(detailOrg.lastUpdated)}</p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Breach Detail Dialog ─── */}
+      <Dialog open={!!selectedBreachOrg} onOpenChange={() => setSelectedBreachOrg(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5 text-red-400" />
+              <div>
+                <p>{selectedBreachOrg?.organization}</p>
+                <p className="text-xs text-muted-foreground font-normal">{selectedBreachOrg?.domain}</p>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          {selectedBreachOrg && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Badge className={severityBadge(selectedBreachOrg.riskLevel === 'high' ? 'critical' : selectedBreachOrg.riskLevel === 'medium' ? 'high' : 'medium')} variant="outline">
+                  Risk: {selectedBreachOrg.riskLevel}
+                </Badge>
+                <span className="text-sm text-muted-foreground">{selectedBreachOrg.breachesFound} breach(es) found</span>
+              </div>
+
+              {selectedBreachOrg.breaches.length === 0 ? (
+                <Alert className="bg-emerald-500/10 border-emerald-500/30">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <AlertTitle className="text-emerald-400">No breaches found</AlertTitle>
+                  <AlertDescription>No known breaches match this organization's tech stack or domain.</AlertDescription>
+                </Alert>
+              ) : (
+                <div className="space-y-3">
+                  {selectedBreachOrg.breaches.map((b, i) => {
+                    const bDate = b.breachDate || b.date || '';
+                    const types = b.dataClasses || b.dataTypes || [];
+                    return (
+                      <Card key={i} className="border-border">
+                        <CardContent className="p-4 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold text-sm">{b.title || b.name}</h4>
+                            {b.isVerified && <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]" variant="outline">Verified</Badge>}
+                          </div>
+                          <div className="flex gap-4 text-xs text-muted-foreground">
+                            <span>Date: <span className="font-mono">{bDate || 'Unknown'}</span></span>
+                            <span>Records: <span className="font-mono">{(b.pwnCount || b.recordCount)?.toLocaleString() || '?'}</span></span>
+                          </div>
+                          {b.description && <p className="text-xs text-muted-foreground">{b.description}</p>}
+                          {types.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              <span className="text-xs text-muted-foreground mr-1">Exposed:</span>
+                              {types.map((dt: string) => (
+                                <Badge key={dt} variant="outline" className="text-[10px]">{dt}</Badge>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
+              <Alert className="bg-blue-500/10 border-blue-500/30">
+                <Globe className="w-4 h-4 text-blue-400" />
+                <AlertDescription className="text-xs text-blue-300">
+                  <strong>Want deeper breach intelligence?</strong> The free HIBP API only provides the global breach catalog.
+                  For domain-specific email breach searches (e.g., how many @{selectedBreachOrg.domain} emails were in breaches),
+                  consider the <a href="https://haveibeenpwned.com/API/Key" target="_blank" rel="noopener noreferrer" className="underline">HIBP Enterprise API key</a>.
+                </AlertDescription>
+              </Alert>
+
+              {selectedBreachOrg.checkedAt && (
+                <p className="text-xs text-muted-foreground text-right">Checked: {timeAgo(selectedBreachOrg.checkedAt)}</p>
               )}
             </div>
           )}
