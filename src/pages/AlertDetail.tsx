@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow, format } from 'date-fns';
 import {
   ArrowLeft, CheckCircle, XCircle, AlertTriangle, Clock, Building2,
-  MapPin, Tag, Radio, Loader2, ExternalLink,
+  MapPin, Tag, Radio, Loader2, ExternalLink, Shield, CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -53,6 +53,7 @@ const AlertDetail: React.FC = () => {
   const queryClient = useQueryClient();
   const { userRole } = useAuth();
   const { toast } = useToast();
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
 
   const canAct = userRole?.role === 'SuperAdmin' || userRole?.role === 'Analyst';
 
@@ -283,12 +284,120 @@ const AlertDetail: React.FC = () => {
         </div>
       </div>
 
+      {/* ── Matched Playbook ──────────────────────────────────────────── */}
+      <PlaybookSection alert={alert} completedSteps={completedSteps} setCompletedSteps={setCompletedSteps} />
+
       {/* Permission note for non-action users */}
       {!canAct && alert.status !== 'closed' && (
         <p className="text-xs text-muted-foreground text-center py-2">
           Acknowledge and close actions require SuperAdmin or Analyst role.
         </p>
       )}
+    </div>
+  );
+};
+
+/* ─── Playbook Matching ─── */
+const KEYWORD_MAP: Record<string, string[]> = {
+  defacement: ['defac', 'deface', 'defaced'],
+  ddos: ['ddos', 'denial', 'attack', 'under attack', 'flood'],
+  dns_hijack: ['dns', 'hijack', 'nameserver', 'ns changed'],
+  ssl_expiry: ['ssl', 'tls', 'certificate', 'cert expir', 'expired'],
+  data_breach: ['breach', 'data leak', 'leaked', 'exfiltrat'],
+  phishing: ['phish', 'lookalike', 'typosquat', 'spoofing domain'],
+  port_exposure: ['port', 'exposed port', 'open port', '3306', '5432', '27017'],
+  email_spoofing: ['spf', 'dmarc', 'dkim', 'email spoof', 'spoofing'],
+};
+
+function matchPlaybookType(alert: AlertRow): string | null {
+  const text = `${alert.title} ${alert.description} ${alert.source}`.toLowerCase();
+  for (const [threatType, keywords] of Object.entries(KEYWORD_MAP)) {
+    if (keywords.some(kw => text.includes(kw))) return threatType;
+  }
+  return null;
+}
+
+interface PlaybookStep {
+  step: number; title: string; description: string;
+  priority: 'immediate' | 'within_1h' | 'within_24h';
+}
+
+const priorityConfig: Record<string, { label: string; className: string }> = {
+  immediate: { label: 'IMMEDIATE', className: 'bg-destructive/15 text-destructive border-destructive/30' },
+  within_1h: { label: 'WITHIN 1H', className: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  within_24h: { label: 'WITHIN 24H', className: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+};
+
+const PlaybookSection: React.FC<{
+  alert: AlertRow;
+  completedSteps: Set<number>;
+  setCompletedSteps: React.Dispatch<React.SetStateAction<Set<number>>>;
+}> = ({ alert, completedSteps, setCompletedSteps }) => {
+  const threatType = matchPlaybookType(alert);
+
+  const { data: playbook } = useQuery({
+    queryKey: ['matched-playbook', threatType],
+    enabled: !!threatType,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('playbooks')
+        .select('*')
+        .eq('threat_type', threatType!)
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  if (!playbook) return null;
+
+  const steps = (Array.isArray(playbook.steps) ? playbook.steps : []) as unknown as PlaybookStep[];
+
+  const toggleStep = (stepNum: number) => {
+    setCompletedSteps(prev => {
+      const s = new Set(prev);
+      if (s.has(stepNum)) s.delete(stepNum); else s.add(stepNum);
+      return s;
+    });
+  };
+
+  return (
+    <div className="glass-card rounded-xl border border-border overflow-hidden">
+      <div className="p-4 border-b border-border flex items-center gap-2 bg-primary/5">
+        <Shield className="w-4 h-4 text-primary" />
+        <h3 className="text-sm font-semibold text-foreground">Response Playbook</h3>
+        <span className="ml-auto text-xs text-muted-foreground font-mono">
+          {completedSteps.size}/{steps.length} completed
+        </span>
+      </div>
+      <div className="p-1">
+        <p className="px-4 py-2 text-sm font-medium text-foreground">{playbook.title}</p>
+        {steps.map(step => {
+          const isDone = completedSteps.has(step.step);
+          const pri = priorityConfig[step.priority] || priorityConfig.within_24h;
+          return (
+            <div key={step.step} className={cn('flex gap-3 px-4 py-3 border-b border-border/30 last:border-b-0', isDone && 'bg-primary/5')}>
+              <button
+                onClick={() => toggleStep(step.step)}
+                className={cn(
+                  'flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all mt-0.5',
+                  isDone ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary/50'
+                )}
+              >
+                {isDone && <CheckCircle2 className="w-3.5 h-3.5" />}
+                {!isDone && <span className="text-[10px] font-bold text-muted-foreground">{step.step}</span>}
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                  <h4 className={cn('text-sm font-medium', isDone && 'line-through text-muted-foreground')}>{step.title}</h4>
+                  <span className={cn('text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border', pri.className)}>{pri.label}</span>
+                </div>
+                <p className={cn('text-xs leading-relaxed', isDone ? 'text-muted-foreground' : 'text-foreground/70')}>{step.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

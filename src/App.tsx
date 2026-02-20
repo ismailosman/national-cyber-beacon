@@ -25,6 +25,7 @@ import UptimeMonitor from "@/pages/UptimeMonitor";
 import DdosMonitor from "@/pages/DdosMonitor";
 import EarlyWarning from "@/pages/EarlyWarning";
 import ThreatIntelligence from "@/pages/ThreatIntelligence";
+import Playbooks from "@/pages/Playbooks";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -62,6 +63,7 @@ const ProtectedRoutes = () => {
         <Route path="/ddos-monitor" element={<DdosMonitor />} />
         <Route path="/early-warning" element={<EarlyWarning />} />
         <Route path="/threat-intelligence" element={<ThreatIntelligence />} />
+        <Route path="/playbooks" element={<Playbooks />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<NotFound />} />
