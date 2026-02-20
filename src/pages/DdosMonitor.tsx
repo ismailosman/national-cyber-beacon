@@ -52,7 +52,7 @@ interface RiskAssessment {
 /* ─── Constants ─── */
 const RISK_RECALC_INTERVAL = 60_000;
 const HEADER_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
-const SECTORS = ['All', 'Government', 'Telecom', 'Banking', 'Education'];
+const SECTORS = ['All', 'Government', 'Bank', 'Telecom', 'Health', 'Education', 'Other'];
 const RISK_LEVELS = ['All', 'Low', 'Medium', 'High', 'Critical'];
 const PROTECTION_FILTERS = ['All', 'CDN Protected', 'Unprotected'];
 
@@ -64,10 +64,12 @@ const riskColors: Record<string, string> = {
 };
 
 const sectorColors: Record<string, string> = {
-  Government: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  Telecom: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  Banking: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  Education: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  government: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  bank: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  telecom: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  health: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+  education: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
 const riskOrder = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -123,11 +125,18 @@ const DdosMonitor: React.FC = () => {
   /* ── Load orgs ── */
   const loadOrgs = useCallback(async () => {
     const { data } = await supabase
-      .from('organizations_monitored')
-      .select('*')
-      .eq('is_active', true)
+      .from('organizations')
+      .select('id, name, domain, sector')
       .order('name');
-    if (data) setOrgs(data as MonitoredOrg[]);
+    if (data) {
+      setOrgs(data.map(o => ({
+        id: o.id,
+        name: o.name,
+        url: o.domain.startsWith('http') ? o.domain : `https://${o.domain}`,
+        sector: o.sector,
+        is_active: true,
+      })));
+    }
     setLoading(false);
   }, []);
 
@@ -305,7 +314,7 @@ const DdosMonitor: React.FC = () => {
   const filtered = riskEntries.filter(({ org, risk }) => {
     if (search && !org.name.toLowerCase().includes(search.toLowerCase()) && !org.url.toLowerCase().includes(search.toLowerCase())) return false;
     if (riskFilter !== 'All' && risk?.riskLevel !== riskFilter.toLowerCase()) return false;
-    if (sectorFilter !== 'All' && org.sector !== sectorFilter) return false;
+    if (sectorFilter !== 'All' && org.sector.toLowerCase() !== sectorFilter.toLowerCase()) return false;
     if (protectionFilter === 'CDN Protected' && !risk?.protection?.hasCDN) return false;
     if (protectionFilter === 'Unprotected' && risk?.protection?.hasCDN) return false;
     return true;
@@ -510,7 +519,7 @@ const DdosMonitor: React.FC = () => {
                           </a>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector])}>{org.sector}</Badge>
+                          <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector.toLowerCase()])}>{org.sector}</Badge>
                         </td>
                         <td className="px-4 py-3">
                           {risk?.protection?.hasCDN ? (
