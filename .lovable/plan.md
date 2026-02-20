@@ -1,126 +1,110 @@
 
 
-## Automated Compliance Assessment Engine + Threat Feed Data Fix
-
-### Overview
-
-Two changes: (1) Make the Compliance page functional by adding client-side auto-assessment logic that queries existing monitoring tables and maps results to CIS Controls, plus manual assessment forms for controls that cannot be auto-assessed. (2) Fix the Threat Feed tab which already has a working edge function (`fetch-threat-intel`) but the data may not be reaching the UI due to edge function timeout or rendering issues.
+## Three Priority Features: Remediation Reports, Incident Playbooks, Score Trend History
 
 ---
 
-### Part 1: Compliance Auto-Assessment
+### Feature 1: Automated Remediation Reports
 
-#### 1A. New Database Table: `compliance_assessments`
+The existing `generate-report` edge function creates basic PDFs with check results. We need to enhance it to include actionable, step-by-step remediation instructions for each failing check.
 
-Create via migration:
+**Edge Function: `generate-report/index.ts`**
+- Add a comprehensive remediation map that generates specific fix instructions based on actual check results from `early_warning_logs`, `ssl_logs`, `ddos_risk_logs`, and `tech_fingerprints`
+- For each failing area, include: what is wrong, why it matters, exact steps to fix, estimated time
+- Example remediation entries:
+  - No CDN/WAF/Rate Limiting: "Step 1: Sign up for Cloudflare free tier. Step 2: Update DNS nameservers. Step 3: Enable WAF rules. Time: 30 minutes."
+  - Missing HSTS: "Add `Strict-Transport-Security: max-age=31536000` to your web server config. Time: 5 minutes."
+  - No SPF/DMARC: "Add TXT record `v=spf1 ...` to your DNS. Add `_dmarc.domain TXT v=DMARC1; p=reject`. Time: 10 minutes."
+  - Exposed database ports: "Block ports 3306/5432/27017 in your firewall immediately. Time: 5 minutes."
+  - Expired/invalid SSL: "Renew SSL certificate. Use Let's Encrypt (free) or contact your certificate provider. Time: 15 minutes."
+- Add a new PDF page for recommendations, prioritized by severity (critical first)
+- Query `early_warning_logs`, `ssl_logs`, `ddos_risk_logs`, `tech_fingerprints` in addition to existing `security_checks` and `alerts`
+- Include a priority ranking: Critical (fix today), High (fix this week), Medium (fix this month)
 
+**Frontend: `Reports.tsx`**
+- Add a "Remediation Report" option (checkbox or toggle) alongside the existing PDF download
+- When enabled, the generated PDF includes the remediation section
+- Add a "Preview Recommendations" section below the existing report preview showing what fix instructions will be included
+- Pass a `includeRemediation: true` flag to the edge function
+
+---
+
+### Feature 2: Incident Response Playbooks
+
+Pre-built step-by-step procedures that appear when specific alert types trigger. These are stored in a new database table and linked to alert categories/severities.
+
+**New Database Table: `playbooks`**
 ```sql
-CREATE TABLE public.compliance_assessments (
+CREATE TABLE public.playbooks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id uuid NOT NULL,
-  control_code text NOT NULL,
-  framework text NOT NULL DEFAULT 'cis-v8',
-  status text NOT NULL DEFAULT 'not_assessed',
-  assessment_type text NOT NULL DEFAULT 'manual',
-  evidence text DEFAULT '',
-  evidence_data jsonb DEFAULT '{}'::jsonb,
-  assessed_by text DEFAULT 'System (Auto)',
-  assessed_at timestamptz DEFAULT now(),
-  expires_at timestamptz,
-  UNIQUE(organization_id, control_code, framework)
+  title text NOT NULL,
+  threat_type text NOT NULL,
+  severity text NOT NULL DEFAULT 'all',
+  steps jsonb NOT NULL DEFAULT '[]',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  created_by uuid
 );
-
-ALTER TABLE public.compliance_assessments ENABLE ROW LEVEL SECURITY;
-
--- RLS policies matching existing pattern
-CREATE POLICY "All authenticated read compliance_assessments" ON public.compliance_assessments FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Analyst full compliance_assessments" ON public.compliance_assessments FOR ALL TO authenticated USING (has_role(auth.uid(), 'Analyst'::app_role)) WITH CHECK (has_role(auth.uid(), 'Analyst'::app_role));
-CREATE POLICY "Auditor read compliance_assessments" ON public.compliance_assessments FOR SELECT TO authenticated USING (has_role(auth.uid(), 'Auditor'::app_role));
-CREATE POLICY "SuperAdmin full compliance_assessments" ON public.compliance_assessments FOR ALL TO authenticated USING (has_role(auth.uid(), 'SuperAdmin'::app_role)) WITH CHECK (has_role(auth.uid(), 'SuperAdmin'::app_role));
 ```
+- `threat_type` values: defacement, ddos, dns_hijack, ssl_expiry, data_breach, phishing, port_exposure, email_spoofing, malware, general
+- `steps` is a JSON array of objects: `{ step: 1, title: "...", description: "...", priority: "immediate|within_1h|within_24h" }`
+- RLS: All authenticated can read, SuperAdmin/Analyst can write
 
-#### 1B. Client-Side Auto-Assessment Logic
+**Seed playbooks** (via insert query, not migration) for these threat types:
+1. **Website Defacement** (7 steps): Screenshot evidence, contact hosting, restore backup, change passwords, check access logs, update CMS, notify stakeholders
+2. **DDoS Attack** (6 steps): Enable Cloudflare Under Attack mode, contact ISP, enable rate limiting, monitor traffic, document attack, post-incident review
+3. **DNS Hijack** (6 steps): Verify DNS records, lock domain registrar, update nameservers, flush DNS caches, enable DNSSEC, audit DNS access
+4. **SSL Certificate Expiry** (4 steps): Renew certificate, install new cert, verify HTTPS, enable auto-renewal
+5. **Data Breach** (8 steps): Isolate systems, preserve evidence, assess scope, notify authorities, reset credentials, patch vulnerability, notify affected parties, post-incident report
+6. **Phishing Domain** (5 steps): Document the phishing site, report to domain registrar, notify employees, block domain in DNS, monitor for new variants
+7. **Exposed Ports** (4 steps): Close ports in firewall, audit services, restrict access to VPN, verify closure
+8. **Email Spoofing** (4 steps): Add SPF record, add DMARC with reject policy, add DKIM, monitor DMARC reports
 
-Add an `assessOrganization` function in `Compliance.tsx` that queries existing monitoring tables and maps results to the 20 CIS Controls. No new edge function needed -- all data already exists in:
-- `organizations_monitored` -- for CIS-1.1
-- `tech_fingerprints` -- for CIS-2.1, CIS-7.1, CIS-12.1
-- `uptime_logs`, `ssl_logs`, `ddos_risk_logs`, `early_warning_logs` -- for CIS-3.10, CIS-4.1, CIS-4.2, CIS-13.1, CIS-16.1, CIS-16.11
-- `early_warning_logs` (check_type = 'security_headers') -- for CIS-4.1, CIS-16.1
-- `early_warning_logs` (check_type = 'open_ports') -- for CIS-4.1, CIS-16.11
+**New Page: `/playbooks` (or section within Incidents page)**
+- List all playbooks with threat type, severity, and step count
+- Click to expand and see full step-by-step procedure
+- Each step shows: step number, title, detailed description, priority tag (immediate/within 1h/within 24h), and a checkbox for tracking completion
 
-**Control-to-data mapping (12 auto/hybrid, 8 manual):**
-
-| Control | Type | Data Source | Pass Condition |
-|---|---|---|---|
-| CIS-1.1 | Hybrid | organizations_monitored + tech_fingerprints | Org record exists with complete fields AND tech fingerprint exists |
-| CIS-2.1 | Auto | tech_fingerprints | Record exists with detected technologies |
-| CIS-3.10 | Auto | ssl_logs + early_warning_logs (security_headers) | Valid SSL AND HSTS header present |
-| CIS-4.1 | Hybrid | early_warning_logs (security_headers + open_ports) | 5+ headers AND no critical ports |
-| CIS-4.2 | Hybrid | ddos_risk_logs | Has CDN AND WAF AND rate limiting |
-| CIS-7.1 | Hybrid | tech_fingerprints + threat_intelligence_logs | Tech fingerprint exists, no critical vulns |
-| CIS-12.1 | Hybrid | tech_fingerprints + early_warning_logs | Software versions current, HSTS present |
-| CIS-13.1 | Auto | uptime_logs + ssl_logs + ddos_risk_logs + early_warning_logs | Org appears in ALL four monitoring tables |
-| CIS-16.1 | Hybrid | early_warning_logs (security_headers) | CSP + X-Frame-Options + X-Content-Type-Options present |
-| CIS-16.11 | Hybrid | early_warning_logs (open_ports) | No database ports (3306, 5432, 27017) exposed |
-| CIS-5.1 through CIS-18.1 | Manual | User input | Manual assessment form |
-
-Each auto-assessment result is upserted into `compliance_assessments` with `assessment_type = 'auto'` and `expires_at` set to 6 hours from now.
-
-#### 1C. Manual Assessment Modal
-
-For manual-only controls, add an "Assess" button in the Status column. Clicking it opens a Dialog with:
-- Control name and description
-- Radio buttons: Passing, Partial, Failing, Not Applicable
-- Evidence textarea
-- Save button that upserts to `compliance_assessments` with `assessment_type = 'manual'` and `expires_at` = 90 days from now
-
-#### 1D. "Run Assessment" Button
-
-Add next to the org/framework selectors. When clicked:
-- Shows progress indicator
-- Queries all monitoring tables for the selected org
-- Runs auto-assessment for each auto/hybrid control
-- Upserts results to `compliance_assessments`
-- Updates score cards in real-time
-
-#### 1E. Score Calculation Update
-
-Replace the current `control_results`-based scoring with `compliance_assessments`-based scoring:
-- Score = (passing * 1.0 + partial * 0.5) / total_assessed * 100
-- Show grade: 90-100% Compliant (green), 70-89% Partially Compliant (yellow), 50-69% Needs Improvement (orange), below 50% Non-Compliant (red)
-- Show "X/20 controls assessed" denominator
-
-#### 1F. Status Badges
-
-Replace generic status with:
-- Passing (green) -- auto or manual pass
-- Partial (yellow) -- partially compliant
-- Failing (red) -- non-compliant
-- Not Assessed (gray) -- manual control, not yet assessed
-- Check Failed (orange) -- auto-assessment data source unavailable
-
-Show "Last assessed: X ago" and assessment type (Auto/Manual) as small badges.
+**Integration with Alerts:**
+- On the Alert Detail page (`AlertDetail.tsx`), add a "Response Playbook" section
+- Auto-match the alert to a playbook based on the alert source/title keywords (e.g., alert with "defacement" matches the defacement playbook, alert with "SSL" matches SSL playbook)
+- Show the matched playbook steps inline with completion checkboxes
+- Add a sidebar link for "Playbooks" in the navigation
 
 ---
 
-### Part 2: Fix Threat Feed Data
+### Feature 3: Attack Surface Score Trend History
 
-The `fetch-threat-intel` edge function already exists and fetches all 4 sources (CISA KEV, URLhaus, NVD, Feodo Tracker). The frontend already calls it via `fetchThreatFeed()` and renders the data. The issue is likely the edge function timing out or returning errors silently.
+The `risk_history` table already exists and has 60 records. The Dashboard already shows a 30-day national trend chart. OrgDetail already shows per-org score history. The gap is: (1) scores aren't being recorded after TI scans, and (2) there's no comparative trend view.
 
-#### 2A. Improve Error Visibility
+**Record scores after scans:**
+- In `ThreatIntelligence.tsx`, after `calculateScorecards` runs during a full scan, insert a `risk_history` entry for each organization with their current percentage score
+- Also update the `organizations.risk_score` field with the latest scorecard percentage
+- This ensures trend data accumulates over time
 
-Update `fetchThreatFeed` in `ThreatIntelligence.tsx` to:
-- Log the raw response for debugging
-- Show a warning banner if the response is empty or partial
-- Show which sources succeeded/failed
+**New Dashboard Section OR Enhancement to OrgDetail:**
+- On the OrgDetail page, enhance the existing score history chart to show:
+  - Score trend line (already exists)
+  - Color-coded zones: green (80-100), yellow (60-80), orange (40-60), red (0-40)
+  - Trend direction indicator: arrow up/down with delta from previous week
+  - "Improving" / "Declining" / "Stable" label based on last 4 data points
+- On the Organizations list page, add a small sparkline or trend arrow next to each org's score showing if they're improving or declining
 
-#### 2B. Add Source Status Indicators
-
-At the top of the Threat Feed tab, show:
-- "Sources: CISA KEV (40 entries), NVD (15 entries), URLhaus (30 entries), Feodo (20 entries)"
-- Or "CISA KEV (failed), NVD (15 entries), ..." if a source failed
-
-No new edge functions needed -- the existing `fetch-threat-intel` already handles all 4 sources with proper error handling per source.
+**Score Recording in TI scan (`ThreatIntelligence.tsx`):**
+- After scorecards are calculated in `runFullScan`, add:
+```typescript
+for (const card of scorecards) {
+  await supabase.from('risk_history').insert({
+    organization_id: card.org.id,
+    score: card.percentage,
+  });
+  await supabase.from('organizations').update({
+    risk_score: card.percentage,
+    status: card.percentage >= 75 ? 'Secure' : card.percentage >= 50 ? 'Warning' : 'Critical',
+    last_scan: new Date().toISOString(),
+  }).eq('id', card.org.id);
+}
+```
 
 ---
 
@@ -128,16 +112,23 @@ No new edge functions needed -- the existing `fetch-threat-intel` already handle
 
 | File | Action |
 |---|---|
-| Migration SQL | Create `compliance_assessments` table with RLS |
-| `src/pages/Compliance.tsx` | Major rewrite -- add auto-assessment logic, manual assessment modal, Run Assessment button, updated scoring |
-| `src/pages/ThreatIntelligence.tsx` | Minor edit -- add source status indicators to Threat Feed tab, improve error logging |
+| Migration SQL | Create `playbooks` table with RLS |
+| Insert SQL | Seed 8 default playbooks with step-by-step procedures |
+| `supabase/functions/generate-report/index.ts` | Enhance PDF to include remediation instructions from all monitoring tables |
+| `src/pages/Reports.tsx` | Add remediation toggle, preview recommendations section |
+| `src/pages/AlertDetail.tsx` | Add matched playbook display with completion checkboxes |
+| `src/pages/ThreatIntelligence.tsx` | Record risk_history entries and update org scores after scan |
+| `src/pages/OrgDetail.tsx` | Enhance trend chart with color zones and trend direction |
+| `src/pages/Organizations.tsx` | Add trend arrow indicator next to scores |
+| `src/components/layout/Sidebar.tsx` | Add Playbooks nav link |
+| `src/App.tsx` | Add /playbooks route |
+| `src/pages/Playbooks.tsx` | New page: list and view playbooks |
 
 ### Technical Notes
 
-- No new edge functions needed for compliance -- all assessment queries run client-side against existing tables
-- The `compliance_assessments` table uses a unique constraint on (organization_id, control_code, framework) for upsert
-- Auto-assessments expire after 6 hours; manual after 90 days
-- The existing `control_results` table is NOT used (it's empty and maps to control UUIDs); the new `compliance_assessments` table maps to control codes (text) for simplicity
-- The threat feed edge function already works -- changes are UI-side error visibility improvements only
-- All 20 existing CIS Controls in the `controls` table will be mapped to the assessment logic
+- No new edge functions needed for playbooks or score trends -- all client-side
+- The `generate-report` edge function enhancement queries additional tables (`early_warning_logs`, `ddos_risk_logs`, `tech_fingerprints`) that it doesn't currently query
+- Playbook-to-alert matching uses keyword matching on alert title/source (e.g., "defacement" in title matches defacement playbook)
+- Score recording happens at the end of a full scan, not on every individual check
+- The `risk_history` table already exists with proper RLS policies
 
