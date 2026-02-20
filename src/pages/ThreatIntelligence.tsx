@@ -25,7 +25,7 @@ interface MonitoredOrg {
 }
 
 interface ThreatFeedData {
-  cisaKEV: any[]; maliciousUrls: any[]; latestCVEs: any[]; fetchedAt: string;
+  cisaKEV: any[]; maliciousUrls: any[]; latestCVEs: any[]; feodoC2: any[]; fetchedAt: string;
 }
 
 interface TechFingerprint {
@@ -47,7 +47,9 @@ interface PhishingResult {
 
 interface BreachResult {
   domain: string; organization: string; breachesFound: number;
-  breaches: { name: string; title: string; date: string; recordCount: number; dataTypes: string[]; description: string; isVerified: boolean }[];
+  breaches: { name: string; title: string; date?: string; breachDate?: string; recordCount?: number; pwnCount?: number; dataClasses?: string[]; dataTypes?: string[]; description: string; isVerified: boolean }[];
+  allRecentBreaches?: any[];
+  riskLevel?: string;
   checkedAt: string; note: string;
 }
 
@@ -453,13 +455,17 @@ const ThreatIntelligence: React.FC = () => {
   const runBreachCheck = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
       const domains = orgList.map(o => ({ domain: extractDomain(o.url), name: o.name }));
-      const { data, error } = await invokeWithRetry('check-breaches', { domains });
+      // Pass detected technologies for cross-referencing
+      const techNames = Object.values(techFingerprints)
+        .filter(t => t.technologies)
+        .flatMap(t => [t.technologies!.webServer, t.technologies!.cms, t.technologies!.language].filter(Boolean) as string[]);
+      const { data, error } = await invokeWithRetry('check-breaches', { domains, orgTechnologies: techNames });
       if (error) throw error;
       setBreachResults(data.results || []);
     } catch (err) {
       console.error('Breach check error:', err);
     }
-  }, []);
+  }, [techFingerprints]);
 
   /* ─── Security Headers Check ─── */
   const runSecurityHeadersCheck = useCallback(async (orgList: MonitoredOrg[]) => {
@@ -548,16 +554,33 @@ const ThreatIntelligence: React.FC = () => {
     } catch (err) { console.error('Blacklist check error:', err); }
   }, []);
 
-  /* ─── Defacement Check ─── */
+  /* ─── Defacement Check (with calibration) ─── */
   const runDefacementCheck = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
       // Load baselines
       const { data: baselines } = await supabase.from('baselines').select('*');
       const baselineMap = new Map((baselines || []).map(b => [b.url, b]));
 
+      // Get check counts per org from early_warning_logs
+      const { data: existingLogs } = await supabase.from('early_warning_logs')
+        .select('organization_id')
+        .eq('check_type', 'defacement');
+      const checkCounts = new Map<string, number>();
+      for (const log of existingLogs || []) {
+        const orgId = log.organization_id || '';
+        checkCounts.set(orgId, (checkCounts.get(orgId) || 0) + 1);
+      }
+
       const urlItems = orgList.map(o => {
         const bl = baselineMap.get(o.url);
-        return { url: o.url, baselineHash: bl?.content_hash || null, baselineTitle: bl?.page_title || null, baselineSize: bl?.page_size || null };
+        return {
+          url: o.url,
+          baselineHash: bl?.content_hash || null,
+          baselineTitle: bl?.page_title || null,
+          baselineSize: bl?.page_size || null,
+          checkCount: checkCounts.get(o.id) || 0,
+          expectedTitle: o.name, // Use org name for title mismatch check
+        };
       });
 
       const { data, error } = await invokeWithRetry('check-defacement', { urls: urlItems }, 2, 30000);
@@ -565,23 +588,38 @@ const ThreatIntelligence: React.FC = () => {
       for (const r of data?.results || []) {
         const org = orgList.find(o => o.url === r.url);
         if (!org) continue;
-        const riskLevel = r.isDefaced ? 'critical' : r.hashChanged ? 'warning' : 'safe';
+
+        // Map new status to risk levels
+        let riskLevel = 'safe';
+        if (r.status === 'defaced') riskLevel = 'critical';
+        else if (r.status === 'review_needed' || r.status === 'content_changed') riskLevel = 'warning';
+        // baseline_set, calibrating, clean = safe
+
         await supabase.from('early_warning_logs').insert({
           organization_id: org.id, organization_name: org.name, url: r.url,
           check_type: 'defacement', risk_level: riskLevel,
-          details: { hashChanged: r.hashChanged, titleChanged: r.titleChanged, sizeAnomaly: r.sizeAnomaly, defacementKeywordsFound: r.defacementKeywordsFound, isDefaced: r.isDefaced, currentHash: r.currentHash, currentTitle: r.currentTitle, currentSize: r.currentSize },
+          details: {
+            status: r.status, hashChanged: r.hashChanged, titleChanged: r.titleChanged,
+            sizeAnomaly: r.sizeAnomaly, defacementKeywordsFound: r.defacementKeywordsFound,
+            keywordContexts: r.keywordContexts, indicators: r.indicators,
+            indicatorCount: r.indicatorCount, internalLinkCount: r.internalLinkCount,
+            hasNormalStructure: r.hasNormalStructure,
+            currentHash: r.currentHash, currentTitle: r.currentTitle, currentSize: r.currentSize,
+          },
         });
 
-        // Upsert baseline
-        if (r.currentHash) {
+        // Only update baseline on first 3 checks
+        const orgCheckCount = checkCounts.get(org.id) || 0;
+        if (r.currentHash && orgCheckCount <= 2) {
           await supabase.from('baselines').upsert({
             organization_id: org.id, url: r.url,
             content_hash: r.currentHash, page_title: r.currentTitle, page_size: r.currentSize,
           }, { onConflict: 'url' });
         }
 
-        if (r.isDefaced) {
-          await generateAlert('critical', `Website Defaced: ${org.name}`, `Defacement detected on ${r.url}. Keywords: ${r.defacementKeywordsFound?.join(', ')}`);
+        // Only alert on confirmed defacement (2+ indicators)
+        if (r.status === 'defaced') {
+          await generateAlert('critical', `Website Defaced: ${org.name}`, `Defacement detected on ${r.url} (${r.indicatorCount} indicators). Keywords: ${r.defacementKeywordsFound?.join(', ') || 'none'}`);
         }
       }
     } catch (err) { console.error('Defacement check error:', err); }
@@ -907,6 +945,7 @@ const ThreatIntelligence: React.FC = () => {
                 <SelectItem value="CISA">CISA KEV</SelectItem>
                 <SelectItem value="NVD">NVD CVEs</SelectItem>
                 <SelectItem value="URLhaus">URLhaus</SelectItem>
+                <SelectItem value="Feodo">Feodo Tracker</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -978,7 +1017,29 @@ const ThreatIntelligence: React.FC = () => {
                 </Card>
               )}
 
-              {threatFeed.cisaKEV.length === 0 && threatFeed.latestCVEs.length === 0 && threatFeed.maliciousUrls.length === 0 && (
+              {(threatFilter === 'All' || threatFilter === 'Feodo') && threatFeed.feodoC2 && threatFeed.feodoC2.length > 0 && (
+                <Card className="border-border">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-yellow-400" /> Feodo Tracker — Botnet C2 Servers</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    {threatFeed.feodoC2.slice(0, 15).map((c: any, i: number) => (
+                      <div key={i} className="p-3 rounded border border-yellow-500/20 bg-yellow-500/5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={severityBadge('high')} variant="outline">HIGH</Badge>
+                          <span className="font-mono text-sm">{c.ipAddress}:{c.port}</span>
+                          <Badge variant="outline" className="text-xs">{c.malware}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">Country: {c.country || 'Unknown'} | First seen: {c.firstSeen} | Last online: {c.lastOnline}</p>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {threatFeed.fetchedAt && (
+                <p className="text-xs text-muted-foreground text-center">Last updated: {timeAgo(threatFeed.fetchedAt)}</p>
+              )}
+
+              {threatFeed.cisaKEV.length === 0 && threatFeed.latestCVEs.length === 0 && threatFeed.maliciousUrls.length === 0 && (!threatFeed.feodoC2 || threatFeed.feodoC2.length === 0) && (
                 <Alert className="bg-emerald-500/10 border-emerald-500/30">
                   <Check className="w-4 h-4 text-emerald-400" />
                   <AlertTitle className="text-emerald-400">No active threats detected</AlertTitle>
@@ -1125,8 +1186,14 @@ const ThreatIntelligence: React.FC = () => {
             </Alert>
           )}
 
+          {/* Section A: Breaches Affecting Our Organizations */}
           {totalBreaches > 0 && (
-            <Card className="border-border">
+            <Card className="border-red-500/20">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400" /> Breaches Affecting Our Organizations
+                </CardTitle>
+              </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
@@ -1140,16 +1207,21 @@ const ThreatIntelligence: React.FC = () => {
                   </TableHeader>
                   <TableBody>
                     {breachResults.flatMap(r => r.breaches.map((b, i) => {
-                      const isRecent = new Date(b.date) > new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+                      const bDate = b.breachDate || b.date || '';
+                      const isRecent = bDate ? new Date(bDate) > new Date(Date.now() - 180 * 24 * 60 * 60 * 1000) : false;
+                      const types = b.dataClasses || b.dataTypes || [];
                       return (
-                        <TableRow key={`${r.domain}-${i}`} className={isRecent ? 'bg-red-500/5' : 'bg-yellow-500/5'}>
+                        <TableRow key={`${r.domain}-${i}`} className={isRecent ? 'bg-red-500/5' : ''}>
                           <TableCell className="font-medium">{r.organization}</TableCell>
-                          <TableCell>{b.name || b.title}</TableCell>
-                          <TableCell className="font-mono text-xs">{b.date}</TableCell>
-                          <TableCell>{b.recordCount?.toLocaleString() || '?'}</TableCell>
+                          <TableCell>
+                            {b.name || b.title}
+                            <Badge className="ml-2 bg-yellow-500/20 text-yellow-400 border-yellow-500/30" variant="outline">Relevant</Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{bDate}</TableCell>
+                          <TableCell>{(b.pwnCount || b.recordCount)?.toLocaleString() || '?'}</TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1">
-                              {b.dataTypes.slice(0, 4).map(dt => (
+                              {types.slice(0, 4).map((dt: string) => (
                                 <Badge key={dt} variant="outline" className="text-xs">{dt}</Badge>
                               ))}
                             </div>
@@ -1163,10 +1235,56 @@ const ThreatIntelligence: React.FC = () => {
             </Card>
           )}
 
+          {/* Section B: Recent Global Breaches */}
+          {breachResults.length > 0 && breachResults[0]?.allRecentBreaches && breachResults[0].allRecentBreaches.length > 0 && (
+            <Card className="border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-blue-400" /> Recent Global Breaches
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Service</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Records</TableHead>
+                      <TableHead>Data Types</TableHead>
+                      <TableHead>Verified</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {breachResults[0].allRecentBreaches.slice(0, 20).map((b: any, i: number) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-medium">{b.title || b.name}</TableCell>
+                        <TableCell className="font-mono text-xs">{b.breachDate}</TableCell>
+                        <TableCell>{b.pwnCount?.toLocaleString() || '?'}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {(b.dataClasses || []).slice(0, 3).map((dt: string) => (
+                              <Badge key={dt} variant="outline" className="text-xs">{dt}</Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>{b.isVerified ? <Check className="w-4 h-4 text-emerald-400" /> : <X className="w-4 h-4 text-muted-foreground" />}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
           {breachResults.length > 0 && (
-            <p className="text-xs text-muted-foreground text-center italic">
-              Note: Full domain-specific breach search requires a paid HIBP API key. Showing publicly available breach data relevant to your sector.
-            </p>
+            <>
+              {breachResults[0]?.checkedAt && (
+                <p className="text-xs text-muted-foreground text-center">Last updated: {timeAgo(breachResults[0].checkedAt)}</p>
+              )}
+              <p className="text-xs text-muted-foreground text-center italic">
+                Note: For detailed domain-specific breach searches, add a Have I Been Pwned API key in Settings. Showing publicly available breach data relevant to your sector.
+              </p>
+            </>
           )}
         </TabsContent>
       </Tabs>
@@ -1228,6 +1346,59 @@ const ThreatIntelligence: React.FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+              {/* Mark as Clean / Reset Baseline actions */}
+              <div className="flex gap-2 pt-2 border-t border-border">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs"
+                  onClick={async () => {
+                    if (!detailOrg) return;
+                    // Mark as clean: insert safe defacement log + update baseline
+                    await supabase.from('early_warning_logs').insert({
+                      organization_id: detailOrg.org.id, organization_name: detailOrg.org.name, url: detailOrg.org.url,
+                      check_type: 'defacement', risk_level: 'safe',
+                      details: { status: 'clean', manualOverride: true },
+                    });
+                    toast({ title: `${detailOrg.org.name} marked as clean` });
+                    calculateScorecards(orgs);
+                  }}
+                >
+                  <Check className="w-3 h-3 mr-1" /> Mark as Clean
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs"
+                  onClick={async () => {
+                    if (!detailOrg) return;
+                    // Reset baseline: fetch current page and update baseline
+                    try {
+                      const { data } = await invokeWithRetry('check-defacement', {
+                        urls: [{ url: detailOrg.org.url, baselineHash: null, baselineTitle: null, baselineSize: null, checkCount: 0 }]
+                      }, 1, 25000);
+                      const r = data?.results?.[0];
+                      if (r?.currentHash) {
+                        await supabase.from('baselines').upsert({
+                          organization_id: detailOrg.org.id, url: detailOrg.org.url,
+                          content_hash: r.currentHash, page_title: r.currentTitle, page_size: r.currentSize,
+                        }, { onConflict: 'url' });
+                        toast({ title: `Baseline reset for ${detailOrg.org.name}` });
+                      }
+                    } catch { toast({ title: 'Failed to reset baseline', variant: 'destructive' }); }
+                  }}
+                >
+                  <RotateCw className="w-3 h-3 mr-1" /> Reset Baseline
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs"
+                  onClick={() => window.open(detailOrg?.org.url, '_blank')}
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" /> View Page
+                </Button>
               </div>
               {detailOrg.lastUpdated && (
                 <p className="text-xs text-muted-foreground text-right">Last updated: {timeAgo(detailOrg.lastUpdated)}</p>

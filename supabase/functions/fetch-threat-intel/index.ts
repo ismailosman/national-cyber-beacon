@@ -9,8 +9,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    return res;
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
@@ -30,47 +29,56 @@ serve(async (req) => {
       'jquery', 'iis', 'cpanel', 'plesk', 'joomla', 'drupal', 'tomcat'
     ];
 
+    // Source 1: CISA KEV
     let cisaKEV: any[] = [];
     try {
       const cisaRes = await fetchWithTimeout('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json');
       if (cisaRes.ok) {
         const cisaData = await cisaRes.json();
         const vulns = cisaData.vulnerabilities || [];
-        cisaKEV = vulns.slice(-50).reverse().map((v: any) => {
-          const combined = `${(v.vendorProject || '').toLowerCase()} ${(v.product || '').toLowerCase()}`;
-          const affectsOurOrgs = orgTechnologies.some(t => combined.includes(t.toLowerCase()));
-          return {
-            cveID: v.cveID, vulnerabilityName: v.vulnerabilityName,
-            vendorProject: v.vendorProject, product: v.product,
-            dateAdded: v.dateAdded, shortDescription: v.shortDescription,
-            requiredAction: v.requiredAction, dueDate: v.dueDate, affectsOurOrgs,
-          };
-        });
+        cisaKEV = vulns
+          .sort((a: any, b: any) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime())
+          .slice(0, 30)
+          .map((v: any) => {
+            const combined = `${(v.vendorProject || '').toLowerCase()} ${(v.product || '').toLowerCase()}`;
+            const affectsOurOrgs = orgTechnologies.some(t => combined.includes(t.toLowerCase()));
+            return {
+              cveID: v.cveID, vulnerabilityName: v.vulnerabilityName,
+              vendorProject: v.vendorProject, product: v.product,
+              dateAdded: v.dateAdded, shortDescription: v.shortDescription,
+              requiredAction: v.requiredAction, dueDate: v.dueDate, affectsOurOrgs,
+            };
+          });
       }
     } catch (e) { console.error('CISA KEV fetch error:', e); }
 
+    // Source 2: URLhaus with GET fallback
     let maliciousUrls: any[] = [];
     try {
-      const urlhausRes = await fetchWithTimeout('https://urlhaus-api.abuse.ch/v1/urls/recent/', {
+      let urlhausRes = await fetchWithTimeout('https://urlhaus-api.abuse.ch/v1/urls/recent/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'limit=50',
       });
+      if (!urlhausRes.ok) {
+        urlhausRes = await fetchWithTimeout('https://urlhaus-api.abuse.ch/v1/urls/recent/limit/50/');
+      }
       if (urlhausRes.ok) {
         const urlhausData = await urlhausRes.json();
         maliciousUrls = (urlhausData.urls || [])
-          .filter((u: any) => {
-            const url = (u.url || '').toLowerCase();
-            return url.includes('.so') || url.includes('somalia');
-          })
-          .slice(0, 20)
+          .slice(0, 30)
           .map((u: any) => ({
-            url: u.url, threat: u.threat || 'unknown', targetsSomalia: true,
+            source: 'URLhaus',
+            url: u.url, threat: u.threat || 'malware', host: u.host,
             dateAdded: u.date_added, status: u.url_status,
+            tags: u.tags || [],
+            targetsSomalia: (u.url || '').toLowerCase().includes('.so/') || (u.url || '').toLowerCase().includes('.so:'),
+            severity: u.threat === 'malware_download' ? 'high' : 'medium',
           }));
       }
     } catch (e) { console.error('URLhaus fetch error:', e); }
 
+    // Source 3: NVD CVEs
     let latestCVEs: any[] = [];
     try {
       const nvdRes = await fetchWithTimeout('https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=20');
@@ -94,8 +102,28 @@ serve(async (req) => {
       }
     } catch (e) { console.error('NVD fetch error:', e); }
 
+    // Source 4: Feodo Tracker C2 servers
+    let feodoC2: any[] = [];
+    try {
+      const feodoRes = await fetchWithTimeout('https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.json');
+      if (feodoRes.ok) {
+        const feodoData = await feodoRes.json();
+        feodoC2 = (feodoData || []).slice(0, 20).map((entry: any) => ({
+          source: 'Feodo Tracker',
+          ipAddress: entry.ip_address,
+          port: entry.port,
+          malware: entry.malware,
+          firstSeen: entry.first_seen,
+          lastOnline: entry.last_online,
+          country: entry.country,
+          severity: 'high',
+        }));
+      }
+    } catch (e) { console.error('Feodo Tracker fetch error:', e); }
+
     return new Response(JSON.stringify({
-      cisaKEV, maliciousUrls, latestCVEs, fetchedAt: new Date().toISOString(),
+      cisaKEV, maliciousUrls, latestCVEs, feodoC2,
+      fetchedAt: new Date().toISOString(),
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
