@@ -73,6 +73,14 @@ const THREAT_SOURCES: { country: string; state: string; lat: number; lng: number
   { country: 'Israel', state: 'Tel Aviv', lat: 31.04, lng: 34.85 },
   { country: 'Kenya', state: 'Nairobi', lat: -1.29, lng: 36.82 },
   { country: 'Ethiopia', state: 'Addis Ababa', lat: 9.14, lng: 40.49 },
+  { country: 'Argentina', state: 'Buenos Aires', lat: -34.60, lng: -58.38 },
+  { country: 'Colombia', state: 'Bogota', lat: 4.71, lng: -74.07 },
+  { country: 'Chile', state: 'Santiago', lat: -33.44, lng: -70.65 },
+  { country: 'Venezuela', state: 'Caracas', lat: 10.48, lng: -66.90 },
+  { country: 'Rwanda', state: 'Kigali', lat: -1.94, lng: 29.87 },
+  { country: 'South Africa', state: 'Johannesburg', lat: -26.20, lng: 28.04 },
+  { country: 'Ghana', state: 'Accra', lat: 5.60, lng: -0.19 },
+  { country: 'Tanzania', state: 'Dar es Salaam', lat: -6.79, lng: 39.28 },
 ];
 
 // Weighted sources — major threat actors appear more frequently
@@ -93,6 +101,8 @@ const WEIGHTED_SOURCES: { country: string; state: string; lat: number; lng: numb
   ...Array(2).fill({ country: 'Ukraine', state: 'Kyiv', lat: 48.37, lng: 31.17 }),
   ...Array(2).fill({ country: 'Kenya', state: 'Nairobi', lat: -1.29, lng: 36.82 }),
   ...Array(2).fill({ country: 'Ethiopia', state: 'Addis Ababa', lat: 9.14, lng: 40.49 }),
+  ...Array(2).fill({ country: 'Rwanda', state: 'Kigali', lat: -1.94, lng: 29.87 }),
+  ...Array(2).fill({ country: 'South Africa', state: 'Johannesburg', lat: -26.20, lng: 28.04 }),
   ...THREAT_SOURCES,
 ];
 
