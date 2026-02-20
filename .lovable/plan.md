@@ -1,89 +1,85 @@
 
 
-## Fix Breaches Tab: Accurate Per-Organization Breach Reporting
+## Integrate HIBP API Key for Email-Pattern Breach Detection
 
-### Problem
-The current breach detection matches global breaches against organization tech stacks using keyword matching (e.g., "nginx" matching a breach named "nginx-something"). This produces identical false results for all organizations. Real breach detection requires checking if each organization's **email domain** appeared in known data breaches.
+### Overview
 
-### Solution Overview
-
-Replace the broken matching logic with per-domain breach lookups using HIBP domain search (if API key exists) or free alternatives (Mozilla Monitor breach catalog with exact domain matching).
-
----
+Upgrade the breach detection system from domain-level matching to email-pattern searching using the HIBP `breachedaccount` API endpoint. This checks 15 common email patterns (info@, admin@, contact@, etc.) per organization for a much more accurate breach picture.
 
 ### Changes
 
 **1. Rewrite Edge Function `supabase/functions/check-breaches/index.ts`**
 
-Complete rewrite to accept a single `{ domain, organizationName }` request (one org at a time):
+Replace the current domain-level HIBP search with email-pattern search:
 
-- If `HIBP_API_KEY` secret exists: call `https://haveibeenpwned.com/api/v3/breaches?domain={emailDomain}` with the API key header -- this returns only breaches where emails from that specific domain were compromised
-- If no API key: fetch the full HIBP breach catalog (free, no key needed) and do **exact domain match only** -- match `breach.Domain === emailDomain` (no fuzzy/keyword matching)
-- Also try Mozilla Monitor's free breach API as a secondary source
-- Return per-org results: `{ success, organization, domain, breachCount, breaches, isClean, source, note }`
-- Deduplicate breaches by name
-- Sort by breach date descending
+- When `HIBP_API_KEY` is present: iterate through 15 common email prefixes (info, admin, contact, support, webmaster, security, hr, office, mail, hello, general, enquiry, communications, media, press) and call `https://haveibeenpwned.com/api/v3/breachedaccount/{email}?truncateResponse=false` for each
+- Track which specific emails were found in which breaches (e.g., "admin@domain.so found in LinkedIn breach")
+- Wait 1.5 seconds between each email check (HIBP rate limit compliance)
+- Handle 429 (rate limited) by reading `retry-after` header and waiting
+- Handle 401 (invalid key) gracefully with clear error message
+- Filter out spam lists (`isSpamList`) and retired breaches (`isRetired`)
+- Deduplicate breaches by name across all email checks
+- Return `breachedEmails` array and `affectedEmails` per breach
+- When no API key: fall back to existing free exact-domain matching (HIBP catalog + Mozilla Monitor)
 
-**2. Update Frontend `src/pages/ThreatIntelligence.tsx` -- Breach Check Logic**
+**2. Create `breach_check_results` Database Table**
 
-Rewrite `runBreachCheck` to call the edge function **once per organization** (not batch):
+New table for caching breach results with upsert support:
 
-```text
-for each org:
-  1. Extract email domain from URL
-  2. Call check-breaches with { domain, organizationName }
-  3. Store result
-  4. Wait 1.5 seconds (rate limiting)
-  5. Update progress indicator
-```
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | PK, default gen_random_uuid() |
+| organization_id | uuid | UNIQUE for upsert |
+| organization_name | text | |
+| domain | text | |
+| breach_count | integer | default 0 |
+| breaches | jsonb | array of breach objects |
+| breached_emails | text[] | which emails were found |
+| is_clean | boolean | nullable |
+| error | text | nullable |
+| source | text | default '' |
+| checked_at | timestamptz | default now() |
 
-Add `breachProgress` state to show "Checking breaches... 5/17 organizations" during scan.
+RLS policies matching existing pattern (SuperAdmin full, Analyst full, Auditor read, authenticated read).
 
-**3. Redesign Breaches Tab UI**
+**3. Update Frontend `src/pages/ThreatIntelligence.tsx` -- Breach Check Logic**
 
-Replace current layout with:
+- Update `runBreachCheck` to:
+  - Wait 3 seconds between organizations (each org takes ~23s internally)
+  - Show detailed progress: "Checking Organization 3/17: Hormuud Telecom"
+  - Save results to `breach_check_results` table via upsert (on conflict organization_id)
+  - Load cached results from `breach_check_results` on mount (instead of `threat_intelligence_logs`)
+- Update `BreachResult` interface to include `breachedEmails`, `checkedEmails`, `source`, `method`
 
-- **Summary Banner**: Green "No breaches detected" or red "X organizations have known breaches" based on results
-- **Source indicator**: Show "Checked via: HIBP Domain Search" or "Checked via: Free Breach Check (Limited)"
-- **Info banner** (if no HIBP key): Yellow banner recommending HIBP API key for comprehensive results
-- **Organization table** with columns: Organization, Domain, Status (Clean/X Breaches/Unknown), Breaches Found, Last Checked
-- **Status badges**: Green "Clean", Red "X Breaches", Gray "Unknown", Blue "Limited"
-- Each row **clickable** -- opens existing breach detail dialog
+**4. Redesign Breaches Tab UI**
 
-**4. Enhance Breach Detail Dialog**
+- Add "Affected Emails" column to the organization table
+- Show `breachedEmails` count per org
+- Enhance the Breach Detail Dialog to show:
+  - Which specific email addresses were found in breaches
+  - Per-breach list of affected emails
+  - Color-coded data class chips (red for passwords/financial, orange for phones/addresses, yellow for emails/IPs, gray for names)
+  - Auto-generated recommendations based on leaked data types (already partially implemented -- enhance with more categories)
+- Show API method indicator: "HIBP Email Pattern Search" vs "Free Breach Check"
+- If HIBP key configured, remove the yellow "add API key" banner
 
-When clicking an org row, the dialog shows:
-- Organization name and domain
-- List of breaches specific to that domain only
-- For each breach: name, date, record count, data classes as chips, description, verified badge
-- **Recommendation section** based on leaked data types:
-  - Passwords leaked: "Force password reset for all @domain accounts"
-  - Emails leaked: "Expect increased phishing targeting @domain"
-  - Phone numbers leaked: "Expect SMS phishing"
-  - IP addresses leaked: "Review network security"
+**5. Add HIBP API Key to Cloud Secrets**
 
-**5. Add HIBP API Key Support**
+Use the secrets tool to prompt the user to add `HIBP_API_KEY` as a Cloud secret. The edge function already reads `Deno.env.get('HIBP_API_KEY')`.
 
-- Prompt user for `HIBP_API_KEY` secret using the secrets tool (only if they want comprehensive results)
-- The edge function checks `Deno.env.get('HIBP_API_KEY')` and uses the appropriate method
-- No blocking -- the feature works without the key using free APIs
+### Rate Limit Considerations
 
-**6. Remove Old Broken Logic**
-
-- Remove the `allRecentBreaches` field from results (no more "Recent Global Breaches" section showing unrelated breaches)
-- Remove tech-stack-based matching entirely
-- Remove `techFingerprints` dependency from `runBreachCheck`
-
----
+- HIBP Pwned 1 plan: 10 requests/minute
+- 15 emails per org with 1.5s delay = ~23 seconds per org
+- 17 organizations = ~6.5 minutes for a full scan
+- 3-second delay between orgs on the frontend side
+- Total full scan: approximately 7 minutes
 
 ### Files Changed
 
 | File | Action |
 |---|---|
-| `supabase/functions/check-breaches/index.ts` | Complete rewrite: per-domain lookup with HIBP API key support + free fallback |
-| `src/pages/ThreatIntelligence.tsx` | Rewrite `runBreachCheck` to call per-org, redesign breaches tab UI, enhance detail dialog with recommendations |
-
-### API Recommendation
-
-**Have I Been Pwned API Key** ($3.50/month from https://haveibeenpwned.com/API/Key) is recommended for the most accurate domain-specific breach searches. Without it, the system uses exact domain matching against the free breach catalog, which is less comprehensive but still accurate (no false positives).
+| `supabase/functions/check-breaches/index.ts` | Rewrite: email-pattern search with HIBP API, free fallback |
+| `src/pages/ThreatIntelligence.tsx` | Update breach logic, cache to new table, enhanced UI |
+| Database migration | Create `breach_check_results` table with RLS |
 
