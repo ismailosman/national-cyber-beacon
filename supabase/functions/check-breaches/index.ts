@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { domain, organizationName } = await req.json();
+    const { domain, organizationName, apiKey } = await req.json();
 
     if (!domain) {
       return new Response(JSON.stringify({ success: false, error: 'domain is required' }), {
@@ -20,7 +20,8 @@ serve(async (req) => {
     }
 
     const emailDomain = domain.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
-    const HIBP_API_KEY = Deno.env.get('HIBP_API_KEY') || '';
+    const HIBP_API_KEY = Deno.env.get('HIBP_API_KEY') || apiKey || '';
+    console.log(`[check-breaches] Domain: ${emailDomain}, API key present: ${HIBP_API_KEY ? 'YES' : 'NO'}`);
 
     // ─── METHOD 1: HIBP Email Pattern Search (most accurate) ───
     if (HIBP_API_KEY) {
