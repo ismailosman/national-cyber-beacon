@@ -937,7 +937,7 @@ const ThreatIntelligence: React.FC = () => {
 
         {/* ─── Tab 2: Threat Feed ─── */}
         <TabsContent value="threats" className="space-y-4">
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap items-center">
             <Select value={threatFilter} onValueChange={setThreatFilter}>
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -948,7 +948,28 @@ const ThreatIntelligence: React.FC = () => {
                 <SelectItem value="Feodo">Feodo Tracker</SelectItem>
               </SelectContent>
             </Select>
+            <Button size="sm" variant="outline" className="text-xs" onClick={fetchThreatFeed} disabled={scanning}>
+              <RefreshCw className="w-3 h-3 mr-1" /> Refresh Feed
+            </Button>
           </div>
+
+          {/* Source Status Indicators */}
+          {threatFeed && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className={cn('px-2 py-1 rounded border', threatFeed.cisaKEV.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
+                CISA KEV {threatFeed.cisaKEV.length > 0 ? `✓ (${threatFeed.cisaKEV.length})` : '✗ failed'}
+              </span>
+              <span className={cn('px-2 py-1 rounded border', threatFeed.latestCVEs.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
+                NVD {threatFeed.latestCVEs.length > 0 ? `✓ (${threatFeed.latestCVEs.length})` : '✗ failed'}
+              </span>
+              <span className={cn('px-2 py-1 rounded border', threatFeed.maliciousUrls.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
+                URLhaus {threatFeed.maliciousUrls.length > 0 ? `✓ (${threatFeed.maliciousUrls.length})` : '✗ failed'}
+              </span>
+              <span className={cn('px-2 py-1 rounded border', (threatFeed.feodoC2?.length || 0) > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
+                Feodo {(threatFeed.feodoC2?.length || 0) > 0 ? `✓ (${threatFeed.feodoC2.length})` : '✗ failed'}
+              </span>
+            </div>
+          )}
 
           {!threatFeed && !scanning && (
             <p className="text-center text-muted-foreground py-8">No threat data yet. Click "Run Full Scan" to fetch.</p>

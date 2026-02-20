@@ -256,6 +256,48 @@ export type Database = {
         }
         Relationships: []
       }
+      compliance_assessments: {
+        Row: {
+          assessed_at: string | null
+          assessed_by: string | null
+          assessment_type: string
+          control_code: string
+          evidence: string | null
+          evidence_data: Json | null
+          expires_at: string | null
+          framework: string
+          id: string
+          organization_id: string
+          status: string
+        }
+        Insert: {
+          assessed_at?: string | null
+          assessed_by?: string | null
+          assessment_type?: string
+          control_code: string
+          evidence?: string | null
+          evidence_data?: Json | null
+          expires_at?: string | null
+          framework?: string
+          id?: string
+          organization_id: string
+          status?: string
+        }
+        Update: {
+          assessed_at?: string | null
+          assessed_by?: string | null
+          assessment_type?: string
+          control_code?: string
+          evidence?: string | null
+          evidence_data?: Json | null
+          expires_at?: string | null
+          framework?: string
+          id?: string
+          organization_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       compliance_frameworks: {
         Row: {
           created_at: string | null
