@@ -80,7 +80,12 @@ const Dashboard: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['threat-events-recent'] });
       }).subscribe();
 
-    return () => { ch1.unsubscribe(); ch2.unsubscribe(); ch3.unsubscribe(); };
+    const ch4 = supabase.channel('risk-history-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'risk_history' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['score-history-all'] });
+      }).subscribe();
+
+    return () => { ch1.unsubscribe(); ch2.unsubscribe(); ch3.unsubscribe(); ch4.unsubscribe(); };
   }, [queryClient]);
 
   const avgScore = orgs.length
