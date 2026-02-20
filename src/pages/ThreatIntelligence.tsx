@@ -86,6 +86,40 @@ function scoreToGrade(pct: number): string {
   return 'F';
 }
 
+/* ─── Fuzzy name matching for org ↔ log linkage ─── */
+function normalizeOrgName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+}
+
+function orgNameMatches(logName: string, orgName: string): boolean {
+  const a = normalizeOrgName(logName);
+  const b = normalizeOrgName(orgName);
+  if (a === b) return true;
+  if (a.startsWith(b) || b.startsWith(a)) return true;
+  // "contains" for short names (>4 chars) inside longer ones
+  if (a.length > 4 && b.includes(a)) return true;
+  if (b.length > 4 && a.includes(b)) return true;
+  return false;
+}
+
+function matchLogToOrg<T extends { organization_id?: string | null; organization_name?: string }>(
+  logs: T[], org: MonitoredOrg
+): T[] {
+  return logs.filter(l =>
+    l.organization_id === org.id ||
+    (l.organization_name && orgNameMatches(l.organization_name, org.name))
+  );
+}
+
+function matchFirstLogToOrg<T extends { organization_id?: string | null; organization_name?: string }>(
+  logs: T[], org: MonitoredOrg
+): T | undefined {
+  return logs.find(l =>
+    l.organization_id === org.id ||
+    (l.organization_name && orgNameMatches(l.organization_name, org.name))
+  );
+}
+
 function gradeColor(grade: string): string {
   if (grade === 'A+' || grade === 'A') return 'text-emerald-400';
   if (grade === 'B') return 'text-green-400';
@@ -287,22 +321,22 @@ const ThreatIntelligence: React.FC = () => {
     const cards: OrgScorecard[] = [];
 
     const [uptimeRes, sslRes, ddosRes, ewRes, techRes] = await Promise.all([
-      supabase.from('uptime_logs').select('*').order('checked_at', { ascending: false }).limit(500),
-      supabase.from('ssl_logs').select('*').order('checked_at', { ascending: false }).limit(200),
-      supabase.from('ddos_risk_logs').select('*').order('checked_at', { ascending: false }).limit(200),
-      supabase.from('early_warning_logs').select('*').order('checked_at', { ascending: false }).limit(500),
-      supabase.from('tech_fingerprints' as any).select('*').order('checked_at', { ascending: false }).limit(200),
+      supabase.from('uptime_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
+      supabase.from('ssl_logs').select('*').order('checked_at', { ascending: false }).limit(500),
+      supabase.from('ddos_risk_logs').select('*').order('checked_at', { ascending: false }).limit(500),
+      supabase.from('early_warning_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
+      supabase.from('tech_fingerprints' as any).select('*').order('checked_at', { ascending: false }).limit(500),
     ]);
 
     const MAXES: Record<string, number> = { uptime: 15, ssl: 15, ddos: 15, email: 10, headers: 10, ports: 10, defacement: 10, dns: 5, blacklist: 5, software: 5 };
 
     for (const org of orgList) {
       const breakdown: Record<string, BreakdownItem> = {};
-      const orgUptime = (uptimeRes.data || []).filter(u => u.organization_id === org.id);
-      const orgSsl = (sslRes.data || []).find(s => s.organization_id === org.id);
-      const orgDdos = (ddosRes.data || []).find(d => d.organization_id === org.id);
-      const orgEw = (ewRes.data || []).filter(e => e.organization_id === org.id);
-      const orgTech = (techRes.data || [] as any[]).find((t: any) => t.organization_id === org.id) as any;
+      const orgUptime = matchLogToOrg(uptimeRes.data || [], org);
+      const orgSsl = matchFirstLogToOrg(sslRes.data || [], org);
+      const orgDdos = matchFirstLogToOrg(ddosRes.data || [], org);
+      const orgEw = matchLogToOrg(ewRes.data || [], org);
+      const orgTech = matchFirstLogToOrg((techRes.data || []) as any[], org) as any;
 
       // Uptime
       if (orgUptime.length > 0) {
