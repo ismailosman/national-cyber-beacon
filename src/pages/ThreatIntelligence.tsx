@@ -338,10 +338,10 @@ const ThreatIntelligence: React.FC = () => {
     const cards: OrgScorecard[] = [];
 
     const [uptimeRes, sslRes, ddosRes, ewRes, techRes] = await Promise.all([
-      supabase.from('uptime_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
-      supabase.from('ssl_logs').select('*').order('checked_at', { ascending: false }).limit(500),
-      supabase.from('ddos_risk_logs').select('*').order('checked_at', { ascending: false }).limit(500),
-      supabase.from('early_warning_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
+      supabase.from('uptime_logs').select('*').order('checked_at', { ascending: false }).limit(2000),
+      supabase.from('ssl_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
+      supabase.from('ddos_risk_logs').select('*').order('checked_at', { ascending: false }).limit(1000),
+      supabase.from('early_warning_logs').select('*').order('checked_at', { ascending: false }).limit(2000),
       supabase.from('tech_fingerprints' as any).select('*').order('checked_at', { ascending: false }).limit(500),
     ]);
 
@@ -929,6 +929,7 @@ const ThreatIntelligence: React.FC = () => {
 
   // Load persisted data from DB on mount
   const initialRun = useRef(false);
+  const autoScanRun = useRef(false);
   useEffect(() => {
     if (!loading && orgs.length > 0 && !initialRun.current) {
       initialRun.current = true;
@@ -1014,8 +1015,92 @@ const ThreatIntelligence: React.FC = () => {
       // Auto-fetch threat feed immediately
       fetchThreatFeed();
 
-      // Load existing data first, then run scan
-      calculateScorecards(orgs);
+      // Load existing data first, then auto-scan missing orgs
+      calculateScorecards(orgs).then(async () => {
+        if (autoScanRun.current) return;
+        autoScanRun.current = true;
+
+        // Check which orgs are missing early_warning / ddos / tech data
+        const [ewCheck, ddosCheck, techCheck] = await Promise.all([
+          supabase.from('early_warning_logs').select('organization_id').limit(2000),
+          supabase.from('ddos_risk_logs').select('organization_id').limit(1000),
+          supabase.from('tech_fingerprints' as any).select('organization_id').limit(500),
+        ]);
+
+        const ewOrgIds = new Set((ewCheck.data || []).map((r: any) => r.organization_id).filter(Boolean));
+        const ddosOrgIds = new Set((ddosCheck.data || []).map((r: any) => r.organization_id).filter(Boolean));
+        const techOrgIds = new Set((techCheck.data || []).map((r: any) => r.organization_id).filter(Boolean));
+
+        const missingEw = orgs.filter(o => !ewOrgIds.has(o.id));
+        const missingDdos = orgs.filter(o => !ddosOrgIds.has(o.id));
+        const missingTech = orgs.filter(o => !techOrgIds.has(o.id));
+
+        const totalMissing = Math.max(missingEw.length, missingDdos.length, missingTech.length);
+        if (totalMissing < Math.floor(orgs.length * 0.3)) return; // Less than 30% missing, skip
+
+        toast({ title: `Auto-scanning ${totalMissing} organizations with missing security data...`, description: 'This runs in the background. Scorecards will update automatically.' });
+
+        const batchSize = 5;
+
+        // Run early warning checks for missing orgs
+        if (missingEw.length > 0) {
+          for (let i = 0; i < missingEw.length; i += batchSize) {
+            const batch = missingEw.slice(i, i + batchSize);
+            await Promise.all([
+              runSecurityHeadersCheck(batch),
+              runEmailDnsCheck(batch),
+              runBlacklistCheck(batch),
+              runDefacementCheck(batch),
+              runPortsCheck(batch),
+            ]);
+            if (i + batchSize < missingEw.length) await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        // Run DDoS checks for missing orgs
+        if (missingDdos.length > 0) {
+          for (let i = 0; i < missingDdos.length; i += batchSize) {
+            const batch = missingDdos.slice(i, i + batchSize);
+            const urls = batch.map(o => o.url);
+            try {
+              const { data } = await invokeWithRetry('check-ddos-risk', { urls }, 2, 30000);
+              for (const r of data?.results || []) {
+                const org = batch.find(o => o.url === r.url);
+                if (!org) continue;
+                const dp = r.ddosProtection;
+                let riskLevel = 'low';
+                const riskFactors: string[] = [];
+                if (dp.originExposed) { riskFactors.push('Origin IP exposed'); riskLevel = 'medium'; }
+                if (!dp.hasCDN) { riskFactors.push('No CDN'); riskLevel = 'medium'; }
+                if (!dp.hasWAF) riskFactors.push('No WAF');
+                if (!dp.hasRateLimiting) riskFactors.push('No rate limiting');
+                if (riskFactors.length >= 3) riskLevel = 'high';
+                await supabase.from('ddos_risk_logs').insert({
+                  organization_id: org.id, organization_name: org.name, url: r.url,
+                  has_cdn: dp.hasCDN, cdn_provider: dp.cdnProvider, has_waf: dp.hasWAF,
+                  has_rate_limiting: dp.hasRateLimiting, origin_exposed: dp.originExposed,
+                  protection_headers: dp.protectionHeaders || [], server_header: dp.serverHeader,
+                  risk_level: riskLevel, risk_factors: riskFactors,
+                });
+              }
+            } catch (err) { console.error('Auto DDoS check error:', err); }
+            if (i + batchSize < missingDdos.length) await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        // Run tech fingerprinting for missing orgs
+        if (missingTech.length > 0) {
+          for (let i = 0; i < missingTech.length; i += batchSize) {
+            const batch = missingTech.slice(i, i + batchSize);
+            await runFingerprinting(batch);
+            if (i + batchSize < missingTech.length) await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        // Recalculate scorecards with new data
+        await calculateScorecards(orgs);
+        toast({ title: 'Auto-scan complete', description: `${totalMissing} organizations scanned. Scorecards updated.` });
+      });
     }
   }, [loading, orgs.length]);
 
