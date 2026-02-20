@@ -210,6 +210,8 @@ const ThreatIntelligence: React.FC = () => {
   const [search, setSearch] = useState('');
   const [gradeFilter, setGradeFilter] = useState('All');
   const [threatFilter, setThreatFilter] = useState('All');
+  const [ministryFilter, setMinistryFilter] = useState('All');
+  const [feedLoading, setFeedLoading] = useState(false);
 
   // Detail
   const [detailOrg, setDetailOrg] = useState<OrgScorecard | null>(null);
@@ -376,6 +378,7 @@ const ThreatIntelligence: React.FC = () => {
 
   /* ─── Threat Feed ─── */
   const fetchThreatFeed = useCallback(async () => {
+    setFeedLoading(true);
     try {
       const techNames = Object.values(techFingerprints)
         .filter(t => t.technologies)
@@ -383,10 +386,15 @@ const ThreatIntelligence: React.FC = () => {
       const { data, error } = await invokeWithRetry('fetch-threat-intel', { orgTechnologies: techNames });
       if (error) throw error;
       setThreatFeed(data);
+      const total = (data?.cisaKEV?.length || 0) + (data?.latestCVEs?.length || 0) + (data?.maliciousUrls?.length || 0) + (data?.feodoC2?.length || 0);
+      toast({ title: 'Threat feed updated', description: `${total} entries loaded from 4 sources` });
     } catch (err) {
       console.error('Threat feed error:', err);
+      toast({ title: 'Threat feed failed', variant: 'destructive' });
+    } finally {
+      setFeedLoading(false);
     }
-  }, [techFingerprints]);
+  }, [techFingerprints, toast]);
 
   /* ─── Tech Fingerprinting ─── */
   const runFingerprinting = useCallback(async (orgList: MonitoredOrg[]) => {
@@ -776,8 +784,11 @@ const ThreatIntelligence: React.FC = () => {
   /* ─── National Threat Level ─── */
   const nationalThreatLevel = (() => {
     if (scorecards.length === 0) return { level: 'LOW', color: 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400', pulse: false };
+    const avgScore = scorecards.reduce((s, c) => s + c.percentage, 0) / scorecards.length;
     const worst = scorecards[0]?.grade;
-    if (worst === 'F') return { level: 'CRITICAL', color: 'bg-red-500/20 border-red-500/30 text-red-400', pulse: true };
+    // Additional condition: average score above 75% or below 25% triggers CRITICAL
+    if (worst === 'F' || avgScore <= 25) return { level: 'CRITICAL ALERT', color: 'bg-red-700/40 border-red-500/50 text-red-300', pulse: true };
+    if (avgScore >= 75 && worst === 'F') return { level: 'CRITICAL ALERT', color: 'bg-red-700/40 border-red-500/50 text-red-300', pulse: true };
     if (worst === 'D') return { level: 'HIGH', color: 'bg-orange-500/20 border-orange-500/30 text-orange-400', pulse: true };
     if (worst === 'C') return { level: 'ELEVATED', color: 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400', pulse: false };
     return { level: 'LOW', color: 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400', pulse: false };
@@ -955,8 +966,8 @@ const ThreatIntelligence: React.FC = () => {
         <TabsContent value="threats" className="space-y-4">
           <div className="flex gap-3 flex-wrap items-center">
             <Select value={threatFilter} onValueChange={setThreatFilter}>
-              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger className="w-40 border-neon-cyan/30 bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover border-border z-50">
                 <SelectItem value="All">All Sources</SelectItem>
                 <SelectItem value="CISA">CISA KEV</SelectItem>
                 <SelectItem value="NVD">NVD CVEs</SelectItem>
@@ -964,126 +975,166 @@ const ThreatIntelligence: React.FC = () => {
                 <SelectItem value="Feodo">Feodo Tracker</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="sm" variant="outline" className="text-xs" onClick={fetchThreatFeed} disabled={scanning}>
-              <RefreshCw className="w-3 h-3 mr-1" /> Refresh Feed
+            <Select value={ministryFilter} onValueChange={setMinistryFilter}>
+              <SelectTrigger className="w-48 border-neon-cyan/30 bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover border-border z-50">
+                <SelectItem value="All">All Ministries</SelectItem>
+                {orgs.map(o => <SelectItem key={o.id} value={o.name}>{o.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" className="text-xs border-neon-cyan/30 text-neon-cyan hover:bg-neon-cyan/10" onClick={fetchThreatFeed} disabled={feedLoading || scanning}>
+              <RefreshCw className={cn('w-3 h-3 mr-1', feedLoading && 'animate-spin')} /> {feedLoading ? 'Loading...' : 'Refresh Feed'}
             </Button>
           </div>
 
           {/* Source Status Indicators */}
           {threatFeed && (
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className={cn('px-2 py-1 rounded border', threatFeed.cisaKEV.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
-                CISA KEV {threatFeed.cisaKEV.length > 0 ? `✓ (${threatFeed.cisaKEV.length})` : '✗ failed'}
+              <span className={cn('px-2 py-1 rounded border', threatFeed.cisaKEV.length > 0 ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-muted/30 text-muted-foreground border-border')}>
+                CISA KEV {threatFeed.cisaKEV.length > 0 ? `✓ (${threatFeed.cisaKEV.length})` : '✗'}
               </span>
-              <span className={cn('px-2 py-1 rounded border', threatFeed.latestCVEs.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
-                NVD {threatFeed.latestCVEs.length > 0 ? `✓ (${threatFeed.latestCVEs.length})` : '✗ failed'}
+              <span className={cn('px-2 py-1 rounded border', threatFeed.latestCVEs.length > 0 ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : 'bg-muted/30 text-muted-foreground border-border')}>
+                NVD {threatFeed.latestCVEs.length > 0 ? `✓ (${threatFeed.latestCVEs.length})` : '✗'}
               </span>
-              <span className={cn('px-2 py-1 rounded border', threatFeed.maliciousUrls.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
-                URLhaus {threatFeed.maliciousUrls.length > 0 ? `✓ (${threatFeed.maliciousUrls.length})` : '✗ failed'}
+              <span className={cn('px-2 py-1 rounded border', threatFeed.maliciousUrls.length > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' : 'bg-muted/30 text-muted-foreground border-border')}>
+                URLhaus {threatFeed.maliciousUrls.length > 0 ? `✓ (${threatFeed.maliciousUrls.length})` : '✗'}
               </span>
-              <span className={cn('px-2 py-1 rounded border', (threatFeed.feodoC2?.length || 0) > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30')}>
-                Feodo {(threatFeed.feodoC2?.length || 0) > 0 ? `✓ (${threatFeed.feodoC2.length})` : '✗ failed'}
+              <span className={cn('px-2 py-1 rounded border', (threatFeed.feodoC2?.length || 0) > 0 ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-muted/30 text-muted-foreground border-border')}>
+                Feodo {(threatFeed.feodoC2?.length || 0) > 0 ? `✓ (${threatFeed.feodoC2.length})` : '✗'}
               </span>
             </div>
           )}
 
-          {!threatFeed && !scanning && (
-            <p className="text-center text-muted-foreground py-8">No threat data yet. Click "Run Full Scan" to fetch.</p>
+          {!threatFeed && !scanning && !feedLoading && (
+            <p className="text-center text-muted-foreground py-8">No threat data yet. Click "Run Full Scan" or "Refresh Feed" to fetch.</p>
           )}
 
-          {threatFeed && (
-            <div className="space-y-4">
-              {(threatFilter === 'All' || threatFilter === 'CISA') && threatFeed.cisaKEV.length > 0 && (
-                <Card className="border-border">
-                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-red-400" /> CISA Known Exploited Vulnerabilities</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {threatFeed.cisaKEV.slice(0, 15).map((v, i) => (
-                      <div key={i} className={cn('p-3 rounded border', v.affectsOurOrgs ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-border')}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Badge className={severityBadge('critical')} variant="outline">CRITICAL</Badge>
-                              <span className="font-mono text-sm">{v.cveID}</span>
-                              {v.affectsOurOrgs && <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30" variant="outline">AFFECTS OUR ORGS</Badge>}
-                            </div>
-                            <p className="text-sm mt-1 font-medium">{v.vulnerabilityName}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{v.vendorProject} — {v.product}</p>
-                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{v.shortDescription}</p>
-                          </div>
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">{v.dateAdded}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+          {threatFeed && (() => {
+            // Build unified threat array
+            const allThreats: { id: string; source: string; sourceColor: string; identifier: string; severity: string; description: string; date: string; ministryAffected: string }[] = [];
 
-              {(threatFilter === 'All' || threatFilter === 'NVD') && threatFeed.latestCVEs.length > 0 && (
-                <Card className="border-border">
-                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-400" /> Latest High-Severity CVEs</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {threatFeed.latestCVEs.slice(0, 10).map((c, i) => (
-                      <div key={i} className={cn('p-3 rounded border', c.affectsTech ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-border')}>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={severityBadge(c.severity)} variant="outline">{c.severity.toUpperCase()}</Badge>
-                          <span className="font-mono text-sm">{c.cveID}</span>
-                          <span className="text-xs text-muted-foreground">CVSS {c.score}</span>
-                          {c.affectsTech && <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30" variant="outline">AFFECTS COMMON TECH</Badge>}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.description}</p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+            // Helper: match ministry by tech keywords
+            const matchMinistry = (vendorProduct: string, description: string): string => {
+              const combined = `${vendorProduct} ${description}`.toLowerCase();
+              for (const org of orgs) {
+                const orgTech = Object.values(techFingerprints).find(t => {
+                  const orgMatch = orgs.find(o => o.url === t.url);
+                  return orgMatch?.id === org.id;
+                });
+                if (orgTech?.technologies) {
+                  const techs = [orgTech.technologies.webServer, orgTech.technologies.cms, orgTech.technologies.language, orgTech.technologies.cdn, ...(orgTech.technologies.jsLibraries || [])].filter(Boolean).map(s => s!.toLowerCase());
+                  if (techs.some(t => combined.includes(t))) return org.name;
+                }
+              }
+              return 'Global';
+            };
 
-              {(threatFilter === 'All' || threatFilter === 'URLhaus') && threatFeed.maliciousUrls.length > 0 && (
-                <Card className="border-border">
-                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Globe className="w-4 h-4 text-purple-400" /> Malicious URLs (Somalia-related)</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {threatFeed.maliciousUrls.map((u, i) => (
-                      <div key={i} className="p-3 rounded border border-red-500/20 bg-red-500/5">
-                        <div className="flex items-center gap-2">
-                          <Badge className={severityBadge('high')} variant="outline">{u.threat}</Badge>
-                          <span className="font-mono text-xs break-all">{u.url}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">Added: {u.dateAdded} | Status: {u.status}</p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+            // CISA KEV
+            if (threatFilter === 'All' || threatFilter === 'CISA') {
+              for (const v of threatFeed.cisaKEV) {
+                allThreats.push({
+                  id: v.cveID, source: 'CISA KEV', sourceColor: 'bg-red-500/20 text-red-400 border-red-500/30',
+                  identifier: v.cveID, severity: 'critical',
+                  description: v.shortDescription || v.vulnerabilityName,
+                  date: v.dateAdded,
+                  ministryAffected: matchMinistry(`${v.vendorProject} ${v.product}`, v.shortDescription || ''),
+                });
+              }
+            }
 
-              {(threatFilter === 'All' || threatFilter === 'Feodo') && threatFeed.feodoC2 && threatFeed.feodoC2.length > 0 && (
-                <Card className="border-border">
-                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-yellow-400" /> Feodo Tracker — Botnet C2 Servers</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {threatFeed.feodoC2.slice(0, 15).map((c: any, i: number) => (
-                      <div key={i} className="p-3 rounded border border-yellow-500/20 bg-yellow-500/5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={severityBadge('high')} variant="outline">HIGH</Badge>
-                          <span className="font-mono text-sm">{c.ipAddress}:{c.port}</span>
-                          <Badge variant="outline" className="text-xs">{c.malware}</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">Country: {c.country || 'Unknown'} | First seen: {c.firstSeen} | Last online: {c.lastOnline}</p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+            // NVD CVEs
+            if (threatFilter === 'All' || threatFilter === 'NVD') {
+              for (const c of threatFeed.latestCVEs) {
+                allThreats.push({
+                  id: c.cveID, source: 'NVD', sourceColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                  identifier: c.cveID, severity: c.severity,
+                  description: c.description,
+                  date: c.published ? new Date(c.published).toISOString().split('T')[0] : '',
+                  ministryAffected: matchMinistry('', c.description || ''),
+                });
+              }
+            }
 
-              {threatFeed.fetchedAt && (
-                <p className="text-xs text-muted-foreground text-center">Last updated: {timeAgo(threatFeed.fetchedAt)}</p>
-              )}
+            // URLhaus
+            if (threatFilter === 'All' || threatFilter === 'URLhaus') {
+              for (const u of threatFeed.maliciousUrls) {
+                allThreats.push({
+                  id: u.url, source: 'URLhaus', sourceColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                  identifier: u.url, severity: u.severity || 'high',
+                  description: `${u.threat} — ${u.host}`,
+                  date: u.dateAdded ? new Date(u.dateAdded).toISOString().split('T')[0] : '',
+                  ministryAffected: u.targetsSomalia ? 'Somalia (Regional)' : 'Global',
+                });
+              }
+            }
 
-              {threatFeed.cisaKEV.length === 0 && threatFeed.latestCVEs.length === 0 && threatFeed.maliciousUrls.length === 0 && (!threatFeed.feodoC2 || threatFeed.feodoC2.length === 0) && (
+            // Feodo C2
+            if (threatFilter === 'All' || threatFilter === 'Feodo') {
+              for (const f of (threatFeed.feodoC2 || [])) {
+                allThreats.push({
+                  id: `${f.ipAddress}:${f.port}`, source: 'Feodo', sourceColor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                  identifier: `${f.ipAddress}:${f.port}`, severity: 'high',
+                  description: `${f.malware} C2 server — ${f.country || 'Unknown'}`,
+                  date: f.firstSeen ? new Date(f.firstSeen).toISOString().split('T')[0] : '',
+                  ministryAffected: f.country === 'SO' ? 'Somalia (Regional)' : 'Global',
+                });
+              }
+            }
+
+            // Sort by date descending
+            allThreats.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+            // Apply ministry filter
+            const filtered = ministryFilter === 'All' ? allThreats : allThreats.filter(t => t.ministryAffected === ministryFilter);
+
+            if (filtered.length === 0) {
+              return (
                 <Alert className="bg-emerald-500/10 border-emerald-500/30">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <AlertTitle className="text-emerald-400">No active threats detected</AlertTitle>
-                  <AlertDescription>All feeds are clear at this time.</AlertDescription>
+                  <AlertTitle className="text-emerald-400">No threats match current filters</AlertTitle>
+                  <AlertDescription>Try changing your source or ministry filter.</AlertDescription>
                 </Alert>
-              )}
-            </div>
+              );
+            }
+
+            return (
+              <Card className="border-neon-cyan/20">
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-neon-cyan/10">
+                        <TableHead className="text-neon-cyan/70 text-xs">Source</TableHead>
+                        <TableHead className="text-neon-cyan/70 text-xs">CVE ID / Identifier</TableHead>
+                        <TableHead className="text-neon-cyan/70 text-xs">Severity</TableHead>
+                        <TableHead className="text-neon-cyan/70 text-xs">Ministry Affected</TableHead>
+                        <TableHead className="text-neon-cyan/70 text-xs">Published</TableHead>
+                        <TableHead className="text-neon-cyan/70 text-xs max-w-[300px]">Description</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.slice(0, 50).map((t, i) => (
+                        <TableRow key={`${t.source}-${t.id}-${i}`} className="border-border/50 hover:bg-neon-cyan/5">
+                          <TableCell className="py-2">
+                            <Badge className={cn(t.sourceColor, 'text-[10px]')} variant="outline">{t.source}</Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs py-2 max-w-[200px] truncate">{t.identifier}</TableCell>
+                          <TableCell className="py-2">
+                            <Badge className={cn(severityBadge(t.severity), 'text-[10px]')} variant="outline">{t.severity.toUpperCase()}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs py-2">{t.ministryAffected}</TableCell>
+                          <TableCell className="font-mono text-xs py-2 text-muted-foreground">{t.date}</TableCell>
+                          <TableCell className="text-xs py-2 text-muted-foreground max-w-[300px] truncate" title={t.description}>{t.description}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {threatFeed?.fetchedAt && (
+            <p className="text-xs text-muted-foreground text-center">Last updated: {timeAgo(threatFeed.fetchedAt)}</p>
           )}
         </TabsContent>
 
