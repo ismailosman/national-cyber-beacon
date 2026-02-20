@@ -8,7 +8,7 @@ Upgrade the breach detection system from domain-level matching to email-pattern 
 
 ### Changes
 
-**1. Rewrite Edge Function `supabase/functions/check-breaches/index.ts`**
+**1. Rewrite Edge Function `supabase/functions/check-breaches/index.ts`** ✅
 
 Replace the current domain-level HIBP search with email-pattern search:
 
@@ -22,7 +22,7 @@ Replace the current domain-level HIBP search with email-pattern search:
 - Return `breachedEmails` array and `affectedEmails` per breach
 - When no API key: fall back to existing free exact-domain matching (HIBP catalog + Mozilla Monitor)
 
-**2. Create `breach_check_results` Database Table**
+**2. Create `breach_check_results` Database Table** ✅
 
 New table for caching breach results with upsert support:
 
@@ -42,7 +42,7 @@ New table for caching breach results with upsert support:
 
 RLS policies matching existing pattern (SuperAdmin full, Analyst full, Auditor read, authenticated read).
 
-**3. Update Frontend `src/pages/ThreatIntelligence.tsx` -- Breach Check Logic**
+**3. Update Frontend `src/pages/ThreatIntelligence.tsx` -- Breach Check Logic** ✅
 
 - Update `runBreachCheck` to:
   - Wait 3 seconds between organizations (each org takes ~23s internally)
@@ -51,7 +51,7 @@ RLS policies matching existing pattern (SuperAdmin full, Analyst full, Auditor r
   - Load cached results from `breach_check_results` on mount (instead of `threat_intelligence_logs`)
 - Update `BreachResult` interface to include `breachedEmails`, `checkedEmails`, `source`, `method`
 
-**4. Redesign Breaches Tab UI**
+**4. Redesign Breaches Tab UI** ✅
 
 - Add "Affected Emails" column to the organization table
 - Show `breachedEmails` count per org
@@ -63,7 +63,7 @@ RLS policies matching existing pattern (SuperAdmin full, Analyst full, Auditor r
 - Show API method indicator: "HIBP Email Pattern Search" vs "Free Breach Check"
 - If HIBP key configured, remove the yellow "add API key" banner
 
-**5. Add HIBP API Key to Cloud Secrets**
+**5. Add HIBP API Key to Cloud Secrets** ✅
 
 Use the secrets tool to prompt the user to add `HIBP_API_KEY` as a Cloud secret. The edge function already reads `Deno.env.get('HIBP_API_KEY')`.
 
@@ -82,4 +82,3 @@ Use the secrets tool to prompt the user to add `HIBP_API_KEY` as a Cloud secret.
 | `supabase/functions/check-breaches/index.ts` | Rewrite: email-pattern search with HIBP API, free fallback |
 | `src/pages/ThreatIntelligence.tsx` | Update breach logic, cache to new table, enhanced UI |
 | Database migration | Create `breach_check_results` table with RLS |
-
