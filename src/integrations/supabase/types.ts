@@ -187,6 +187,48 @@ export type Database = {
           },
         ]
       }
+      breach_check_results: {
+        Row: {
+          breach_count: number
+          breached_emails: string[]
+          breaches: Json
+          checked_at: string
+          domain: string
+          error: string | null
+          id: string
+          is_clean: boolean | null
+          organization_id: string
+          organization_name: string
+          source: string
+        }
+        Insert: {
+          breach_count?: number
+          breached_emails?: string[]
+          breaches?: Json
+          checked_at?: string
+          domain?: string
+          error?: string | null
+          id?: string
+          is_clean?: boolean | null
+          organization_id: string
+          organization_name?: string
+          source?: string
+        }
+        Update: {
+          breach_count?: number
+          breached_emails?: string[]
+          breaches?: Json
+          checked_at?: string
+          domain?: string
+          error?: string | null
+          id?: string
+          is_clean?: boolean | null
+          organization_id?: string
+          organization_name?: string
+          source?: string
+        }
+        Relationships: []
+      }
       cert_advisories: {
         Row: {
           affected_sectors: Database["public"]["Enums"]["sector_type"][]
