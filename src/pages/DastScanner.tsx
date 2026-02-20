@@ -130,6 +130,9 @@ const DastScanner: React.FC = () => {
     setCurrentResults([]);
     setCurrentScore(null);
 
+    // Collect scan data locally for email sending (avoids stale closure on cachedResults)
+    const completedScans: { org: Org; url: string; dastScore: number; summary: any; results: TestResult[] }[] = [];
+
     for (const org of orgList) {
       setScanningOrgId(org.id);
       const url = org.domain.startsWith('http') ? org.domain : `https://${org.domain}`;
@@ -167,7 +170,9 @@ const DastScanner: React.FC = () => {
         passed: allFindings.filter(f => f.status === 'pass').length,
       };
 
-      const dastScore = Math.max(0, 100 - (summary.critical * 25 + summary.high * 15 + summary.medium * 5 + summary.low * 2));
+      const weightedFail = summary.critical * 5 + summary.high * 3 + summary.medium * 2 + summary.low * 1;
+      const weightedPass = summary.passed * 1;
+      const dastScore = (weightedPass + weightedFail) === 0 ? 100 : Math.round(100 * weightedPass / (weightedPass + weightedFail));
       setCurrentScore(dastScore);
 
       await supabase.from('dast_scan_results').upsert({
@@ -175,6 +180,8 @@ const DastScanner: React.FC = () => {
         results: allResults as any, summary, dast_score: dastScore,
         scanned_at: new Date().toISOString(),
       }, { onConflict: 'organization_id' });
+
+      completedScans.push({ org, url, dastScore, summary, results: allResults });
     }
 
     await loadCachedResults();
@@ -182,32 +189,27 @@ const DastScanner: React.FC = () => {
     setScanningOrgId(null);
     toast({ title: 'DAST Scan Complete', description: `Scanned ${orgList.length} organization(s)` });
 
-  // Send email report with PDF for each org scanned
-    for (const org of orgList) {
-      const url = org.domain.startsWith('http') ? org.domain : `https://${org.domain}`;
-      const scanData = cachedResults.find(r => r.organization_id === org.id);
-      if (scanData) {
-        try {
-          const { data: reportData } = await supabase.functions.invoke('send-dast-report', {
-            body: {
-              organizationName: org.name,
-              url,
-              dastScore: scanData.dast_score,
-              summary: scanData.summary,
-              results: scanData.results,
-            },
-          });
-          toast({ title: 'Report Sent', description: `PDF report emailed for ${org.name}` });
-          // Auto-download the PDF
-          if (reportData?.pdf) {
-            downloadPdfFromBase64(reportData.pdf, `DAST-Report-${org.name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
-          }
-        } catch (emailErr) {
-          console.error('Email report failed:', emailErr);
+    // Send email reports using locally collected data (not stale state)
+    for (const scan of completedScans) {
+      try {
+        const { data: reportData } = await supabase.functions.invoke('send-dast-report', {
+          body: {
+            organizationName: scan.org.name,
+            url: scan.url,
+            dastScore: scan.dastScore,
+            summary: scan.summary,
+            results: scan.results,
+          },
+        });
+        toast({ title: 'Report Sent', description: `PDF report emailed for ${scan.org.name}` });
+        if (reportData?.pdf) {
+          downloadPdfFromBase64(reportData.pdf, `DAST-Report-${scan.org.name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
         }
+      } catch (emailErr) {
+        console.error('Email report failed:', emailErr);
       }
     }
-  }, [toast, cachedResults]);
+  }, [toast]);
 
   const handleScan = () => {
     if (selectedOrgId === 'all') {
