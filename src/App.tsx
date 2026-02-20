@@ -22,6 +22,7 @@ import Compliance from "@/pages/Compliance";
 import CertAdvisories from "@/pages/CertAdvisories";
 import ThreatMap from "@/pages/ThreatMap";
 import UptimeMonitor from "@/pages/UptimeMonitor";
+import DdosMonitor from "@/pages/DdosMonitor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +57,7 @@ const ProtectedRoutes = () => {
         <Route path="/cert" element={<CertAdvisories />} />
             <Route path="/reports" element={<Reports />} />
         <Route path="/uptime" element={<UptimeMonitor />} />
+        <Route path="/ddos-monitor" element={<DdosMonitor />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<NotFound />} />

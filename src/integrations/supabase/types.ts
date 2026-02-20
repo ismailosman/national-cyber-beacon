@@ -286,6 +286,74 @@ export type Database = {
           },
         ]
       }
+      ddos_risk_logs: {
+        Row: {
+          availability_flapping: boolean
+          cdn_provider: string | null
+          checked_at: string
+          extended_downtime: boolean
+          has_cdn: boolean
+          has_rate_limiting: boolean
+          has_waf: boolean
+          id: string
+          organization_id: string | null
+          organization_name: string
+          origin_exposed: boolean
+          protection_headers: string[]
+          response_time_spike: boolean
+          risk_factors: string[]
+          risk_level: string
+          server_header: string | null
+          url: string
+        }
+        Insert: {
+          availability_flapping?: boolean
+          cdn_provider?: string | null
+          checked_at?: string
+          extended_downtime?: boolean
+          has_cdn?: boolean
+          has_rate_limiting?: boolean
+          has_waf?: boolean
+          id?: string
+          organization_id?: string | null
+          organization_name: string
+          origin_exposed?: boolean
+          protection_headers?: string[]
+          response_time_spike?: boolean
+          risk_factors?: string[]
+          risk_level?: string
+          server_header?: string | null
+          url: string
+        }
+        Update: {
+          availability_flapping?: boolean
+          cdn_provider?: string | null
+          checked_at?: string
+          extended_downtime?: boolean
+          has_cdn?: boolean
+          has_rate_limiting?: boolean
+          has_waf?: boolean
+          id?: string
+          organization_id?: string | null
+          organization_name?: string
+          origin_exposed?: boolean
+          protection_headers?: string[]
+          response_time_spike?: boolean
+          risk_factors?: string[]
+          risk_level?: string
+          server_header?: string | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ddos_risk_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       incident_reports: {
         Row: {
           affected_assets: string | null
