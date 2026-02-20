@@ -21,6 +21,20 @@ function getGrade(score: number): string {
   return 'F';
 }
 
+function classifyError(err: unknown): { error_type: string; error_message: string } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (lower.includes('abort') || lower.includes('timeout') || lower.includes('timed out'))
+    return { error_type: 'CONNECTION_TIMEOUT', error_message: `Request timed out: ${msg}` };
+  if (lower.includes('dns') || lower.includes('getaddrinfo') || lower.includes('resolve'))
+    return { error_type: 'DNS_FAILED', error_message: `DNS resolution failed: ${msg}` };
+  if (lower.includes('ssl') || lower.includes('tls') || lower.includes('cert'))
+    return { error_type: 'SSL_ERROR', error_message: `SSL/TLS error: ${msg}` };
+  if (lower.includes('refused') || lower.includes('econnrefused'))
+    return { error_type: 'CONNECTION_REFUSED', error_message: `Connection refused: ${msg}` };
+  return { error_type: 'UNKNOWN', error_message: msg };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -37,7 +51,7 @@ Deno.serve(async (req) => {
     const results = await Promise.all(urls.map(async (url: string) => {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        const timeout = setTimeout(() => controller.abort(), 20000);
 
         const response = await fetch(url, {
           signal: controller.signal,
@@ -55,26 +69,17 @@ Deno.serve(async (req) => {
           if (value) score++;
         }
 
-        // Consume body to avoid resource leak
         await response.text();
 
         return {
-          url,
-          headers,
-          score,
-          maxScore: 7,
-          grade: getGrade(score),
-          error: null,
-          checkedAt: new Date().toISOString(),
+          url, success: true, headers, score, maxScore: 7, grade: getGrade(score),
+          error: null, checkedAt: new Date().toISOString(),
         };
       } catch (err) {
+        const classified = classifyError(err);
         return {
-          url,
-          headers: {},
-          score: 0,
-          maxScore: 7,
-          grade: 'F',
-          error: err instanceof Error ? err.message : 'Check failed',
+          url, success: false, headers: {}, score: 0, maxScore: 7, grade: 'F',
+          error: classified.error_type, errorMessage: classified.error_message,
           checkedAt: new Date().toISOString(),
         };
       }

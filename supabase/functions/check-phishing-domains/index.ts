@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 function generateVariations(domain: string): string[] {
@@ -11,7 +11,6 @@ function generateVariations(domain: string): string[] {
   const rest = parts.slice(1).join('.');
   const variations: Set<string> = new Set();
 
-  // Letter substitutions
   const subs: Record<string, string[]> = { o: ['0'], l: ['1'], i: ['1', 'l'], a: ['@'], e: ['3'], s: ['5'] };
   for (let i = 0; i < name.length; i++) {
     const ch = name[i].toLowerCase();
@@ -22,22 +21,18 @@ function generateVariations(domain: string): string[] {
     }
   }
 
-  // Missing letter
   for (let i = 0; i < name.length; i++) {
     variations.add(name.slice(0, i) + name.slice(i + 1) + '.' + rest);
   }
 
-  // Double letter
   for (let i = 0; i < name.length; i++) {
     variations.add(name.slice(0, i) + name[i] + name[i] + name.slice(i + 1) + '.' + rest);
   }
 
-  // Hyphenated
   for (let i = 1; i < name.length; i++) {
     variations.add(name.slice(0, i) + '-' + name.slice(i) + '.' + rest);
   }
 
-  // Different TLDs
   const tlds = ['com', 'net', 'org', 'io', 'info'];
   for (const tld of tlds) {
     if (!domain.endsWith('.' + tld)) {
@@ -73,7 +68,10 @@ serve(async (req) => {
 
       for (const v of variations) {
         try {
-          const dnsRes = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(v)}&type=A`);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 10000);
+          const dnsRes = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(v)}&type=A`, { signal: controller.signal });
+          clearTimeout(timeout);
           const dnsData = await dnsRes.json();
           const exists = (dnsData.Answer || []).length > 0;
           const ip = exists ? (dnsData.Answer[0]?.data || null) : null;
@@ -81,29 +79,23 @@ serve(async (req) => {
           let hasWebsite = false;
           if (exists) {
             try {
-              const webRes = await fetch(`http://${v}`, { method: 'HEAD', redirect: 'manual' });
+              const webController = new AbortController();
+              const webTimeout = setTimeout(() => webController.abort(), 10000);
+              const webRes = await fetch(`http://${v}`, { method: 'HEAD', redirect: 'manual', signal: webController.signal });
+              clearTimeout(webTimeout);
               hasWebsite = webRes.status < 500;
             } catch { /* no website */ }
           }
 
           if (exists) {
-            lookalikeDomains.push({
-              domain: v,
-              exists,
-              ip,
-              hasWebsite,
-              risk: hasWebsite ? 'high' : 'medium',
-            });
+            lookalikeDomains.push({ domain: v, exists, ip, hasWebsite, risk: hasWebsite ? 'high' : 'medium' });
           }
         } catch { /* skip this variation */ }
       }
 
       results.push({
-        organization: org.name,
-        organizationId: org.id,
-        domain,
-        lookalikeDomains,
-        totalFound: lookalikeDomains.length,
+        organization: org.name, organizationId: org.id, domain,
+        lookalikeDomains, totalFound: lookalikeDomains.length,
         checkedAt: new Date().toISOString(),
       });
     }

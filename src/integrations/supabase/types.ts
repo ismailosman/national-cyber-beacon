@@ -220,6 +220,42 @@ export type Database = {
         }
         Relationships: []
       }
+      check_errors: {
+        Row: {
+          check_type: string
+          checked_at: string
+          error_message: string
+          error_type: string
+          id: string
+          organization_id: string | null
+          organization_name: string
+          retry_count: number
+          url: string
+        }
+        Insert: {
+          check_type?: string
+          checked_at?: string
+          error_message?: string
+          error_type?: string
+          id?: string
+          organization_id?: string | null
+          organization_name?: string
+          retry_count?: number
+          url?: string
+        }
+        Update: {
+          check_type?: string
+          checked_at?: string
+          error_message?: string
+          error_type?: string
+          id?: string
+          organization_id?: string | null
+          organization_name?: string
+          retry_count?: number
+          url?: string
+        }
+        Relationships: []
+      }
       compliance_frameworks: {
         Row: {
           created_at: string | null
