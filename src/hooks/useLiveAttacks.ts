@@ -33,6 +33,27 @@ function createSeededRand(seed: number) {
 const DAY_STRING = new Date().toISOString().slice(0, 10);
 const DAY_SEED = hashStr(DAY_STRING);
 
+// ── Deterministic delay for the Nth threat ──
+function getDelay(index: number): number {
+  const r = createSeededRand(DAY_SEED + index * 3571);
+  return 300 + r() * 700; // 0.3–1s
+}
+
+// ── Calculate current position in day's sequence ──
+function calculateCurrentIndex(): number {
+  const now = new Date();
+  const midnightMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const elapsedMs = now.getTime() - midnightMs;
+
+  let totalMs = 0;
+  let idx = 0;
+  while (totalMs < elapsedMs) {
+    totalMs += getDelay(idx);
+    idx++;
+  }
+  return idx;
+}
+
 // Real global sources with known cyber-threat actor presence
 const THREAT_SOURCES: { country: string; state: string; lat: number; lng: number }[] = [
   { country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 },
@@ -152,39 +173,42 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
   ],
 };
 
-// Generate the Nth threat of the day deterministically
+// Generate the Nth threat of the day deterministically (seeded PRNG per index)
 function generateDayThreat(index: number): LiveThreat {
-  const source = WEIGHTED_SOURCES[Math.floor(Math.random() * WEIGHTED_SOURCES.length)];
-  const target = SOMALIA_TARGETS[Math.floor(Math.random() * SOMALIA_TARGETS.length)];
-  const attack_type = ATTACK_TYPES[Math.floor(Math.random() * ATTACK_TYPES.length)];
+  const rand = createSeededRand(DAY_SEED + index * 7919);
+  const source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
+  const target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
+  const attack_type = ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)];
   const signatures = ATTACK_SIGNATURES[attack_type];
-  const name = signatures[Math.floor(Math.random() * signatures.length)];
+  const name = signatures[Math.floor(rand() * signatures.length)];
   return {
     id: `${DAY_STRING}-${index}`,
     name,
     source: { lat: source.lat, lng: source.lng, country: source.country, state: source.state },
     target: { lat: target.lat, lng: target.lng, country: target.country, state: target.state },
     attack_type,
-    severity: SEVERITIES[Math.floor(Math.random() * SEVERITIES.length)],
+    severity: SEVERITIES[Math.floor(rand() * SEVERITIES.length)],
     timestamp: Date.now(),
   };
 }
 
 const RING_BUFFER_SIZE = 100;
 
-// Module-level singleton — deterministic daily count
+// Module-level singleton — deterministic daily count + time-based initialization
 const countRand = createSeededRand(DAY_SEED + 42);
 const BASE_COUNT = Math.floor(3_000 + countRand() * 12_000);
-let sharedTodayCount = BASE_COUNT;
+
+// Calculate where we are in the day's sequence based on elapsed time since midnight
+const initialIndex = calculateCurrentIndex();
+let sharedTodayCount = BASE_COUNT + initialIndex;
+let sharedThreatIndex = initialIndex;
+
 const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
 
 function incrementSharedCount() {
   sharedTodayCount += 1;
   todayListeners.forEach(fn => fn(sharedTodayCount));
 }
-
-// Shared sequential index so all hook instances produce the same Nth threat
-let sharedThreatIndex = 0;
 
 export function useLiveAttacks(enabled: boolean) {
   const [threats, setThreats] = useState<LiveThreat[]>([]);
@@ -208,12 +232,6 @@ export function useLiveAttacks(enabled: boolean) {
       setThreats([]);
       return;
     }
-
-    // Deterministic delay per index
-    const getDelay = (idx: number) => {
-      const r = createSeededRand(DAY_SEED + idx * 3571);
-      return 300 + r() * 700; // 0.3–1s
-    };
 
     const scheduleNext = () => {
       const delay = getDelay(sharedThreatIndex);
