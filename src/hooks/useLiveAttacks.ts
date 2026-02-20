@@ -126,19 +126,18 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 
 // Generate the Nth threat of the day deterministically
 function generateDayThreat(index: number): LiveThreat {
-  const rand = createSeededRand(DAY_SEED + index * 7919);
-  const source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
-  const target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
-  const attack_type = ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)];
+  const source = WEIGHTED_SOURCES[Math.floor(Math.random() * WEIGHTED_SOURCES.length)];
+  const target = SOMALIA_TARGETS[Math.floor(Math.random() * SOMALIA_TARGETS.length)];
+  const attack_type = ATTACK_TYPES[Math.floor(Math.random() * ATTACK_TYPES.length)];
   const signatures = ATTACK_SIGNATURES[attack_type];
-  const name = signatures[Math.floor(rand() * signatures.length)];
+  const name = signatures[Math.floor(Math.random() * signatures.length)];
   return {
     id: `${DAY_STRING}-${index}`,
     name,
     source: { lat: source.lat, lng: source.lng, country: source.country, state: source.state },
     target: { lat: target.lat, lng: target.lng, country: target.country, state: target.state },
     attack_type,
-    severity: SEVERITIES[Math.floor(rand() * SEVERITIES.length)],
+    severity: SEVERITIES[Math.floor(Math.random() * SEVERITIES.length)],
     timestamp: Date.now(),
   };
 }
