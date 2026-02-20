@@ -239,22 +239,41 @@ const ThreatIntelligence: React.FC = () => {
       const { data } = await supabase.from('organizations').select('id, name, domain, sector').order('name');
       if (data) setOrgs(data.map((d: any) => ({ id: d.id, name: d.name, url: d.domain.startsWith('http') ? d.domain : 'https://' + d.domain, sector: d.sector, is_active: true })));
 
-      // Load cached breach results
-      const { data: cached } = await supabase.from('breach_check_results' as any).select('*').order('organization_name');
-      if (cached && (cached as any[]).length > 0) {
-        const mapped: BreachResult[] = (cached as any[]).map((r: any) => ({
-          organizationId: r.organization_id,
-          domain: r.domain,
-          organization: r.organization_name,
-          breachCount: r.breach_count,
-          breachesFound: r.breach_count,
-          breaches: r.breaches || [],
-          isClean: r.is_clean,
-          source: r.source,
-          breachedEmails: r.breached_emails || [],
-          error: r.error,
-          checkedAt: r.checked_at,
-        }));
+      // Load cached breach results and merge with all orgs
+      const { data: cached } = await supabase.from('breach_check_results').select('*').order('organization_name');
+      const cachedMap = new Map<string, any>();
+      for (const r of cached || []) {
+        if (!cachedMap.has(r.organization_id)) cachedMap.set(r.organization_id, r);
+      }
+      if (data) {
+        const mapped: BreachResult[] = data.map((d: any) => {
+          const orgId = d.id;
+          const r = cachedMap.get(orgId);
+          if (r) {
+            return {
+              organizationId: r.organization_id,
+              domain: r.domain,
+              organization: r.organization_name,
+              breachCount: r.breach_count,
+              breachesFound: r.breach_count,
+              breaches: r.breaches || [],
+              isClean: r.is_clean,
+              source: r.source,
+              breachedEmails: r.breached_emails || [],
+              error: r.error,
+              checkedAt: r.checked_at,
+            };
+          }
+          const domain = d.domain.startsWith('http') ? extractDomain(d.domain) : d.domain;
+          return {
+            organizationId: orgId,
+            domain,
+            organization: d.name,
+            breachCount: 0, breachesFound: 0, breaches: [],
+            isClean: null, source: 'Not checked',
+            checkedAt: '',
+          };
+        });
         setBreachResults(mapped);
       }
 
@@ -561,7 +580,7 @@ const ThreatIntelligence: React.FC = () => {
       const matchedOrg = orgList.find(o => o.id === result.organizationId || extractDomain(o.url) === result.domain);
       if (matchedOrg) {
         try {
-          await supabase.from('breach_check_results' as any).upsert({
+          await supabase.from('breach_check_results').upsert({
             organization_id: matchedOrg.id,
             organization_name: result.organization,
             domain: result.domain,
@@ -895,29 +914,40 @@ const ThreatIntelligence: React.FC = () => {
         }
       });
 
-      // Load breaches from DB (deduplicate by org name, keep latest)
-      supabase.from('threat_intelligence_logs').select('*').eq('check_type', 'breach')
-        .order('checked_at', { ascending: false }).limit(100).then(({ data: breachData }) => {
-          if (breachData && breachData.length > 0) {
-            const seen = new Set<string>();
-            const results: BreachResult[] = [];
-            for (const bl of breachData) {
-              const orgName = bl.organization_name || '';
-              if (seen.has(orgName)) continue;
-              seen.add(orgName);
-              const det = bl.details as any;
-              const breaches = det?.breaches || [];
-              results.push({
-                domain: orgName, organization: orgName,
-                breachCount: breaches.length, breachesFound: breaches.length,
-                breaches, isClean: breaches.length === 0,
-                riskLevel: bl.risk_level,
-                checkedAt: bl.checked_at,
-              });
-            }
-            setBreachResults(results);
+      // Load breaches from breach_check_results (correct table) and show all orgs
+      supabase.from('breach_check_results').select('*').order('checked_at', { ascending: false }).then(({ data: breachData }) => {
+        const cachedMap = new Map<string, any>();
+        for (const r of breachData || []) {
+          if (!cachedMap.has(r.organization_id)) cachedMap.set(r.organization_id, r);
+        }
+        const results: BreachResult[] = orgs.map(org => {
+          const cached = cachedMap.get(org.id);
+          if (cached) {
+            return {
+              organizationId: cached.organization_id,
+              domain: cached.domain,
+              organization: cached.organization_name,
+              breachCount: cached.breach_count,
+              breachesFound: cached.breach_count,
+              breaches: cached.breaches || [],
+              isClean: cached.is_clean,
+              source: cached.source,
+              breachedEmails: cached.breached_emails || [],
+              error: cached.error,
+              checkedAt: cached.checked_at,
+            };
           }
+          return {
+            organizationId: org.id,
+            domain: extractDomain(org.url),
+            organization: org.name,
+            breachCount: 0, breachesFound: 0, breaches: [],
+            isClean: null, source: 'Not checked',
+            checkedAt: '',
+          };
         });
+        setBreachResults(results);
+      });
 
       // Auto-fetch threat feed immediately
       fetchThreatFeed();
