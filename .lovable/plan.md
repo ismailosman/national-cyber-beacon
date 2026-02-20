@@ -3,32 +3,37 @@
 ## Plan: Email Notifications for Critical DAST Findings via Resend
 
 ### Overview
-After each scheduled DAST scan, when new critical or high findings are detected, send an email summary to osmando@gmail.com using the Resend API.
+After each scheduled DAST scan, when new critical or high findings are detected, send a styled HTML email report to osmando@gmail.com using the Resend API from noreply@cyberdefense.so.
 
 ### Changes
 
 #### 1. Add Resend API Key Secret
-Store the user's Resend API key as a backend secret (`RESEND_API_KEY`).
+Store the `RESEND_API_KEY` as a backend secret so the scan function can use it.
 
 #### 2. Update `supabase/functions/scheduled-dast-scan/index.ts`
-After the scan loop completes and new critical/high findings have been identified and inserted as alerts, add email notification logic:
+After the scan loop completes and alerts have been inserted, add email notification logic:
 
-- Collect all new critical/high findings across all scanned organizations
-- If any exist, build an HTML email with:
-  - Subject: "DAST Alert: X new critical/high findings detected"
-  - Body: A styled table listing each finding with organization name, severity badge, finding title, detail, and recommendation
-  - Overall scan summary (orgs scanned, scores)
-- Send via Resend API (`POST https://api.resend.com/emails`) using the `RESEND_API_KEY` secret
-- Recipient: `osmando@gmail.com`
-- From: `onboarding@resend.dev` (Resend's default sender -- works without domain verification)
-- Email sending is best-effort; failures are logged but don't fail the scan
+- Count total new critical/high alerts across all scanned organizations
+- If any exist (totalNewAlerts > 0):
+  - Query recent alerts from the `alerts` table (source = "dast-scanner", last hour) for detailed finding info
+  - Build a styled HTML email containing:
+    - Header with alert count
+    - Organization summary table (name, DAST score, new alert count)
+    - Finding details table (severity badge, title, description/remediation)
+    - Scan metadata (orgs scanned, date)
+  - Send via Resend API (`POST https://api.resend.com/emails`)
+  - From: `noreply@cyberdefense.so`
+  - To: `osmando@gmail.com`
+  - Subject: "DAST Alert: X new critical/high finding(s) detected"
+- Email sending is best-effort -- failures are logged but do not fail the scan
+- If no new critical/high findings, no email is sent
 
 ### Technical Details
 
 | File | Action |
 |---|---|
-| Secret: `RESEND_API_KEY` | Add via secret tool |
-| `supabase/functions/scheduled-dast-scan/index.ts` | Add Resend email sending after scan loop, before returning response |
+| Secret: `RESEND_API_KEY` | Add via secrets tool |
+| `supabase/functions/scheduled-dast-scan/index.ts` | Add ~90 lines of email logic after the scan loop, before the final response. Reads `RESEND_API_KEY` from env, builds HTML, calls Resend API, logs result. |
 
-The email will only be sent when there are new critical or high findings (not on every scan). The email includes a summary table of all new findings grouped by organization, with severity, title, detail, and remediation steps.
+No database changes needed. No UI changes needed.
 
