@@ -21,6 +21,7 @@ const navItems = [
   { to: '/early-warning', icon: Radar, label: 'Early Warning' },
   { to: '/threat-intelligence', icon: Crosshair, label: 'Threat Intel' },
   { to: '/reports', icon: FileText, label: 'Reports' },
+  { to: '/playbooks', icon: FileText, label: 'Playbooks' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

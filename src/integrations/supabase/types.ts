@@ -812,6 +812,39 @@ export type Database = {
         }
         Relationships: []
       }
+      playbooks: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          id: string
+          severity: string
+          steps: Json
+          threat_type: string
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          severity?: string
+          steps?: Json
+          threat_type: string
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          severity?: string
+          steps?: Json
+          threat_type?: string
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       risk_history: {
         Row: {
           created_at: string | null

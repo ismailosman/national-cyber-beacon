@@ -703,10 +703,26 @@ const ThreatIntelligence: React.FC = () => {
         await Promise.all([fetchThreatFeed(), runPhishingCheck(orgs), runBreachCheck(orgs)]);
       }
 
-      // Phase 4: Recalculate scorecards
+      // Phase 4: Recalculate scorecards and record history
       if (!scanAbort.current) {
         setScanProgress({ current: orgs.length, total: orgs.length, currentOrg: 'Calculating scores', phase: 'Scoring' });
         await calculateScorecards(orgs);
+
+        // Record risk_history and update org scores
+        const latestCards = scorecards.length > 0 ? scorecards : [];
+        for (const card of latestCards) {
+          try {
+            await supabase.from('risk_history').insert({
+              organization_id: card.org.id,
+              score: card.percentage,
+            });
+            await supabase.from('organizations').update({
+              risk_score: card.percentage,
+              status: card.percentage >= 75 ? 'Secure' : card.percentage >= 50 ? 'Warning' : 'Critical',
+              last_scan: new Date().toISOString(),
+            }).eq('id', card.org.id);
+          } catch { /* best effort */ }
+        }
       }
 
       setLastChecked(new Date().toISOString());

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Filter, Globe, ChevronRight, Plus } from 'lucide-react';
+import { Search, Filter, Globe, ChevronRight, Plus, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
@@ -36,6 +36,24 @@ const Organizations: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase.from('organizations').select('*').order('name');
       return data || [];
+    },
+  });
+
+  // Fetch latest 2 risk_history entries per org for trend
+  const { data: trendData = {} } = useQuery({
+    queryKey: ['org-trends'],
+    queryFn: async () => {
+      const { data } = await supabase.from('risk_history').select('organization_id, score, created_at').order('created_at', { ascending: false }).limit(200);
+      const trends: Record<string, { current: number; previous: number | null }> = {};
+      const grouped: Record<string, { score: number; created_at: string }[]> = {};
+      for (const r of data || []) {
+        if (!grouped[r.organization_id]) grouped[r.organization_id] = [];
+        if (grouped[r.organization_id].length < 2) grouped[r.organization_id].push(r);
+      }
+      for (const [orgId, entries] of Object.entries(grouped)) {
+        trends[orgId] = { current: entries[0]?.score ?? 0, previous: entries[1]?.score ?? null };
+      }
+      return trends;
     },
   });
 
@@ -205,11 +223,21 @@ const Organizations: React.FC = () => {
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className={cn('text-2xl font-bold font-mono',
-                      org.risk_score >= 75 ? 'text-neon-green' :
-                      org.risk_score >= 50 ? 'text-neon-amber' : 'text-neon-red'
-                    )}>{org.risk_score}</span>
-                    <span className="text-muted-foreground text-xs ml-1">/100</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span className={cn('text-2xl font-bold font-mono',
+                        org.risk_score >= 75 ? 'text-neon-green' :
+                        org.risk_score >= 50 ? 'text-neon-amber' : 'text-neon-red'
+                      )}>{org.risk_score}</span>
+                      <span className="text-muted-foreground text-xs">/100</span>
+                      {(() => {
+                        const trend = (trendData as any)[org.id];
+                        if (!trend || trend.previous === null) return null;
+                        const delta = trend.current - trend.previous;
+                        if (delta > 2) return <TrendingUp className="w-4 h-4 text-neon-green ml-1" />;
+                        if (delta < -2) return <TrendingDown className="w-4 h-4 text-neon-red ml-1" />;
+                        return <Minus className="w-3 h-3 text-muted-foreground ml-1" />;
+                      })()}
+                    </div>
                   </div>
                 </div>
 
