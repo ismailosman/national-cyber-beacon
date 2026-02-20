@@ -689,6 +689,51 @@ export type Database = {
         }
         Relationships: []
       }
+      phishing_domains: {
+        Row: {
+          first_detected: string
+          has_website: boolean
+          id: string
+          ip_address: string | null
+          is_acknowledged: boolean
+          is_active: boolean
+          last_checked: string
+          lookalike_domain: string
+          organization_id: string | null
+          organization_name: string
+          original_domain: string
+          risk_level: string
+        }
+        Insert: {
+          first_detected?: string
+          has_website?: boolean
+          id?: string
+          ip_address?: string | null
+          is_acknowledged?: boolean
+          is_active?: boolean
+          last_checked?: string
+          lookalike_domain: string
+          organization_id?: string | null
+          organization_name: string
+          original_domain: string
+          risk_level?: string
+        }
+        Update: {
+          first_detected?: string
+          has_website?: boolean
+          id?: string
+          ip_address?: string | null
+          is_acknowledged?: boolean
+          is_active?: boolean
+          last_checked?: string
+          lookalike_domain?: string
+          organization_id?: string | null
+          organization_name?: string
+          original_domain?: string
+          risk_level?: string
+        }
+        Relationships: []
+      }
       risk_history: {
         Row: {
           created_at: string | null
@@ -812,6 +857,57 @@ export type Database = {
           },
         ]
       }
+      tech_fingerprints: {
+        Row: {
+          cdn: string | null
+          checked_at: string
+          cms: string | null
+          cms_version: string | null
+          id: string
+          js_libraries: string[]
+          language: string | null
+          language_version: string | null
+          organization_id: string | null
+          outdated_count: number
+          url: string
+          vulnerabilities_count: number
+          web_server: string | null
+          web_server_version: string | null
+        }
+        Insert: {
+          cdn?: string | null
+          checked_at?: string
+          cms?: string | null
+          cms_version?: string | null
+          id?: string
+          js_libraries?: string[]
+          language?: string | null
+          language_version?: string | null
+          organization_id?: string | null
+          outdated_count?: number
+          url: string
+          vulnerabilities_count?: number
+          web_server?: string | null
+          web_server_version?: string | null
+        }
+        Update: {
+          cdn?: string | null
+          checked_at?: string
+          cms?: string | null
+          cms_version?: string | null
+          id?: string
+          js_libraries?: string[]
+          language?: string | null
+          language_version?: string | null
+          organization_id?: string | null
+          outdated_count?: number
+          url?: string
+          vulnerabilities_count?: number
+          web_server?: string | null
+          web_server_version?: string | null
+        }
+        Relationships: []
+      }
       threat_events: {
         Row: {
           count: number
@@ -864,6 +960,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      threat_intelligence_logs: {
+        Row: {
+          check_type: string
+          checked_at: string
+          details: Json
+          id: string
+          is_acknowledged: boolean
+          organization_id: string | null
+          organization_name: string | null
+          risk_level: string
+        }
+        Insert: {
+          check_type: string
+          checked_at?: string
+          details?: Json
+          id?: string
+          is_acknowledged?: boolean
+          organization_id?: string | null
+          organization_name?: string | null
+          risk_level?: string
+        }
+        Update: {
+          check_type?: string
+          checked_at?: string
+          details?: Json
+          id?: string
+          is_acknowledged?: boolean
+          organization_id?: string | null
+          organization_name?: string | null
+          risk_level?: string
+        }
+        Relationships: []
       }
       uptime_logs: {
         Row: {
