@@ -5,15 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const RELEVANT_SERVICES = [
-  'adobe', 'linkedin', 'dropbox', 'canva', 'facebook', 'twitter',
-  'yahoo', 'gmail', 'outlook', 'hotmail', 'zoom', 'slack',
-  'trello', 'mailchimp', 'hubspot', 'godaddy', 'namecheap',
-  'cpanel', 'plesk', 'wordpress', 'joomla', 'drupal',
-  'cloudflare', 'google', 'microsoft', 'nginx', 'apache',
-  'php', 'mysql', 'postgresql', 'mongodb'
-];
-
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -30,7 +21,7 @@ serve(async (req) => {
   }
 
   try {
-    const { domains, orgTechnologies } = await req.json();
+    const { domains } = await req.json();
     if (!domains || !Array.isArray(domains)) {
       return new Response(JSON.stringify({ error: 'domains array required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -66,22 +57,36 @@ serve(async (req) => {
         isVerified: b.IsVerified, isSensitive: b.IsSensitive,
       }));
 
-    // Build tech-matching set from org technologies
-    const techSet = new Set((orgTechnologies || []).map((t: string) => t.toLowerCase()));
-
     const results = [];
 
     for (const domainEntry of domains) {
       const domain = typeof domainEntry === 'string' ? domainEntry : domainEntry.domain;
       const orgName = typeof domainEntry === 'string' ? domain : domainEntry.name;
+      // Per-org technologies array
+      const orgTech: string[] = (typeof domainEntry === 'object' && Array.isArray(domainEntry.technologies))
+        ? domainEntry.technologies.map((t: string) => t.toLowerCase())
+        : [];
 
-      // Match breaches by exact service name against org tech stack + relevant services
+      // Match breaches only against THIS org's tech stack and domain
       const relevantBreaches = recentGlobalBreaches.filter((b: any) => {
         const bDomain = (b.domain || '').toLowerCase();
         const bName = (b.name || '').toLowerCase();
-        // Check if breach domain/name matches any detected technology or relevant service
-        return RELEVANT_SERVICES.some(service => bDomain.includes(service) || bName.includes(service)) ||
-          [...techSet].some(tech => bDomain.includes(tech) || bName.includes(tech));
+
+        // 1. Exact domain match (org's domain appears in breach domain)
+        if (bDomain && domain.toLowerCase().includes(bDomain)) return true;
+        if (bDomain && bDomain.includes(domain.toLowerCase())) return true;
+
+        // 2. Match against this org's specific detected technologies only
+        if (orgTech.length > 0) {
+          return orgTech.some(tech => {
+            const t = tech.toLowerCase();
+            // Require meaningful match (at least 3 chars to avoid false positives)
+            if (t.length < 3) return false;
+            return bDomain.includes(t) || bName.includes(t);
+          });
+        }
+
+        return false;
       });
 
       results.push({
@@ -89,9 +94,9 @@ serve(async (req) => {
         breachesFound: relevantBreaches.length,
         breaches: relevantBreaches,
         allRecentBreaches: recentGlobalBreaches,
-        riskLevel: relevantBreaches.length > 5 ? 'high' : relevantBreaches.length > 2 ? 'medium' : 'low',
+        riskLevel: relevantBreaches.length > 5 ? 'high' : relevantBreaches.length > 2 ? 'medium' : relevantBreaches.length > 0 ? 'low' : 'info',
         checkedAt: new Date().toISOString(),
-        note: 'Breach data shows services that were breached which this organization may use. Direct domain breach search requires HIBP enterprise API key.',
+        note: 'Breach data filtered by org-specific tech stack and domain. For domain-specific email breach searches, add a HIBP enterprise API key.',
       });
     }
 
