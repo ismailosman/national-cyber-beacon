@@ -1,118 +1,117 @@
 
 
-## Add SSL Certificate Monitoring to Uptime Monitor
+## Add DDoS Risk Monitor Page
 
 ### Overview
 
-Add SSL certificate checking on top of the existing uptime ping monitor. The existing ping/uptime functionality remains untouched. SSL monitoring adds a new edge function, a new database table, new columns in the table view, new summary cards, an alerts section, and new filter options.
+Create a new standalone "/ddos-monitor" page with its own edge function, database table, and full UI for DDoS risk assessment. This page reads from existing `organizations_monitored` and `uptime_logs` tables but has its own `ddos_risk_logs` table and `check-ddos-risk` edge function.
 
-### 1. New Edge Function: `check-ssl`
+### 1. New Edge Function: `check-ddos-risk`
 
-**File:** `supabase/functions/check-ssl/index.ts`
+**File:** `supabase/functions/check-ddos-risk/index.ts`
 
-Accepts POST with `{ urls: ["https://..."] }` (batch) or `{ url: "https://..." }` (single).
+Accepts POST with `{ urls: [...] }` or `{ url: "..." }`. For each URL:
+- HTTP GET with 10s timeout
+- Inspect all response headers for CDN indicators (Cloudflare cf-ray, AWS x-amz-cf-id, Akamai, Fastly, Sucuri), rate limiting headers (x-ratelimit-*), WAF headers, and server header
+- Return: `{ url, ddosProtection: { hasCDN, cdnProvider, hasRateLimiting, hasWAF, originExposed, protectionHeaders, serverHeader, checkedAt } }`
+- Set `verify_jwt = false` in config.toml
 
-For each URL:
-- Extract hostname from the URL
-- Attempt an HTTPS fetch to verify SSL validity (success = valid, certificate error = invalid)
-- Call a public SSL API (e.g., `https://ssl-checker.io/api/v1/check/{hostname}`) to get certificate details: issuer, valid_from, valid_to, protocol
-- Calculate `daysUntilExpiry`, `isExpired`, `isExpiringSoon` (within 30 days)
-- Return: `{ url, ssl: { isValid, isExpired, isExpiringSoon, issuer, protocol, validFrom, validTo, daysUntilExpiry } }`
-- If the public API is unavailable, fall back to just the fetch-based check (valid/invalid) with null for detailed fields
+### 2. New Database Table: `ddos_risk_logs`
 
-Set `verify_jwt = false` in `supabase/config.toml`.
+Columns: id, organization_id, organization_name, url, risk_level, has_cdn, cdn_provider, has_rate_limiting, has_waf, origin_exposed, response_time_spike, availability_flapping, extended_downtime, risk_factors (text[]), protection_headers (text[]), server_header, checked_at.
 
-### 2. New Database Table: `ssl_logs`
+RLS policies matching existing pattern (authenticated SELECT, SuperAdmin/Analyst ALL, Auditor SELECT).
 
-Columns:
-- `id` (uuid, PK, default gen_random_uuid())
-- `organization_id` (uuid, nullable)
-- `organization_name` (text)
-- `url` (text)
-- `is_valid` (boolean)
-- `is_expired` (boolean)
-- `is_expiring_soon` (boolean)
-- `issuer` (text, nullable)
-- `protocol` (text, nullable)
-- `valid_from` (timestamptz, nullable)
-- `valid_to` (timestamptz, nullable)
-- `days_until_expiry` (integer, nullable)
-- `checked_at` (timestamptz, default now())
+### 3. New Page: `src/pages/DdosMonitor.tsx`
 
-RLS policies matching existing uptime_logs pattern:
-- All authenticated can SELECT
-- SuperAdmin and Analyst have ALL access
-- Auditor has SELECT access
+Full standalone page with:
 
-Auto-delete entries older than 30 days via a scheduled database function or handled at query time.
+**Summary Cards:**
+- Total Monitored (blue)
+- Low Risk (green, ShieldCheck icon)
+- Medium Risk (yellow, Shield icon)
+- High Risk (orange, ShieldAlert icon)
+- Critical (red, ShieldX icon, pulsing)
+- CDN Protected (cyan)
 
-### 3. Frontend Changes to `src/pages/UptimeMonitor.tsx`
+**Alert Banners:**
+- Critical: red pulsing full-width banner naming affected orgs
+- High: orange banner with count
+- All clear: green banner
 
-**New state and types:**
-- Add `SslResult` interface with `isValid`, `isExpired`, `isExpiringSoon`, `issuer`, `protocol`, `validFrom`, `validTo`, `daysUntilExpiry`
-- Add `sslStatuses` state map (orgId to SslResult)
-- Add `sslFilter` state: 'All' | 'Secure' | 'Expiring Soon' | 'Expired/Invalid'
-- Add `sslChecking` state boolean
-- SSL check interval: 6 hours (tracked via last check timestamp in state)
+**Main Table Columns:**
+- Risk Level (color-coded badge, pulsing for critical)
+- Organization name
+- URL (clickable, external link)
+- Sector badge
+- DDoS Protection (CDN provider or "No Protection")
+- WAF status
+- Rate Limiting status
+- Origin Exposed indicator
+- Response Time Trend (mini sparkline from last 20 uptime_logs pings)
+- Current Avg Response (1h average)
+- Baseline Response (24h average)
+- Status Flaps (1h count, color-coded)
+- Active Risk Factors (tag chips)
+- Actions (Re-check button)
 
-**New SSL check function:**
-- `checkAllSsl()` - calls `check-ssl` edge function with all org URLs
-- Stores results in `ssl_logs` table
-- Updates `sslStatuses` state map
-- Called on page load and every 6 hours
+**Expandable Detail Panel per org:**
+- Full risk factor list with explanations
+- Response time line chart (last 2h from uptime_logs via recharts)
+- Availability timeline (green/red horizontal bar)
+- Detected headers list
+- Protection recommendations
 
-**New summary cards (added after existing 5 cards):**
-- SSL Valid (green) - count of orgs with valid SSL and > 30 days to expiry
-- SSL Expiring Soon (yellow) - count expiring within 30 days
-- SSL Expired/Invalid (red) - count of expired or invalid certificates
+**Filters & Sorting:**
+- Risk level: All, Low, Medium, High, Critical
+- Sector: All, Government, Telecom, Banking, Education
+- Protection: All, CDN Protected, Unprotected
+- Sort by: risk level (default), name, response time, flap count
+- Search box
 
-**New table columns (added after existing columns, before "Checked" and actions):**
-- **SSL Status** - color-coded badge:
-  - Green "Secure" with Lock icon (valid, > 30 days)
-  - Yellow "Expiring Soon" with AlertTriangle icon (valid, <= 30 days)
-  - Red "Expired"/"Invalid"/"No SSL" with ShieldAlert icon
-  - Gray "Unknown" if check pending/failed
-- **SSL Expiry** - date + days remaining, color-coded text
-- **SSL Issuer** - certificate issuer name or "---"
+**Risk Calculation (client-side from uptime_logs):**
+- Response Time Spike: 1h avg > 3x 24h avg
+- Availability Flapping: 3+ status changes in 1h
+- Extended Downtime: 3+ consecutive down pings
+- Combined with header check results to compute LOW/MEDIUM/HIGH/CRITICAL
 
-**New filter option:**
-- Add SSL Status filter dropdown: All, Secure, Expiring Soon, Expired/Invalid
-- Add "sslExpiry" sort option (soonest expiry first)
+**Schedule:**
+- On page load: header check + risk calculation
+- Every 60s: recalculate risk from uptime_logs (no new API calls)
+- Every 6h: re-check DDoS protection headers
+- "Check All Now" triggers both immediately
 
-**SSL Alerts section (below the table):**
-- Shows expired SSL certs in red rows at top
-- Shows expiring-soon certs in yellow rows below
-- Green banner if all certs are healthy
+**Mobile:** Card layout with risk badge, name, protection status, risk factors. Summary cards scroll horizontally.
 
-**Updated "Ping Now" / "Check All Now" button:**
-- Triggers both ping and SSL check
-- Per-org: add a small "Check SSL" button in the actions area
+### 4. Sidebar Update
 
-**Mobile cards:**
-- Add SSL status badge and expiry info to mobile card layout
+**File:** `src/components/layout/Sidebar.tsx`
 
-### 4. Config Updates
+Add nav item: `{ to: '/ddos-monitor', icon: ShieldAlert, label: 'DDoS Monitor' }` after the Uptime Monitor entry. Import ShieldAlert from lucide-react.
 
-**`supabase/config.toml`** - add:
-```toml
-[functions.check-ssl]
-verify_jwt = false
-```
+### 5. Router Update
+
+**File:** `src/App.tsx`
+
+- Import DdosMonitor component
+- Add route: `<Route path="/ddos-monitor" element={<DdosMonitor />} />` inside the AppLayout routes
 
 ### Files Changed
 
 | File | Action |
 |------|--------|
-| `supabase/functions/check-ssl/index.ts` | Create |
-| `supabase/config.toml` | Edit (add check-ssl config) |
-| `src/pages/UptimeMonitor.tsx` | Edit (add SSL columns, cards, alerts, filters) |
-| Migration SQL | Create ssl_logs table + RLS policies |
+| `supabase/functions/check-ddos-risk/index.ts` | Create |
+| `src/pages/DdosMonitor.tsx` | Create |
+| `src/components/layout/Sidebar.tsx` | Edit (add nav item + ShieldAlert import) |
+| `src/App.tsx` | Edit (add import + route) |
+| Migration SQL | Create ddos_risk_logs table + RLS |
 
 ### Technical Notes
 
-- SSL checks go through the edge function only, never from the browser
-- Existing ping logic, uptime_logs table, and ping-website function are not modified
-- Errors in SSL checking show "Unknown" in gray, never crash the page
-- The 6-hour re-check interval is tracked client-side; on page load always checks immediately
-- SSL logs older than 30 days cleaned up via a SQL function or periodic delete
+- Existing uptime/SSL pages, functions, and tables are NOT modified
+- DDoS page only READS from uptime_logs and organizations_monitored
+- Header checks go through the edge function, never from the browser
+- Risk calculation from ping history is done client-side by querying uptime_logs
+- Errors show "Unknown" in gray, never crash
+- Response time sparkline uses recharts (already installed)
 
