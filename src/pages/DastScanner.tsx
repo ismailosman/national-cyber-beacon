@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CircularGauge from '@/components/dashboard/CircularGauge';
 import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar, FileDown, Loader2, Mail } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 
 const downloadPdfFromBase64 = (base64: string, filename: string) => {
@@ -110,6 +111,7 @@ const DastScanner: React.FC = () => {
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
   const [emailingPdf, setEmailingPdf] = useState<string | null>(null);
+  const [recipientEmail, setRecipientEmail] = useState('osmando@gmail.com');
 
   useEffect(() => {
     loadOrgs();
@@ -200,6 +202,7 @@ const DastScanner: React.FC = () => {
             dastScore: scan.dastScore,
             summary: scan.summary,
             results: scan.results,
+            to: recipientEmail,
           },
         });
         toast({ title: 'Report Sent', description: `PDF report emailed for ${scan.org.name}` });
@@ -262,9 +265,10 @@ const DastScanner: React.FC = () => {
           dastScore: scan.dast_score,
           summary: scan.summary,
           results: scan.results,
+          to: recipientEmail,
         },
       });
-      toast({ title: 'Report Emailed', description: `PDF report sent to osmando@gmail.com` });
+      toast({ title: 'Report Emailed', description: `PDF report sent to ${recipientEmail}` });
     } catch (err) {
       console.error('Email report failed:', err);
       toast({ title: 'Email Failed', description: 'Could not send PDF report', variant: 'destructive' });
@@ -364,6 +368,13 @@ const DastScanner: React.FC = () => {
           <Button variant="outline" onClick={exportReport} disabled={cachedResults.length === 0}>
             <Download className="w-4 h-4 mr-1" /> Export TXT
           </Button>
+          <Input
+            type="email"
+            placeholder="Recipient email"
+            value={recipientEmail}
+            onChange={(e) => setRecipientEmail(e.target.value)}
+            className="w-[220px] bg-card border-border"
+          />
           {displayResults && (
             <>
               <Button
