@@ -53,6 +53,14 @@ const TESTS = [
   { name: 'CORS Configuration', fn: 'dast-cors-check', icon: '🔗', desc: 'Cross-origin access misconfiguration' },
   { name: 'Redirect Security', fn: 'dast-redirect-check', icon: '↪️', desc: 'Open redirects, HTTPS enforcement' },
   { name: 'Error Handling', fn: 'dast-error-handling', icon: '⚠️', desc: 'Verbose errors, exposed admin panels' },
+  { name: 'TLS/SSL Deep Scan', fn: 'dast-tls-deep-scan', icon: '🔐', desc: 'HSTS, mixed content, CAA records, cert transparency' },
+  { name: 'Subdomain Discovery', fn: 'dast-subdomain-discovery', icon: '🌐', desc: 'CT log enumeration, live subdomain checks' },
+  { name: 'CMS Vulnerabilities', fn: 'dast-cms-vulns', icon: '🏗️', desc: 'WordPress, Joomla, Drupal specific checks' },
+  { name: 'JS Library Audit', fn: 'dast-js-libraries', icon: '📦', desc: 'Outdated libraries with known CVEs, SRI checks' },
+  { name: 'API Discovery', fn: 'dast-api-discovery', icon: '🔌', desc: 'Exposed Swagger, GraphQL, debug endpoints' },
+  { name: 'DNS Security', fn: 'dast-dns-security', icon: '🧭', desc: 'DNSSEC, SPF, DMARC, DNS provider analysis' },
+  { name: 'Content Security', fn: 'dast-content-security', icon: '🛡️', desc: 'CSP analysis, clickjacking, MIME sniffing' },
+  { name: 'WAF Detection', fn: 'dast-waf-detection', icon: '🧱', desc: 'WAF fingerprinting, rate limiting, server info' },
 ];
 
 const severityColor: Record<string, string> = {
@@ -160,6 +168,28 @@ const DastScanner: React.FC = () => {
     setScanning(false);
     setScanningOrgId(null);
     toast({ title: 'DAST Scan Complete', description: `Scanned ${orgList.length} organization(s)` });
+
+    // Send email report for each org scanned
+    for (const org of orgList) {
+      const url = org.domain.startsWith('http') ? org.domain : `https://${org.domain}`;
+      const scanData = cachedResults.find(r => r.organization_id === org.id);
+      if (scanData) {
+        try {
+          await supabase.functions.invoke('send-dast-report', {
+            body: {
+              organizationName: org.name,
+              url,
+              dastScore: scanData.dast_score,
+              summary: scanData.summary,
+              results: scanData.results,
+            },
+          });
+          toast({ title: 'Report Sent', description: `Email report sent for ${org.name}` });
+        } catch (emailErr) {
+          console.error('Email report failed:', emailErr);
+        }
+      }
+    }
   }, [toast]);
 
   const handleScan = () => {

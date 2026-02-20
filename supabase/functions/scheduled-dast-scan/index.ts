@@ -14,6 +14,14 @@ const DAST_TESTS = [
   { name: "CORS Configuration", fn: "dast-cors-check" },
   { name: "Redirect Security", fn: "dast-redirect-check" },
   { name: "Error Handling", fn: "dast-error-handling" },
+  { name: "TLS/SSL Deep Scan", fn: "dast-tls-deep-scan" },
+  { name: "Subdomain Discovery", fn: "dast-subdomain-discovery" },
+  { name: "CMS Vulnerabilities", fn: "dast-cms-vulns" },
+  { name: "JS Library Audit", fn: "dast-js-libraries" },
+  { name: "API Discovery", fn: "dast-api-discovery" },
+  { name: "DNS Security", fn: "dast-dns-security" },
+  { name: "Content Security", fn: "dast-content-security" },
+  { name: "WAF Detection", fn: "dast-waf-detection" },
 ];
 
 serve(async (req) => {
