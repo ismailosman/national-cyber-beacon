@@ -5,10 +5,9 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CircularGauge from '@/components/dashboard/CircularGauge';
-import { Search, Play, Download, ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, Info, Shield } from 'lucide-react';
+import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Finding {
@@ -83,6 +82,7 @@ const DastScanner: React.FC = () => {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('all');
   const [scanning, setScanning] = useState(false);
+  const [scanningOrgId, setScanningOrgId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, testName: '', orgName: '' });
   const [cachedResults, setCachedResults] = useState<ScanResult[]>([]);
   const [currentResults, setCurrentResults] = useState<TestResult[]>([]);
@@ -110,6 +110,7 @@ const DastScanner: React.FC = () => {
     setCurrentScore(null);
 
     for (const org of orgList) {
+      setScanningOrgId(org.id);
       const url = org.domain.startsWith('http') ? org.domain : `https://${org.domain}`;
       const allResults: TestResult[] = [];
 
@@ -157,6 +158,7 @@ const DastScanner: React.FC = () => {
 
     await loadCachedResults();
     setScanning(false);
+    setScanningOrgId(null);
     toast({ title: 'DAST Scan Complete', description: `Scanned ${orgList.length} organization(s)` });
   }, [toast]);
 
@@ -167,6 +169,13 @@ const DastScanner: React.FC = () => {
       const org = orgs.find(o => o.id === selectedOrgId);
       if (org) runScan([org]);
     }
+  };
+
+  const handleScanSingleOrg = (e: React.MouseEvent, org: Org) => {
+    e.stopPropagation();
+    if (scanning) return;
+    setSelectedOrgId(org.id);
+    runScan([org]);
   };
 
   const toggleTest = (name: string) => {
@@ -263,6 +272,23 @@ const DastScanner: React.FC = () => {
         </div>
       </div>
 
+      {/* Schedule Info Banner */}
+      <Card className="p-3 border-border bg-muted/30 flex items-center gap-3 flex-wrap">
+        <Calendar className="w-4 h-4 text-muted-foreground" />
+        <span className="text-sm font-mono text-muted-foreground">
+          Automated scans run weekly (Sundays 2:00 AM UTC) · {orgs.length} organizations monitored
+        </span>
+        {summaryData.lastScan && (
+          <>
+            <span className="text-muted-foreground">·</span>
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-mono text-muted-foreground">
+              Last scan: {new Date(summaryData.lastScan).toLocaleString()}
+            </span>
+          </>
+        )}
+      </Card>
+
       {/* Progress */}
       {scanning && (
         <Card className="p-4 border-neon-cyan/20 bg-neon-cyan/5">
@@ -306,7 +332,6 @@ const DastScanner: React.FC = () => {
 
       {/* Score + Results */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Score Gauge */}
         {activeScore !== null && activeScore !== undefined && (
           <Card className="p-6 flex flex-col items-center justify-center">
             <CircularGauge score={activeScore} size={180} />
@@ -319,7 +344,6 @@ const DastScanner: React.FC = () => {
           </Card>
         )}
 
-        {/* Results Table */}
         <div className={activeScore !== null && activeScore !== undefined ? 'lg:col-span-3' : 'lg:col-span-4'}>
           <Card>
             <Table>
@@ -374,7 +398,6 @@ const DastScanner: React.FC = () => {
                         </TableCell>
                       </TableRow>
 
-                      {/* Expanded findings */}
                       {isExpanded && findings.map((f, fi) => (
                         <TableRow key={`${test.name}-${fi}`} className="bg-muted/10">
                           <TableCell />
@@ -421,6 +444,7 @@ const DastScanner: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {cachedResults.map(scan => {
               const grade = getGrade(scan.dast_score);
+              const isScanningThis = scanningOrgId === scan.organization_id;
               return (
                 <Card key={scan.id} className="p-4 cursor-pointer hover:border-neon-cyan/30 transition-colors"
                   onClick={() => setSelectedOrgId(scan.organization_id)}>
@@ -440,6 +464,22 @@ const DastScanner: React.FC = () => {
                         {scan.summary?.low > 0 && <span className="text-blue-400">{scan.summary.low}L</span>}
                       </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={scanning}
+                      onClick={(e) => {
+                        const org = orgs.find(o => o.id === scan.organization_id);
+                        if (org) handleScanSingleOrg(e, org);
+                      }}
+                    >
+                      {isScanningThis ? (
+                        <span className="text-xs">Scanning...</span>
+                      ) : (
+                        <><Play className="w-3 h-3 mr-1" /> Scan</>
+                      )}
+                    </Button>
                   </div>
                 </Card>
               );
