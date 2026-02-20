@@ -1,50 +1,58 @@
 
 
-## Plan: PDF Export and Email Attachment for DAST Reports
+## Fix: DAST Score Always 0/F and Emails Never Sending
 
-### Overview
-Upgrade the `send-dast-report` edge function to generate a multi-page PDF report and attach it to the email sent to osmando@gmail.com. Also add a "Download PDF" button in the DAST Scanner UI for manual export.
+### Root Cause Analysis
+
+**Bug 1: Score always 0 (Grade F)**
+The scoring formula `100 - (critical*25 + high*15 + medium*5 + low*2)` was designed when there were only 6 test modules. Now with 14 modules, a typical site generates many more findings. For example:
+- Ministry of Fishery: 6 critical + 5 high + 10 medium + 10 low = 295 penalty points (capped at 0)
+- Hormuud: 1 critical + 3 high + 6 medium + 6 low = 112 penalty points (capped at 0)
+
+Even modest findings across 14 tests blow past 100 immediately.
+
+**Fix**: Switch to a percentage-based scoring model. Calculate what percentage of total findings passed vs failed, with severity weighting. Formula: `score = 100 * weighted_pass / (weighted_pass + weighted_fail)` where critical failures have 5x weight, high 3x, medium 2x, low 1x. This scales naturally regardless of how many test modules exist.
+
+**Bug 2: Emails never sent**
+The `send-dast-report` function has zero logs -- it is never called. The email-sending code at line 186-209 uses `cachedResults` from a stale React closure. When `loadCachedResults()` runs at line 180 it updates React state asynchronously, but the `runScan` callback still holds the OLD `cachedResults` value. For first-time scans or new orgs, `cachedResults` is empty, so `scanData` is `undefined` and the `if (scanData)` check silently skips the email.
+
+**Fix**: Instead of looking up stale cached results, collect the scan data (score, summary, results) during the scan loop and pass it directly to `send-dast-report`.
 
 ---
 
 ### Changes
 
-#### 1. Update `supabase/functions/send-dast-report/index.ts`
+#### 1. `src/pages/DastScanner.tsx`
 
-Rewrite this function to:
-- Generate a multi-page PDF using the same raw PDF construction technique already used in `generate-report/index.ts` (no external libraries needed)
-- **Page 1 - Executive Summary**: Organization name, URL, scan date, DAST score with grade, severity summary counts (critical/high/medium/low/passed)
-- **Page 2+ - Failed Findings**: Table with severity badge, category, test name, detail, and recommendation for each failed finding
-- Convert PDF to base64 and attach to the Resend email using the `attachments` field:
-  ```json
-  {
-    "from": "noreply@cyberdefense.so",
-    "to": ["osmando@gmail.com"],
-    "subject": "DAST Report: OrgName -- Score XX/100 (Grade X)",
-    "html": "<brief summary email body>",
-    "attachments": [{
-      "filename": "DAST-Report-OrgName-2026-02-20.pdf",
-      "content": "<base64 PDF>"
-    }]
-  }
+- **Fix scoring formula** (line 170): Replace with a weighted percentage model:
   ```
-- Keep the HTML email body as a brief summary (score, grade, finding counts) with a note that the full report is attached as PDF
-- Return the base64 PDF in the response so the frontend can also offer a download
+  weighted_fail = critical*5 + high*3 + medium*2 + low*1
+  weighted_pass = passed*1
+  score = round(100 * weighted_pass / (weighted_pass + weighted_fail))
+  ```
+  If there are no findings at all, score defaults to 100.
 
-#### 2. Update `src/pages/DastScanner.tsx`
+- **Fix email sending** (lines 185-209): Collect each org's scan data into a local array during the scan loop, then iterate over that array (not `cachedResults`) to call `send-dast-report`. This eliminates the stale closure bug entirely.
 
-- After calling `send-dast-report`, use the returned base64 PDF to also trigger a browser download
-- Add a "Download PDF" button on cached scan results that calls `send-dast-report` (or a lighter endpoint) to regenerate/download the PDF on demand
-- The email call already exists at line ~178; update it to handle the PDF response
+- **Remove `cachedResults` from `runScan` dependency** (line 210): It's no longer needed in the callback closure.
+
+#### 2. `supabase/functions/send-dast-report/index.ts`
+
+- **Update the PDF grade display** to use the same scoring formula for consistency (the `getGrade` function is already correct, it just needs to receive the correct score).
+
+#### 3. `supabase/functions/scheduled-dast-scan/index.ts`
+
+- **Update the scoring formula** there too for consistency with the frontend calculation.
 
 ---
 
 ### Technical Details
 
-| File | Action |
-|---|---|
-| `supabase/functions/send-dast-report/index.ts` | Rewrite -- add `generateDastPDF()` function (~150 lines) using raw PDF operators, attach PDF to Resend email, return base64 in response |
-| `src/pages/DastScanner.tsx` | Edit -- handle PDF response from send-dast-report, add Download PDF button for cached results |
+| File | Lines | Change |
+|---|---|---|
+| `src/pages/DastScanner.tsx` | 170 | Replace scoring formula with weighted percentage |
+| `src/pages/DastScanner.tsx` | 185-210 | Collect scan data in local variable during loop; pass directly to send-dast-report instead of reading stale cachedResults |
+| `supabase/functions/scheduled-dast-scan/index.ts` | scoring section | Same weighted percentage formula |
 
-No database changes. No new secrets needed.
+No database changes needed. No new files.
 
