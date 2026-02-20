@@ -1,132 +1,82 @@
 
 
-## Fix Threat Intelligence Accuracy and Real-Time Updates
+## Automated Background Scanning via pg_cron + Remove Lookalike Column
 
 ### Overview
 
-Fix 7 interrelated issues with the Threat Intelligence page: inaccurate scoring of pending checks, silent edge function failures, lack of scheduling, no real-time UI updates, missing URL verification, fragile edge functions, and no confidence indicator. Also create a `check_errors` logging table.
+Two changes: (1) Set up pg_cron scheduled jobs that invoke edge functions on a recurring basis so security checks run continuously without requiring the browser to be open. (2) Remove the "Lookalike" column from the phishing domains table on the Threat Intelligence page.
 
 ---
 
-### 1. Database: `check_errors` Table
+### 1. Enable pg_cron and pg_net Extensions
 
-Create a new table to log all check failures for debugging:
+Run a migration to enable both extensions needed for scheduled HTTP calls from the database.
 
-| Column | Type |
-|---|---|
-| id | uuid PK, gen_random_uuid() |
-| organization_id | uuid, nullable |
-| organization_name | text |
-| url | text |
-| check_type | text |
-| error_type | text (CONNECTION_TIMEOUT, DNS_FAILED, SSL_ERROR, CONNECTION_REFUSED, EDGE_FUNCTION_ERROR, RATE_LIMITED, UNKNOWN) |
-| error_message | text |
-| retry_count | integer, default 0 |
-| checked_at | timestamptz, default now() |
-
-RLS: Authenticated SELECT, SuperAdmin/Analyst ALL, Auditor SELECT. Auto-delete entries older than 7 days via a scheduled SQL or client-side cleanup.
-
----
-
-### 2. Fix Score Calculation (Problem 1 + Problem 7)
-
-**File:** `src/pages/ThreatIntelligence.tsx` -- `calculateScorecards` function
-
-Current logic assigns 0 to checks without data. Change to:
-
-- Track which checks have completed data vs pending
-- Only sum points and max-possible for checks that have actual data
-- Calculate percentage as `earnedPoints / completedMaxPoints * 100`
-- Add to `OrgScorecard` type: `completedChecks: number; totalChecks: number; confidence: number`
-- Display score as "X / Y (Z%)" with "N/10 checks completed"
-- Grade display becomes "A (5/10 checks)"
-- Confidence indicator: below 50% = yellow warning, 50-80% = blue "Partial", above 80% = green "High Confidence"
-
-The `breakdown` object values will use `null` for pending instead of `0`.
-
----
-
-### 3. Edge Function Timeout + Retry (Problem 2 + Problem 6)
-
-**File:** `src/pages/ThreatIntelligence.tsx`
-
-Create a helper function `invokeWithRetry(fnName, body, maxRetries=2)`:
-- Wraps `supabase.functions.invoke()` with a 15-second timeout (AbortController)
-- On failure, retries up to 2 more times with 5-second delay
-- On final failure, logs to `check_errors` table and returns a structured error object
-- Classifies errors: CONNECTION_TIMEOUT, DNS_FAILED, SSL_ERROR, CONNECTION_REFUSED, EDGE_FUNCTION_ERROR, RATE_LIMITED, UNKNOWN
-
-**Edge Functions** (`fingerprint-tech`, `fetch-threat-intel`, `check-breaches`, `check-phishing-domains`, `check-security-headers`):
-- Increase HTTP request timeout from 10s to 20s
-- Add structured error response: `{ success: false, error: "CONNECTION_TIMEOUT", errorMessage: "...", url, checkedAt }`
-- Classify fetch errors by message content (cert/ssl, DNS, timeout, refused)
-
-Update the UI to show:
-- "Check Failed" in orange with specific error type instead of "~" forever
-- "Retry" button next to failed checks
-- "X/Y checks succeeded" indicator at page top
-
----
-
-### 4. Queue-Based Scanning with Progress (Problem 3)
-
-**File:** `src/pages/ThreatIntelligence.tsx`
-
-Replace `runFullScan` with a queue system:
-- Process organizations one at a time with 2-second delay between each
-- Show progress bar: "Scanning organizations... 5/35 complete"
-- Track `scanProgress: { current: number; total: number; currentOrg: string }` state
-
-Add client-side scheduling via `useEffect` with intervals:
-- Threat feed: 30 minutes
-- Tech fingerprinting: 12 hours
-- Phishing domains: 24 hours
-- Data breaches: 24 hours
-- Scorecard recalculation: 1 hour
-
-Use `useRef` for last-check timestamps to avoid re-renders. Stagger org checks within each interval.
-
----
-
-### 5. Realtime UI Updates (Problem 4)
-
-**File:** `src/pages/ThreatIntelligence.tsx`
-
-Add Supabase Realtime subscriptions in a `useEffect`:
-- Subscribe to `uptime_logs`, `ssl_logs`, `ddos_risk_logs`, `early_warning_logs`, `threat_intelligence_logs` tables
-- On new INSERT, update the relevant organization's scorecard data
-- Recalculate score live as new results arrive
-- Add CSS transition/animation: brief green glow on score improvement, red glow on degradation
-- Show "Last updated: X seconds ago" live counter per card (1-second tick interval)
-- Show global "Last scan: X minutes ago" in the page header
-
-Enable realtime on relevant tables via migration:
 ```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE uptime_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE ssl_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE ddos_risk_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE early_warning_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE threat_intelligence_logs;
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 ```
 
 ---
 
-### 6. URL Verification (Problem 5)
+### 2. Create pg_cron Scheduled Jobs
 
-This is specifically about the Organizations page, not the Threat Intelligence page. However, since the prompt says "do NOT change existing pages", this will be handled minimally:
+Use the insert tool (not migration) since these contain project-specific URLs and keys. The jobs will call existing edge functions via `net.http_post`:
 
-- On the Threat Intelligence page's scorecard cards, show URL status (reachable/unreachable) based on the latest uptime_logs data
-- If an org's URL is failing all checks, show a yellow "URL may be incorrect" warning on the card
-- Common Somali URL correction suggestions shown in a tooltip
+| Job | Edge Function | Schedule | Description |
+|---|---|---|---|
+| scheduled-security-scan | `scheduled-scan` | Every 6 hours | Runs all security checks (uptime, SSL, DDoS, headers, DNS, etc.) for all organizations via `run-security-checks` |
+| scheduled-threat-intel | `fetch-threat-intel` | Every 30 minutes | Fetches CISA KEV, NVD, URLhaus threat feeds |
+| scheduled-fingerprint | `fingerprint-tech` | Every 12 hours | Tech stack fingerprinting for all organizations |
+| scheduled-phishing-check | `check-phishing-domains` | Every 24 hours | Typosquat/lookalike domain checks |
+| scheduled-breach-check | `check-breaches` | Every 24 hours | Data breach monitoring |
+| scheduled-defacement | `check-defacement` | Every 30 minutes | Website defacement detection |
+| scheduled-dns-check | `check-dns` | Every 1 hour | DNS integrity monitoring |
+| scheduled-blacklist | `check-blacklist` | Every 6 hours | Blacklist/reputation checks |
+| scheduled-headers | `check-security-headers` | Every 6 hours | Security headers assessment |
+
+Each job uses `net.http_post` to call the respective edge function with the service role key for authentication.
+
+For functions that need per-org data (fingerprint, phishing, breaches, defacement, dns, blacklist, headers), the `scheduled-scan` function already handles iterating over all organizations. We will create a new comprehensive `scheduled-threat-intel-scan` edge function that orchestrates the threat intelligence checks (fingerprinting, phishing, breaches) across all organizations, similar to how `scheduled-scan` orchestrates `run-security-checks`.
 
 ---
 
-### 7. Score Confidence Display (Problem 7)
+### 3. New Edge Function: `scheduled-ti-scan`
 
-Already covered in the scorecard fix (section 2). Add a small bar or badge next to each score:
-- Below 50% confidence: yellow "Low Confidence -- more checks needed"
-- 50-80%: blue "Partial -- some checks pending"
-- Above 80%: green "High Confidence"
+A new edge function that iterates all organizations from `organizations_monitored` and calls:
+- `fingerprint-tech` for each org
+- `check-phishing-domains` for each org
+- `check-breaches` for each org
+- `check-defacement` for each org
+- `check-dns` for each org
+- `check-blacklist` for each org
+- `check-security-headers` for each org
+
+It processes organizations sequentially with small delays to avoid rate limiting. This function is called by pg_cron.
+
+---
+
+### 4. Simplified pg_cron Jobs (Final)
+
+With the orchestrator function, we only need 3 pg_cron jobs:
+
+| Job | Function | Schedule |
+|---|---|---|
+| scheduled-security-scan | `scheduled-scan` | `0 */6 * * *` (every 6 hours) |
+| scheduled-threat-intel | `fetch-threat-intel` | `*/30 * * * *` (every 30 min) |
+| scheduled-ti-scan | `scheduled-ti-scan` | `0 */6 * * *` (every 6 hours) |
+
+---
+
+### 5. Remove Lookalike Column from Phishing Table
+
+**File:** `src/pages/ThreatIntelligence.tsx`
+
+In the phishing tab table (around lines 917-936):
+- Remove the `<TableHead>Lookalike</TableHead>` column header (line 921)
+- Remove the `<TableCell>` that renders `d.domain` (line 932)
+
+The data still shows in Organization, Original Domain, IP, Website status, and Risk columns -- the lookalike domain name is redundant since it is implied by context.
 
 ---
 
@@ -134,20 +84,16 @@ Already covered in the scorecard fix (section 2). Add a small bar or badge next 
 
 | File | Action |
 |---|---|
-| Migration SQL | Create `check_errors` table + RLS + enable realtime on 5 tables |
-| `src/pages/ThreatIntelligence.tsx` | Major edit -- fix scoring, add retry/queue/realtime/confidence/progress |
-| `supabase/functions/fingerprint-tech/index.ts` | Edit -- increase timeout to 20s, structured error responses |
-| `supabase/functions/fetch-threat-intel/index.ts` | Edit -- increase timeout to 20s, structured error responses |
-| `supabase/functions/check-breaches/index.ts` | Edit -- increase timeout to 20s, structured error responses |
-| `supabase/functions/check-phishing-domains/index.ts` | Edit -- increase timeout to 20s, structured error responses |
-| `supabase/functions/check-security-headers/index.ts` | Edit -- increase timeout to 20s, structured error responses |
+| Migration SQL | Enable pg_cron + pg_net extensions |
+| SQL insert | Create cron.schedule jobs with project URL and anon key |
+| `supabase/functions/scheduled-ti-scan/index.ts` | Create -- orchestrator for TI checks across all orgs |
+| `src/pages/ThreatIntelligence.tsx` | Edit -- remove Lookalike column from phishing table |
 
 ### Technical Notes
 
-- No existing pages other than ThreatIntelligence.tsx are modified
-- Realtime subscriptions are cleaned up on component unmount
-- Queue processing stops if user navigates away (cleanup via ref)
-- Edge function error classification uses string matching on error messages
-- Progress bar uses existing UI components (Progress from radix)
-- All intervals cleared on unmount to prevent memory leaks
+- pg_cron runs inside the database and does not require the browser to be open
+- `net.http_post` makes HTTP calls from within PostgreSQL to edge functions
+- The anon key is used for authentication since the edge functions have `verify_jwt = false`
+- The orchestrator function processes orgs sequentially to avoid overwhelming edge function concurrency limits
+- Existing edge functions and pages are not modified (except removing the one column)
 
