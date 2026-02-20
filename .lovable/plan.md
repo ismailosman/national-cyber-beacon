@@ -1,58 +1,47 @@
 
 
-## Migrate Early Warning and Threat Intelligence to Main Organizations Table
+## Ensure Dashboard Data Updates in Realtime
 
 ### Problem
-Both the Early Warning (`/early-warning`) and Threat Intelligence (`/threat-intelligence`) pages query the legacy `organizations_monitored` table which has only 17 entries, while the main `organizations` table has 37. The `scheduled-ti-scan` edge function also uses the old table.
+
+The Dashboard has realtime subscriptions for `organizations`, `alerts`, and `threat_events`, but **none of these tables are in the Supabase realtime publication**. This means the subscriptions silently do nothing -- data only refreshes on page reload. Additionally, the `risk_history` table (which powers the 30-Day Risk Trend chart) has no realtime subscription at all.
+
+The actual data in the database is accurate and matches what's shown:
+- 36 organizations
+- 58 open alerts (40 critical, 12 high, 6 medium, 0 low)
+- Risk trend data across 9 days
 
 ### Changes
 
-**File: `src/pages/EarlyWarning.tsx`**
+**1. Database Migration: Enable realtime for dashboard tables**
 
-1. Update the `loadOrgs` function (line 166-167) to query `organizations` instead of `organizations_monitored`
-2. Map `domain` to `url` with `https://` prefix: `url: d.domain.startsWith('http') ? d.domain : 'https://' + d.domain`
-3. Set `is_active: true` for all records (the main table doesn't have this field but the `MonitoredOrg` interface expects it)
+Add `organizations`, `alerts`, `threat_events`, and `risk_history` to the `supabase_realtime` publication so that postgres_changes events are actually emitted.
 
-**File: `src/pages/ThreatIntelligence.tsx`**
-
-1. Update the `loadOrgs` function (line 230-231) to query `organizations` instead of `organizations_monitored`
-2. Same domain-to-url mapping with `https://` prefix
-3. Set `is_active: true` for all records
-
-**File: `supabase/functions/scheduled-ti-scan/index.ts`**
-
-1. Update the query (line 18-21) from `organizations_monitored` to `organizations`
-2. Select `id, name, domain, sector` instead of `id, name, url, sector`
-3. Map `domain` to `url` with `https://` prefix in the org loop
-4. Remove the `.eq('is_active', true)` filter
-
-### Technical Details
-
-The key query change in both frontend files:
-```typescript
-// Before:
-supabase.from('organizations_monitored').select('*').eq('is_active', true)
-
-// After:
-supabase.from('organizations').select('id, name, domain, sector').order('name')
-// Then map each record: { id, name, url: domain.startsWith('http') ? domain : `https://${domain}`, sector, is_active: true }
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE public.organizations;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.threat_events;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.risk_history;
 ```
 
-The edge function change:
-```typescript
-// Before:
-supabase.from('organizations_monitored').select('id, name, url, sector').eq('is_active', true)
+**2. File: `src/pages/Dashboard.tsx` -- Add risk_history realtime subscription**
 
-// After:
-supabase.from('organizations').select('id, name, domain, sector')
-// Then map: { ...org, url: org.domain.startsWith('http') ? org.domain : `https://${org.domain}` }
+Add a fourth realtime channel that listens for changes on `risk_history` and invalidates the `score-history-all` query key. This ensures the 30-Day National Risk Trend chart updates live when new scan results are recorded.
+
+```typescript
+const ch4 = supabase.channel('risk-history-realtime')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'risk_history' }, () => {
+    queryClient.invalidateQueries({ queryKey: ['score-history-all'] });
+  }).subscribe();
 ```
 
-### Files Changed
+Update the cleanup to also unsubscribe `ch4`.
 
-| File | Action |
+### Summary
+
+| Change | Purpose |
 |---|---|
-| `src/pages/EarlyWarning.tsx` | Switch from `organizations_monitored` to `organizations`, map domain to url |
-| `src/pages/ThreatIntelligence.tsx` | Switch from `organizations_monitored` to `organizations`, map domain to url |
-| `supabase/functions/scheduled-ti-scan/index.ts` | Switch from `organizations_monitored` to `organizations`, map domain to url |
+| DB migration: add 4 tables to realtime publication | Enable postgres_changes events for dashboard data |
+| Dashboard.tsx: add `risk_history` channel + cleanup | Live-update the 30-Day Risk Trend chart |
 
+After this, all dashboard cards (National Score, Monitored Orgs, Open Alerts, At Risk, severity breakdown) and the trend chart will update in realtime whenever scans complete or alerts are created/resolved.
