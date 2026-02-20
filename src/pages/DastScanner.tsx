@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CircularGauge from '@/components/dashboard/CircularGauge';
-import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar, FileDown, Loader2 } from 'lucide-react';
+import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar, FileDown, Loader2, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const downloadPdfFromBase64 = (base64: string, filename: string) => {
@@ -109,6 +109,7 @@ const DastScanner: React.FC = () => {
   const [currentScore, setCurrentScore] = useState<number | null>(null);
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
+  const [emailingPdf, setEmailingPdf] = useState<string | null>(null);
 
   useEffect(() => {
     loadOrgs();
@@ -251,6 +252,27 @@ const DastScanner: React.FC = () => {
     }
   };
 
+  const handleEmailPdf = async (scan: ScanResult) => {
+    setEmailingPdf(scan.organization_id);
+    try {
+      await supabase.functions.invoke('send-dast-report', {
+        body: {
+          organizationName: scan.organization_name,
+          url: scan.url,
+          dastScore: scan.dast_score,
+          summary: scan.summary,
+          results: scan.results,
+        },
+      });
+      toast({ title: 'Report Emailed', description: `PDF report sent to osmando@gmail.com` });
+    } catch (err) {
+      console.error('Email report failed:', err);
+      toast({ title: 'Email Failed', description: 'Could not send PDF report', variant: 'destructive' });
+    } finally {
+      setEmailingPdf(null);
+    }
+  };
+
   const toggleTest = (name: string) => {
     setExpandedTests(prev => {
       const next = new Set(prev);
@@ -343,17 +365,30 @@ const DastScanner: React.FC = () => {
             <Download className="w-4 h-4 mr-1" /> Export TXT
           </Button>
           {displayResults && (
-            <Button
-              variant="outline"
-              onClick={() => handleDownloadPdf(displayResults)}
-              disabled={downloadingPdf === displayResults.organization_id}
-            >
-              {downloadingPdf === displayResults.organization_id ? (
-                <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Generating...</>
-              ) : (
-                <><FileDown className="w-4 h-4 mr-1" /> Download PDF</>
-              )}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadPdf(displayResults)}
+                disabled={downloadingPdf === displayResults.organization_id}
+              >
+                {downloadingPdf === displayResults.organization_id ? (
+                  <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Generating...</>
+                ) : (
+                  <><FileDown className="w-4 h-4 mr-1" /> Download PDF</>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleEmailPdf(displayResults)}
+                disabled={emailingPdf === displayResults.organization_id}
+              >
+                {emailingPdf === displayResults.organization_id ? (
+                  <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending...</>
+                ) : (
+                  <><Mail className="w-4 h-4 mr-1" /> Email PDF</>
+                )}
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -576,6 +611,18 @@ const DastScanner: React.FC = () => {
                           <Loader2 className="w-3 h-3 animate-spin" />
                         ) : (
                           <><FileDown className="w-3 h-3 mr-1" /> PDF</>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={emailingPdf === scan.organization_id}
+                        onClick={(e) => { e.stopPropagation(); handleEmailPdf(scan); }}
+                      >
+                        {emailingPdf === scan.organization_id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <><Mail className="w-3 h-3 mr-1" /> Email</>
                         )}
                       </Button>
                     </div>
