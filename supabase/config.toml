@@ -14,3 +14,42 @@ verify_jwt = false
 
 [functions.ping-website]
 verify_jwt = false
+
+[functions.scheduled-ti-scan]
+verify_jwt = false
+
+[functions.fetch-threat-intel]
+verify_jwt = false
+
+[functions.fingerprint-tech]
+verify_jwt = false
+
+[functions.check-phishing-domains]
+verify_jwt = false
+
+[functions.check-breaches]
+verify_jwt = false
+
+[functions.check-defacement]
+verify_jwt = false
+
+[functions.check-dns]
+verify_jwt = false
+
+[functions.check-blacklist]
+verify_jwt = false
+
+[functions.check-security-headers]
+verify_jwt = false
+
+[functions.check-ssl]
+verify_jwt = false
+
+[functions.check-ddos-risk]
+verify_jwt = false
+
+[functions.public-stats]
+verify_jwt = false
+
+[functions.get-map-token]
+verify_jwt = false

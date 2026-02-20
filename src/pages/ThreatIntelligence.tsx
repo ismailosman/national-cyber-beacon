@@ -918,7 +918,6 @@ const ThreatIntelligence: React.FC = () => {
                       <TableRow>
                         <TableHead>Organization</TableHead>
                         <TableHead>Original</TableHead>
-                        <TableHead>Lookalike</TableHead>
                         <TableHead>IP</TableHead>
                         <TableHead>Website</TableHead>
                         <TableHead>Risk</TableHead>
@@ -929,7 +928,6 @@ const ThreatIntelligence: React.FC = () => {
                         <TableRow key={`${r.domain}-${i}`} className={d.hasWebsite ? 'bg-red-500/5' : ''}>
                           <TableCell className="font-medium">{r.organization}</TableCell>
                           <TableCell className="font-mono text-xs">{r.domain}</TableCell>
-                          <TableCell className="font-mono text-xs">{d.domain}</TableCell>
                           <TableCell className="font-mono text-xs">{d.ip || '—'}</TableCell>
                           <TableCell>{d.hasWebsite ? <Badge className="bg-red-500/20 text-red-400 border-red-500/30" variant="outline">Active</Badge> : <span className="text-muted-foreground">No</span>}</TableCell>
                           <TableCell><Badge className={d.risk === 'high' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'} variant="outline">{d.risk}</Badge></TableCell>
