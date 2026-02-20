@@ -19,351 +19,469 @@ function buildRemediations(data: {
   const rems: Remediation[] = [];
   const { sslLog, ddosLog, ewLogs, techFp } = data;
 
-  // SSL
   if (sslLog && (!sslLog.is_valid || sslLog.is_expired)) {
-    rems.push({
-      issue: 'SSL Certificate Invalid or Expired',
-      severity: 'critical',
-      steps: [
-        'Use Let\'s Encrypt (free) to issue a new SSL certificate: certbot certonly --webroot -w /var/www/html -d yourdomain.so',
-        'Install the certificate on your web server (Apache/Nginx)',
-        'Set up auto-renewal: add cron job "0 0 1 * * certbot renew --quiet"',
-        'Verify with: openssl s_client -connect yourdomain.so:443',
-      ],
-      estimatedTime: '15 minutes',
-    });
+    rems.push({ issue: 'SSL Certificate Invalid or Expired', severity: 'critical', steps: [
+      'Use Let\'s Encrypt to issue a new SSL certificate', 'Install the certificate on your web server',
+      'Set up auto-renewal cron job', 'Verify with: openssl s_client -connect yourdomain:443',
+    ], estimatedTime: '15 minutes' });
   } else if (sslLog?.is_expiring_soon) {
-    rems.push({
-      issue: `SSL Certificate Expiring in ${sslLog.days_until_expiry} days`,
-      severity: 'high',
-      steps: ['Renew certificate before expiry using certbot renew or your CA portal', 'Enable auto-renewal to prevent future expiry'],
-      estimatedTime: '10 minutes',
-    });
+    rems.push({ issue: `SSL Expiring in ${sslLog.days_until_expiry} days`, severity: 'high', steps: [
+      'Renew certificate before expiry', 'Enable auto-renewal',
+    ], estimatedTime: '10 minutes' });
   }
 
-  // DDoS Protection
   if (ddosLog) {
-    if (!ddosLog.has_cdn) {
-      rems.push({
-        issue: 'No CDN Protection',
-        severity: 'critical',
-        steps: [
-          'Sign up for Cloudflare free tier at cloudflare.com',
-          'Update your domain nameservers to Cloudflare nameservers',
-          'Enable "Always Use HTTPS" and "Auto Minify" in Cloudflare',
-          'This also provides WAF, DDoS protection, and caching',
-        ],
-        estimatedTime: '30 minutes',
-      });
-    }
-    if (!ddosLog.has_waf) {
-      rems.push({
-        issue: 'No Web Application Firewall (WAF)',
-        severity: 'critical',
-        steps: [
-          'If using Cloudflare: enable WAF rules under Security > WAF',
-          'Enable OWASP ModSecurity Core Rule Set managed rules',
-          'Set Security Level to "High" under Security > Settings',
-        ],
-        estimatedTime: '15 minutes',
-      });
-    }
-    if (!ddosLog.has_rate_limiting) {
-      rems.push({
-        issue: 'No Rate Limiting',
-        severity: 'high',
-        steps: [
-          'If using Cloudflare: create rate limiting rules under Security > WAF > Rate limiting',
-          'Set login page limit: 10 requests/minute per IP',
-          'Set general page limit: 100 requests/minute per IP',
-        ],
-        estimatedTime: '10 minutes',
-      });
-    }
-    if (ddosLog.origin_exposed) {
-      rems.push({
-        issue: 'Origin Server IP Exposed',
-        severity: 'high',
-        steps: [
-          'Ensure DNS is proxied through CDN (orange cloud in Cloudflare)',
-          'Change origin server IP if it was previously exposed',
-          'Block direct IP access on the origin server firewall',
-        ],
-        estimatedTime: '20 minutes',
-      });
-    }
+    if (!ddosLog.has_cdn) rems.push({ issue: 'No CDN Protection', severity: 'critical', steps: [
+      'Sign up for Cloudflare free tier', 'Update nameservers', 'Enable Always Use HTTPS',
+    ], estimatedTime: '30 minutes' });
+    if (!ddosLog.has_waf) rems.push({ issue: 'No WAF', severity: 'critical', steps: [
+      'Enable WAF rules in Cloudflare', 'Enable OWASP ModSecurity rules',
+    ], estimatedTime: '15 minutes' });
+    if (!ddosLog.has_rate_limiting) rems.push({ issue: 'No Rate Limiting', severity: 'high', steps: [
+      'Create rate limiting rules: 10 req/min login, 100 req/min general',
+    ], estimatedTime: '10 minutes' });
+    if (ddosLog.origin_exposed) rems.push({ issue: 'Origin IP Exposed', severity: 'high', steps: [
+      'Proxy DNS through CDN', 'Block direct IP access on firewall',
+    ], estimatedTime: '20 minutes' });
   }
 
-  // Security Headers
   const headersLog = ewLogs.find(e => e.check_type === 'security_headers');
   if (headersLog) {
     const det = headersLog.details as any;
     const headers = det?.headers || {};
     const missing: string[] = [];
-    if (!headers['strict-transport-security']) missing.push('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-    if (!headers['content-security-policy']) missing.push('Content-Security-Policy: default-src \'self\'');
-    if (!headers['x-frame-options']) missing.push('X-Frame-Options: DENY');
-    if (!headers['x-content-type-options']) missing.push('X-Content-Type-Options: nosniff');
-    if (missing.length > 0) {
-      rems.push({
-        issue: `${missing.length} Missing Security Headers`,
-        severity: missing.length >= 3 ? 'high' : 'medium',
-        steps: [
-          'Add the following headers to your web server configuration:',
-          ...missing.map(h => `  ${h}`),
-          'For Nginx: add_header directive in server block',
-          'For Apache: Header set directive in .htaccess or httpd.conf',
-        ],
-        estimatedTime: '5 minutes',
-      });
-    }
+    if (!headers['strict-transport-security']) missing.push('HSTS');
+    if (!headers['content-security-policy']) missing.push('CSP');
+    if (!headers['x-frame-options']) missing.push('X-Frame-Options');
+    if (!headers['x-content-type-options']) missing.push('X-Content-Type-Options');
+    if (missing.length > 0) rems.push({ issue: `${missing.length} Missing Security Headers`, severity: missing.length >= 3 ? 'high' : 'medium', steps: [
+      `Add missing headers: ${missing.join(', ')}`, 'Configure in web server (Nginx/Apache)',
+    ], estimatedTime: '5 minutes' });
   }
 
-  // Email Security
   const emailLog = ewLogs.find(e => e.check_type === 'email_security' || e.check_type === 'dns');
   if (emailLog) {
     const es = (emailLog.details as any)?.emailSecurity;
-    if (es && !es.spfExists) {
-      rems.push({
-        issue: 'No SPF Record - Email Spoofing Possible',
-        severity: 'critical',
-        steps: [
-          'Add TXT record to DNS: v=spf1 include:_spf.google.com ~all',
-          'Adjust "include:" for your email provider',
-          'Test with: dig TXT yourdomain.so',
-        ],
-        estimatedTime: '5 minutes',
-      });
-    }
-    if (es && !es.dmarcExists) {
-      rems.push({
-        issue: 'No DMARC Record',
-        severity: 'high',
-        steps: [
-          'Add TXT record at _dmarc.yourdomain.so:',
-          '  v=DMARC1; p=reject; rua=mailto:dmarc@yourdomain.so',
-          'Start with p=none to monitor, then move to p=reject',
-        ],
-        estimatedTime: '10 minutes',
-      });
-    }
+    if (es && !es.spfExists) rems.push({ issue: 'No SPF Record', severity: 'critical', steps: [
+      'Add TXT DNS record: v=spf1 include:_spf.google.com ~all',
+    ], estimatedTime: '5 minutes' });
+    if (es && !es.dmarcExists) rems.push({ issue: 'No DMARC Record', severity: 'high', steps: [
+      'Add TXT record at _dmarc: v=DMARC1; p=reject; rua=mailto:dmarc@domain',
+    ], estimatedTime: '10 minutes' });
   }
 
-  // Open Ports
   const portsLog = ewLogs.find(e => e.check_type === 'open_ports');
   if (portsLog && portsLog.risk_level !== 'safe') {
-    const det = portsLog.details as any;
-    const critical = det?.openPorts?.filter((p: any) => p.risk === 'critical') || [];
-    if (critical.length > 0) {
-      rems.push({
-        issue: `${critical.length} Critical Database Port(s) Exposed`,
-        severity: 'critical',
-        steps: [
-          `Close these ports IMMEDIATELY: ${critical.map((p: any) => `${p.port} (${p.service})`).join(', ')}`,
-          'Linux: sudo ufw deny 3306 && sudo ufw deny 5432 && sudo ufw deny 27017',
-          'Cloud: update security group/firewall rules',
-          'Restrict database access to localhost or VPN only',
-        ],
-        estimatedTime: '5 minutes',
-      });
-    }
+    const critical = ((portsLog.details as any)?.openPorts || []).filter((p: any) => p.risk === 'critical');
+    if (critical.length > 0) rems.push({ issue: `${critical.length} Critical Port(s) Exposed`, severity: 'critical', steps: [
+      `Close ports: ${critical.map((p: any) => `${p.port} (${p.service})`).join(', ')}`,
+      'Restrict database access to localhost or VPN',
+    ], estimatedTime: '5 minutes' });
   }
 
-  // Software
-  if (techFp && techFp.outdated_count > 0) {
-    rems.push({
-      issue: `${techFp.outdated_count} Outdated Software Component(s)`,
-      severity: 'medium',
-      steps: [
-        techFp.cms ? `Update ${techFp.cms} to the latest version` : 'Update all CMS software',
-        'Update all plugins and extensions',
-        'Remove unused plugins and themes',
-        'Enable automatic security updates where possible',
-      ],
-      estimatedTime: '30 minutes',
-    });
-  }
+  if (techFp && techFp.outdated_count > 0) rems.push({ issue: `${techFp.outdated_count} Outdated Software`, severity: 'medium', steps: [
+    'Update all CMS and plugins', 'Enable automatic security updates',
+  ], estimatedTime: '30 minutes' });
 
-  // Sort by severity
   const order = { critical: 0, high: 1, medium: 2 };
   rems.sort((a, b) => order[a.severity] - order[b.severity]);
   return rems;
 }
 
+/* ─── Sanitize PDF text ─── */
+function s(text: string | null | undefined, maxLen = 90): string {
+  return (text || '').replace(/[()\\]/g, ' ').substring(0, maxLen);
+}
+
 /* ─── PDF Generator ─── */
 function generatePDF(data: {
-  org: any; checks: any[]; alerts: any[]; history: any[];
-  dateFrom: string; dateTo: string; remediations: Remediation[];
-  includeRemediation: boolean;
+  org: any; alerts: any[]; dateFrom: string; dateTo: string;
+  remediations: Remediation[]; includeRemediation: boolean;
+  sslLog: any; ddosLog: any; ewLogs: any[]; uptimeLogs: any[];
+  techFp: any; phishingDomains: any[]; tiLogs: any[];
+  sections: { earlyWarning: boolean; threatIntel: boolean; alertHistory: boolean };
 }): Uint8Array {
-  const { org, checks, alerts, dateFrom, dateTo, remediations, includeRemediation } = data;
+  const { org, alerts, dateFrom, dateTo, remediations, includeRemediation,
+    sslLog, ddosLog, ewLogs, uptimeLogs, techFp, phishingDomains, tiLogs, sections } = data;
   const now = new Date().toISOString().split('T')[0];
-  const passCount = checks.filter(c => c.result === 'pass').length;
-  const failCount = checks.filter(c => c.result === 'fail').length;
-  const warnCount = checks.filter(c => c.result === 'warn').length;
   const scoreColor = org.risk_score >= 75 ? '0.2 0.8 0.4' : org.risk_score >= 50 ? '1 0.7 0' : '0.9 0.2 0.2';
+  const orgName = s(org.name);
+  const domain = s(org.domain);
 
-  const checkTypeLabels: Record<string, string> = {
-    ssl: 'SSL Certificate', https: 'HTTPS Enforcement',
-    headers: 'Security Headers', dns: 'DNS Resolution', uptime: 'Uptime Check'
-  };
-
-  const recMap: Record<string, string> = {
-    ssl: 'Renew/fix SSL certificate immediately.',
-    https: 'Enable HTTPS redirect on your web server.',
-    headers: 'Implement HSTS, CSP, X-Frame-Options headers.',
-    dns: 'Review DNS configuration for the domain.',
-    uptime: 'Investigate downtime. Add redundant servers.'
-  };
-
-  // Build pages
   const pages: string[][] = [];
 
-  // Page 1: Main report
+  // ── Page 1: Executive Summary ──
   const p1: string[] = [];
-  p1.push(`% Header bar`);
-  p1.push(`0.05 0.07 0.1 rg`);
-  p1.push(`0 790 595 52 re f`);
-  p1.push(`0 0.4 0.6 rg`);
-  p1.push(`BT /F2 20 Tf 1 1 1 rg 40 810 Td (SOMALIA CYBER DEFENSE OBSERVATORY) Tj ET`);
-  p1.push(`BT /F2 11 Tf 1 1 1 rg 40 797 Td (Security Risk Assessment Report) Tj ET`);
+  // Header bar
+  p1.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+  p1.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (SOMALIA CYBER DEFENSE OBSERVATORY) Tj ET`);
+  p1.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (Security Risk Assessment Report) Tj ET`);
 
-  p1.push(`% Body`);
-  p1.push(`0.08 0.1 0.14 rg`);
-  p1.push(`30 120 535 660 re f`);
-  p1.push(`0.12 0.15 0.2 rg`);
-  p1.push(`30 680 535 90 re f`);
+  // Background
+  p1.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
-  const orgName = (org.name || '').replace(/[()\\]/g, ' ');
-  const domain = (org.domain || '').replace(/[()\\]/g, ' ');
-  p1.push(`BT /F2 16 Tf 0.9 0.95 1 rg 50 748 Td (${orgName}) Tj ET`);
-  p1.push(`BT /F1 10 Tf 0.6 0.7 0.8 rg 50 732 Td (${domain} | ${org.sector} | Report: ${dateFrom} to ${dateTo}) Tj ET`);
+  // Org info bar
+  p1.push(`0.12 0.15 0.2 rg`, `30 700 535 80 re f`);
+  p1.push(`BT /F2 16 Tf 0.9 0.95 1 rg 50 758 Td (${orgName}) Tj ET`);
+  p1.push(`BT /F1 10 Tf 0.6 0.7 0.8 rg 50 742 Td (${domain} | ${s(org.sector)} | ${s(org.region)}) Tj ET`);
+  p1.push(`BT /F1 9 Tf 0.6 0.7 0.8 rg 50 726 Td (Report Period: ${dateFrom} to ${dateTo} | Generated: ${now}) Tj ET`);
 
-  p1.push(`${scoreColor} rg`);
-  p1.push(`460 700 105 70 re f`);
-  p1.push(`BT /F2 32 Tf 0.05 0.07 0.1 rg 478 728 Td (${org.risk_score}) Tj ET`);
-  p1.push(`BT /F1 9 Tf 0.05 0.07 0.1 rg 487 712 Td (/ 100) Tj ET`);
-  p1.push(`BT /F2 9 Tf 0.05 0.07 0.1 rg 480 700 Td (${(org.status || '').toUpperCase()}) Tj ET`);
+  // Risk Score box
+  p1.push(`${scoreColor} rg`, `460 710 105 70 re f`);
+  p1.push(`BT /F2 32 Tf 0.05 0.07 0.1 rg 478 738 Td (${org.risk_score}) Tj ET`);
+  p1.push(`BT /F1 9 Tf 0.05 0.07 0.1 rg 487 722 Td (/ 100) Tj ET`);
+  p1.push(`BT /F2 9 Tf 0.05 0.07 0.1 rg 472 710 Td (RISK SCORE) Tj ET`);
 
-  p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 670 Td (Security Check Summary) Tj ET`);
-  p1.push(`0.12 0.15 0.2 rg`);
-  p1.push(`50 620 130 40 re f`);
-  p1.push(`200 620 130 40 re f`);
-  p1.push(`350 620 130 40 re f`);
-  p1.push(`BT /F2 16 Tf 0.2 0.9 0.4 rg 90 638 Td (${passCount}) Tj ET`);
-  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 82 625 Td (Checks Passed) Tj ET`);
-  p1.push(`BT /F2 16 Tf 0.9 0.4 0.2 rg 240 638 Td (${failCount}) Tj ET`);
-  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 232 625 Td (Checks Failed) Tj ET`);
-  p1.push(`BT /F2 16 Tf 1 0.8 0 rg 390 638 Td (${warnCount}) Tj ET`);
-  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 382 625 Td (Warnings) Tj ET`);
+  // Security Posture Summary
+  p1.push(`BT /F2 12 Tf ${scoreColor} rg 50 688 Td (Security Posture Summary) Tj ET`);
 
-  p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 600 Td (Security Check Results) Tj ET`);
-  p1.push(`0.12 0.15 0.2 rg`);
-  p1.push(`50 565 480 28 re f`);
-  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 55 577 Td (CHECK TYPE) Tj ET`);
-  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 280 577 Td (RESULT) Tj ET`);
-  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 380 577 Td (TIMESTAMP) Tj ET`);
+  // Build check results
+  const checks: { name: string; status: string; color: string; detail: string; time: string }[] = [];
 
-  const uniqueChecks = checks.filter((c, i, arr) => arr.findIndex(x => x.check_type === c.check_type) === i).slice(0, 5);
-  uniqueChecks.forEach((c, i) => {
-    const y = 550 - i * 22;
-    if (i % 2 === 0) {
-      p1.push(`0.1 0.13 0.17 rg`);
-      p1.push(`50 ${y - 6} 480 22 re f`);
-    }
-    const label = checkTypeLabels[c.check_type] || c.check_type;
-    const rc = c.result === 'pass' ? '0.2 0.8 0.4' : c.result === 'fail' ? '0.9 0.2 0.2' : '1 0.7 0';
-    const ts = c.checked_at ? c.checked_at.substring(0, 16).replace('T', ' ') : now;
-    p1.push(`BT /F1 9 Tf 0.9 0.95 1 rg 55 ${y + 2} Td (${label}) Tj ET`);
-    p1.push(`BT /F2 9 Tf ${rc} rg 280 ${y + 2} Td (${(c.result || '').toUpperCase()}) Tj ET`);
-    p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 380 ${y + 2} Td (${ts}) Tj ET`);
-  });
-
-  // Basic recommendations
-  const recY = 420;
-  p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 ${recY} Td (Recommendations) Tj ET`);
-  const failedChecks = checks.filter(c => c.result !== 'pass');
-  if (failedChecks.length === 0) {
-    p1.push(`BT /F1 10 Tf 0.2 0.8 0.4 rg 50 ${recY - 20} Td (All security checks passed. Maintain current security posture.) Tj ET`);
-  } else {
-    const uniqueFailed = failedChecks.filter((c, i, arr) => arr.findIndex(x => x.check_type === c.check_type) === i).slice(0, 5);
-    uniqueFailed.forEach((c, i) => {
-      const ry = recY - 20 - i * 25;
-      const rec = recMap[c.check_type] || 'Review and remediate this security check.';
-      p1.push(`BT /F2 9 Tf 1 0.7 0 rg 50 ${ry} Td (-> ) Tj ET`);
-      p1.push(`BT /F1 9 Tf 0.9 0.95 1 rg 62 ${ry} Td (${rec.replace(/[()\\]/g, ' ')}) Tj ET`);
-    });
+  // SSL
+  if (sslLog) {
+    const st = sslLog.is_valid && !sslLog.is_expired ? 'PASS' : 'FAIL';
+    const detail = sslLog.is_valid ? `Valid, expires in ${sslLog.days_until_expiry || '?'} days` : 'Invalid or expired';
+    checks.push({ name: 'SSL Certificate', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : '0.9 0.2 0.2', detail, time: (sslLog.checked_at || '').substring(0, 16) });
   }
 
-  const alertY = 200;
+  // Uptime
+  if (uptimeLogs.length > 0) {
+    const upCount = uptimeLogs.filter((u: any) => u.status === 'up').length;
+    const pct = Math.round((upCount / uptimeLogs.length) * 100);
+    const st = pct >= 95 ? 'PASS' : pct >= 80 ? 'WARN' : 'FAIL';
+    checks.push({ name: 'Uptime', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : st === 'WARN' ? '1 0.7 0' : '0.9 0.2 0.2', detail: `${pct}% uptime (${uptimeLogs.length} checks)`, time: (uptimeLogs[0]?.checked_at || '').substring(0, 16) });
+  }
+
+  // DDoS
+  if (ddosLog) {
+    const protections = [ddosLog.has_cdn && 'CDN', ddosLog.has_waf && 'WAF', ddosLog.has_rate_limiting && 'Rate Limit'].filter(Boolean);
+    const st = protections.length >= 2 ? 'PASS' : protections.length >= 1 ? 'WARN' : 'FAIL';
+    checks.push({ name: 'DDoS Protection', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : st === 'WARN' ? '1 0.7 0' : '0.9 0.2 0.2', detail: protections.length > 0 ? protections.join(', ') : 'No protection', time: (ddosLog.checked_at || '').substring(0, 16) });
+  }
+
+  // Early Warning checks
+  const ewTypes = ['security_headers', 'email_security', 'open_ports', 'defacement', 'dns', 'blacklist'];
+  const ewLabels: Record<string, string> = {
+    security_headers: 'Security Headers', email_security: 'Email Security',
+    open_ports: 'Open Ports', defacement: 'Defacement', dns: 'DNS Integrity', blacklist: 'Blacklist',
+  };
+  for (const ct of ewTypes) {
+    const log = ewLogs.find(e => e.check_type === ct);
+    if (log) {
+      const st = log.risk_level === 'safe' ? 'PASS' : log.risk_level === 'warning' ? 'WARN' : 'FAIL';
+      let detail = log.risk_level.toUpperCase();
+      if (ct === 'security_headers') {
+        const sc = (log.details as any)?.score;
+        const grade = (log.details as any)?.grade;
+        detail = grade ? `Grade ${grade} (${sc}/10)` : detail;
+      } else if (ct === 'email_security') {
+        const es = (log.details as any)?.emailSecurity;
+        if (es) detail = [es.spfExists && 'SPF', es.dmarcExists && 'DMARC', es.dkimFound && 'DKIM'].filter(Boolean).join('+') || 'None configured';
+      } else if (ct === 'open_ports') {
+        const det = log.details as any;
+        detail = det?.totalOpen ? `${det.totalOpen} open, ${det.criticalPorts || 0} critical` : 'No exposed ports';
+      }
+      checks.push({ name: ewLabels[ct] || ct, status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : st === 'WARN' ? '1 0.7 0' : '0.9 0.2 0.2', detail, time: (log.checked_at || '').substring(0, 16) });
+    }
+  }
+
+  // Render checks table
+  const passCount = checks.filter(c => c.status === 'PASS').length;
+  const failCount = checks.filter(c => c.status === 'FAIL').length;
+  const warnCount = checks.filter(c => c.status === 'WARN').length;
+
+  // Summary boxes
+  p1.push(`0.12 0.15 0.2 rg`);
+  p1.push(`50 635 130 40 re f`, `200 635 130 40 re f`, `350 635 130 40 re f`);
+  p1.push(`BT /F2 18 Tf 0.2 0.9 0.4 rg 90 653 Td (${passCount}) Tj ET`);
+  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 80 640 Td (Checks Passed) Tj ET`);
+  p1.push(`BT /F2 18 Tf 0.9 0.4 0.2 rg 245 653 Td (${failCount}) Tj ET`);
+  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 232 640 Td (Checks Failed) Tj ET`);
+  p1.push(`BT /F2 18 Tf 1 0.8 0 rg 395 653 Td (${warnCount}) Tj ET`);
+  p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 387 640 Td (Warnings) Tj ET`);
+
+  // Table header
+  p1.push(`0.12 0.15 0.2 rg`, `50 588 480 24 re f`);
+  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 55 596 Td (CHECK TYPE) Tj ET`);
+  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 220 596 Td (STATUS) Tj ET`);
+  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 280 596 Td (DETAILS) Tj ET`);
+  p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 450 596 Td (TIMESTAMP) Tj ET`);
+
+  checks.slice(0, 10).forEach((c, i) => {
+    const y = 572 - i * 20;
+    if (i % 2 === 0) { p1.push(`0.1 0.13 0.17 rg`, `50 ${y - 4} 480 20 re f`); }
+    p1.push(`BT /F1 9 Tf 0.9 0.95 1 rg 55 ${y + 3} Td (${s(c.name)}) Tj ET`);
+    p1.push(`BT /F2 9 Tf ${c.color} rg 220 ${y + 3} Td (${c.status}) Tj ET`);
+    p1.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 280 ${y + 3} Td (${s(c.detail, 30)}) Tj ET`);
+    p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 450 ${y + 3} Td (${s(c.time?.replace('T', ' '), 16)}) Tj ET`);
+  });
+
+  // Alert summary at bottom
+  const alertY = 160;
   p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 ${alertY} Td (Alert Summary) Tj ET`);
-  p1.push(`BT /F1 10 Tf 0.9 0.95 1 rg 50 ${alertY - 18} Td (${alerts.length} total alerts in period. ${alerts.filter((a: any) => !a.is_read).length} unread.) Tj ET`);
+  const openAlerts = alerts.filter((a: any) => a.status === 'open').length;
+  const critAlerts = alerts.filter((a: any) => a.severity === 'critical').length;
+  p1.push(`BT /F1 10 Tf 0.9 0.95 1 rg 50 ${alertY - 18} Td (${alerts.length} total alerts | ${openAlerts} open | ${critAlerts} critical) Tj ET`);
 
-  p1.push(`0.15 0.19 0.25 rg`);
-  p1.push(`0 0 595 70 re f`);
-  p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 45 Td (Generated by Somalia Cyber Defense Observatory | ${now} | CONFIDENTIAL) Tj ET`);
-  p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 32 Td (This report contains sensitive security information. Handle with appropriate care.) Tj ET`);
+  // Tech stack summary
+  if (techFp) {
+    p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 ${alertY - 45} Td (Technology Stack) Tj ET`);
+    const techInfo = [techFp.web_server, techFp.cms, techFp.language, techFp.cdn].filter(Boolean).join(' | ') || 'Unknown';
+    p1.push(`BT /F1 9 Tf 0.7 0.8 0.9 rg 50 ${alertY - 60} Td (${s(techInfo, 80)}) Tj ET`);
+    if (techFp.outdated_count > 0) {
+      p1.push(`BT /F1 9 Tf 1 0.5 0 rg 50 ${alertY - 75} Td (${techFp.outdated_count} outdated components, ${techFp.vulnerabilities_count || 0} known vulnerabilities) Tj ET`);
+    }
+  }
 
+  // Footer
+  p1.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
+  p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Somalia Cyber Defense Observatory | ${now} | CONFIDENTIAL) Tj ET`);
+  p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 40 18 Td (This report contains sensitive security information. Handle with appropriate care.) Tj ET`);
   pages.push(p1);
 
-  // Page 2: Remediation Report (if enabled and there are issues)
-  if (includeRemediation && remediations.length > 0) {
+  // ── Page 2: Early Warning Details ──
+  if (sections.earlyWarning && ewLogs.length > 0) {
     const p2: string[] = [];
-    p2.push(`0.05 0.07 0.1 rg`);
-    p2.push(`0 790 595 52 re f`);
-    p2.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (REMEDIATION ACTION PLAN) Tj ET`);
-    p2.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - Step-by-Step Fix Instructions) Tj ET`);
+    p2.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+    p2.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (EARLY WARNING DETAILS) Tj ET`);
+    p2.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - All Security Check Results) Tj ET`);
+    p2.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
-    p2.push(`0.08 0.1 0.14 rg`);
-    p2.push(`30 100 535 680 re f`);
+    // Group by check_type
+    const byType: Record<string, any[]> = {};
+    for (const log of ewLogs) {
+      const ct = log.check_type;
+      if (!byType[ct]) byType[ct] = [];
+      byType[ct].push(log);
+    }
 
-    // Summary
+    let y = 760;
+    for (const [checkType, logs] of Object.entries(byType)) {
+      if (y < 120) break;
+      const label = ewLabels[checkType] || checkType;
+      const latest = logs[0]; // already sorted desc
+
+      // Section header
+      const rlColor = latest.risk_level === 'safe' ? '0.2 0.8 0.4' : latest.risk_level === 'warning' ? '1 0.7 0' : '0.9 0.2 0.2';
+      p2.push(`${rlColor} rg`, `50 ${y - 3} 6 12 re f`);
+      p2.push(`BT /F2 10 Tf 0.9 0.95 1 rg 62 ${y} Td (${s(label)}) Tj ET`);
+      p2.push(`BT /F1 8 Tf ${rlColor} rg 250 ${y} Td (${latest.risk_level.toUpperCase()}) Tj ET`);
+      p2.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 350 ${y} Td (${s((latest.checked_at || '').substring(0, 16).replace('T', ' '), 16)}) Tj ET`);
+      p2.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 460 ${y} Td (${logs.length} checks) Tj ET`);
+      y -= 16;
+
+      // Show detail for latest
+      const det = latest.details as any;
+      if (det) {
+        let detailStr = '';
+        if (checkType === 'security_headers') detailStr = `Grade: ${det.grade || '?'}, Score: ${det.score || 0}/10`;
+        else if (checkType === 'email_security') {
+          const es = det.emailSecurity;
+          detailStr = es ? `SPF: ${es.spfExists ? 'Yes' : 'No'}, DMARC: ${es.dmarcExists ? 'Yes' : 'No'}, DKIM: ${es.dkimFound ? 'Yes' : 'No'}` : '';
+        }
+        else if (checkType === 'open_ports') detailStr = `Open: ${det.totalOpen || 0}, Critical: ${det.criticalPorts || 0}`;
+        else if (checkType === 'defacement') detailStr = `Status: ${det.status || 'unknown'}`;
+        else if (checkType === 'dns') detailStr = det.records ? `A: ${(det.records.A || []).length}, NS: ${(det.records.NS || []).length} records` : '';
+        else if (checkType === 'blacklist') detailStr = det.blacklisted ? 'BLACKLISTED' : 'Clean';
+
+        if (detailStr) {
+          p2.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 62 ${y} Td (${s(detailStr, 85)}) Tj ET`);
+          y -= 14;
+        }
+      }
+      y -= 8;
+    }
+
+    p2.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
+    p2.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Early Warning Details | ${now} | Page 2) Tj ET`);
+    pages.push(p2);
+  }
+
+  // ── Page 3: Threat Intelligence ──
+  if (sections.threatIntel) {
+    const p3: string[] = [];
+    p3.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+    p3.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (THREAT INTELLIGENCE) Tj ET`);
+    p3.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - Phishing, Breaches, and Technology Risks) Tj ET`);
+    p3.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
+
+    let y = 760;
+
+    // Phishing Domains
+    p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Phishing / Lookalike Domains) Tj ET`);
+    y -= 18;
+    if (phishingDomains.length === 0) {
+      p3.push(`BT /F1 9 Tf 0.2 0.8 0.4 rg 50 ${y} Td (No lookalike domains detected.) Tj ET`);
+      y -= 18;
+    } else {
+      p3.push(`0.12 0.15 0.2 rg`, `50 ${y - 4} 480 18 re f`);
+      p3.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 55 ${y + 2} Td (LOOKALIKE DOMAIN) Tj ET`);
+      p3.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 230 ${y + 2} Td (ORIGINAL) Tj ET`);
+      p3.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 370 ${y + 2} Td (ACTIVE) Tj ET`);
+      p3.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 430 ${y + 2} Td (RISK) Tj ET`);
+      y -= 18;
+      for (const pd of phishingDomains.slice(0, 8)) {
+        if (y < 120) break;
+        const activeColor = pd.is_active ? '0.9 0.2 0.2' : '0.2 0.8 0.4';
+        p3.push(`BT /F1 8 Tf 0.9 0.95 1 rg 55 ${y} Td (${s(pd.lookalike_domain, 30)}) Tj ET`);
+        p3.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 230 ${y} Td (${s(pd.original_domain, 25)}) Tj ET`);
+        p3.push(`BT /F2 8 Tf ${activeColor} rg 370 ${y} Td (${pd.is_active ? 'YES' : 'NO'}) Tj ET`);
+        p3.push(`BT /F1 8 Tf 0.9 0.95 1 rg 430 ${y} Td (${s(pd.risk_level)}) Tj ET`);
+        y -= 14;
+      }
+      if (phishingDomains.length > 8) {
+        p3.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 50 ${y} Td (... and ${phishingDomains.length - 8} more) Tj ET`);
+        y -= 14;
+      }
+    }
+
+    y -= 15;
+
+    // Breach Summary
+    const breachLogs = tiLogs.filter(l => l.check_type === 'breach');
+    p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Data Breach Exposure) Tj ET`);
+    y -= 18;
+    if (breachLogs.length === 0) {
+      p3.push(`BT /F1 9 Tf 0.2 0.8 0.4 rg 50 ${y} Td (No known breach exposure detected.) Tj ET`);
+      y -= 18;
+    } else {
+      for (const bl of breachLogs.slice(0, 5)) {
+        if (y < 120) break;
+        const det = bl.details as any;
+        const bCount = det?.breaches?.length || 0;
+        const rlColor = bl.risk_level === 'critical' ? '0.9 0.2 0.2' : bl.risk_level === 'high' ? '1 0.5 0' : '0.2 0.8 0.4';
+        p3.push(`BT /F2 9 Tf ${rlColor} rg 50 ${y} Td (${s(bl.organization_name || 'Unknown', 40)}) Tj ET`);
+        p3.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 280 ${y} Td (${bCount} breaches found | Risk: ${bl.risk_level}) Tj ET`);
+        y -= 16;
+        // List breach names
+        for (const b of (det?.breaches || []).slice(0, 3)) {
+          if (y < 120) break;
+          p3.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 65 ${y} Td (- ${s(b.name || b.title, 70)} ${b.breachDate ? '(' + b.breachDate + ')' : ''}) Tj ET`);
+          y -= 13;
+        }
+        y -= 5;
+      }
+    }
+
+    y -= 15;
+
+    // Tech Stack Risks
+    if (techFp) {
+      p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Technology Stack Analysis) Tj ET`);
+      y -= 18;
+      const components = [
+        techFp.web_server && `Web Server: ${techFp.web_server}${techFp.web_server_version ? ' ' + techFp.web_server_version : ''}`,
+        techFp.cms && `CMS: ${techFp.cms}${techFp.cms_version ? ' ' + techFp.cms_version : ''}`,
+        techFp.language && `Language: ${techFp.language}${techFp.language_version ? ' ' + techFp.language_version : ''}`,
+        techFp.cdn && `CDN: ${techFp.cdn}`,
+      ].filter(Boolean);
+      for (const comp of components) {
+        p3.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 55 ${y} Td (${s(comp!, 80)}) Tj ET`);
+        y -= 14;
+      }
+      if (techFp.outdated_count > 0 || techFp.vulnerabilities_count > 0) {
+        p3.push(`BT /F2 8 Tf 1 0.5 0 rg 55 ${y} Td (${techFp.outdated_count} outdated | ${techFp.vulnerabilities_count} vulnerabilities) Tj ET`);
+        y -= 14;
+      }
+    }
+
+    p3.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
+    p3.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Threat Intelligence | ${now} | Page 3) Tj ET`);
+    pages.push(p3);
+  }
+
+  // ── Page 4: Alert History ──
+  if (sections.alertHistory && alerts.length > 0) {
+    const p4: string[] = [];
+    p4.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+    p4.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (ALERT HISTORY) Tj ET`);
+    p4.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - ${alerts.length} Alerts in Period) Tj ET`);
+    p4.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
+
+    // Severity breakdown
+    const sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const a of alerts) sevCounts[a.severity as keyof typeof sevCounts] = (sevCounts[a.severity as keyof typeof sevCounts] || 0) + 1;
+    const statusCounts = { open: 0, acknowledged: 0, closed: 0 };
+    for (const a of alerts) {
+      if (a.status === 'open') statusCounts.open++;
+      else if (a.status === 'acknowledged') statusCounts.acknowledged++;
+      else statusCounts.closed++;
+    }
+
+    let y = 760;
+    p4.push(`BT /F2 11 Tf 0 0.8 0.85 rg 50 ${y} Td (Severity Breakdown) Tj ET`);
+    y -= 18;
+    p4.push(`BT /F1 9 Tf 0.9 0.2 0.2 rg 50 ${y} Td (Critical: ${sevCounts.critical}) Tj ET`);
+    p4.push(`BT /F1 9 Tf 1 0.5 0 rg 180 ${y} Td (High: ${sevCounts.high}) Tj ET`);
+    p4.push(`BT /F1 9 Tf 1 0.8 0 rg 280 ${y} Td (Medium: ${sevCounts.medium}) Tj ET`);
+    p4.push(`BT /F1 9 Tf 0.4 0.6 1 rg 380 ${y} Td (Low: ${sevCounts.low}) Tj ET`);
+    y -= 18;
+    p4.push(`BT /F1 9 Tf 0.7 0.8 0.9 rg 50 ${y} Td (Open: ${statusCounts.open} | Acknowledged: ${statusCounts.acknowledged} | Closed: ${statusCounts.closed}) Tj ET`);
+    y -= 25;
+
+    // Alert table
+    p4.push(`0.12 0.15 0.2 rg`, `50 ${y - 4} 480 18 re f`);
+    p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 55 ${y + 2} Td (SEVERITY) Tj ET`);
+    p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 115 ${y + 2} Td (TITLE) Tj ET`);
+    p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 360 ${y + 2} Td (STATUS) Tj ET`);
+    p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 430 ${y + 2} Td (DATE) Tj ET`);
+    y -= 18;
+
+    for (const a of alerts.slice(0, 25)) {
+      if (y < 100) break;
+      const sevColor = a.severity === 'critical' ? '0.9 0.2 0.2' : a.severity === 'high' ? '1 0.5 0' : a.severity === 'medium' ? '1 0.8 0' : '0.4 0.6 1';
+      p4.push(`BT /F2 8 Tf ${sevColor} rg 55 ${y} Td (${(a.severity || '').toUpperCase()}) Tj ET`);
+      p4.push(`BT /F1 8 Tf 0.9 0.95 1 rg 115 ${y} Td (${s(a.title, 40)}) Tj ET`);
+      p4.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 360 ${y} Td (${s(a.status)}) Tj ET`);
+      p4.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 430 ${y} Td (${s((a.created_at || '').substring(0, 10))}) Tj ET`);
+      y -= 14;
+    }
+
+    p4.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
+    p4.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Alert History | ${now} | Page 4) Tj ET`);
+    pages.push(p4);
+  }
+
+  // ── Page 5: Remediation Plan ──
+  if (includeRemediation && remediations.length > 0) {
+    const p5: string[] = [];
+    p5.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+    p5.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (REMEDIATION ACTION PLAN) Tj ET`);
+    p5.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - Step-by-Step Fix Instructions) Tj ET`);
+    p5.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
+
     const critCount = remediations.filter(r => r.severity === 'critical').length;
     const highCount = remediations.filter(r => r.severity === 'high').length;
     const medCount = remediations.filter(r => r.severity === 'medium').length;
-    p2.push(`BT /F2 12 Tf 0.9 0.95 1 rg 50 760 Td (${remediations.length} Issues Found: ${critCount} Critical, ${highCount} High, ${medCount} Medium) Tj ET`);
+    p5.push(`BT /F2 12 Tf 0.9 0.95 1 rg 50 760 Td (${remediations.length} Issues: ${critCount} Critical, ${highCount} High, ${medCount} Medium) Tj ET`);
 
     let y = 735;
-    remediations.slice(0, 6).forEach((rem, idx) => {
-      if (y < 130) return;
+    for (const rem of remediations.slice(0, 8)) {
+      if (y < 100) break;
       const sevColor = rem.severity === 'critical' ? '0.9 0.2 0.2' : rem.severity === 'high' ? '1 0.5 0' : '1 0.8 0';
+      p5.push(`${sevColor} rg`, `50 ${y - 3} 6 12 re f`);
+      p5.push(`BT /F2 10 Tf 0.9 0.95 1 rg 62 ${y} Td (${s(rem.issue, 70)}) Tj ET`);
+      p5.push(`BT /F1 8 Tf ${sevColor} rg 62 ${y - 12} Td (${rem.severity.toUpperCase()} | Est: ${rem.estimatedTime}) Tj ET`);
+      y -= 26;
+      for (const step of rem.steps.slice(0, 3)) {
+        if (y < 100) break;
+        p5.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 72 ${y} Td (${s(step, 85)}) Tj ET`);
+        y -= 13;
+      }
+      y -= 8;
+    }
 
-      // Issue header with severity badge
-      p2.push(`${sevColor} rg`);
-      p2.push(`50 ${y - 5} 8 14 re f`);
-      const issueText = rem.issue.replace(/[()\\]/g, ' ').substring(0, 80);
-      p2.push(`BT /F2 10 Tf 0.9 0.95 1 rg 65 ${y} Td (${issueText}) Tj ET`);
-      p2.push(`BT /F1 8 Tf ${sevColor} rg 65 ${y - 12} Td (${rem.severity.toUpperCase()} | Est. time: ${rem.estimatedTime}) Tj ET`);
-      y -= 28;
-
-      // Steps (max 4 per remediation)
-      rem.steps.slice(0, 4).forEach((step, si) => {
-        if (y < 130) return;
-        const stepText = step.replace(/[()\\]/g, ' ').substring(0, 90);
-        p2.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 75 ${y} Td (${si + 1}. ${stepText}) Tj ET`);
-        y -= 14;
-      });
-      y -= 10;
-    });
-
-    // Footer
-    p2.push(`0.15 0.19 0.25 rg`);
-    p2.push(`0 0 595 70 re f`);
-    p2.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 45 Td (Remediation Plan | ${now} | Priority: Critical fixes first, then High, then Medium) Tj ET`);
-    p2.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 32 Td (Contact CERT-SO for assistance with remediation implementation.) Tj ET`);
-
-    pages.push(p2);
+    p5.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
+    p5.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Remediation Plan | ${now} | Priority: Critical > High > Medium) Tj ET`);
+    pages.push(p5);
   }
 
   // Build multi-page PDF
   const pageCount = pages.length;
   const fontObj1 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
   const fontObj2 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>`;
-
-  // Encode all streams
   const streams = pages.map(p => new TextEncoder().encode(p.join('\n')));
-
-  // Object numbering: 1=catalog, 2=pages, 3=font1, 4=font2, then per page: pageObj, streamObj
   const baseObj = 5;
   const pageObjIds = pages.map((_, i) => baseObj + i * 2);
   const streamObjIds = pages.map((_, i) => baseObj + i * 2 + 1);
@@ -401,51 +519,62 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { org_id, date_from, date_to, includeRemediation } = await req.json();
+    const { org_id, date_from, date_to, includeRemediation,
+      includeEarlyWarning = true, includeThreatIntel = true, includeAlertHistory = true } = await req.json();
     if (!org_id) return new Response(JSON.stringify({ error: 'org_id required' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
-    // Fetch all data in parallel
-    const [orgData, checksData, alertsData, historyData, sslData, ddosData, ewData, techData] = await Promise.all([
+    const dateFromFilter = date_from || '2020-01-01';
+    const dateToFilter = (date_to || new Date().toISOString().split('T')[0]) + 'T23:59:59';
+
+    // Fetch all data in parallel from real monitoring tables
+    const [orgData, alertsData, sslData, ddosData, ewData, techData, uptimeData, phishingData, tiData] = await Promise.all([
       supabase.from('organizations').select('*').eq('id', org_id).single(),
-      supabase.from('security_checks').select('*')
-        .gte('checked_at', date_from || '2020-01-01')
-        .lte('checked_at', (date_to || new Date().toISOString().split('T')[0]) + 'T23:59:59')
-        .order('checked_at', { ascending: false }).limit(100),
       supabase.from('alerts').select('*').eq('organization_id', org_id)
-        .gte('created_at', date_from || '2020-01-01')
-        .order('created_at', { ascending: false }),
-      supabase.from('risk_history').select('*').eq('organization_id', org_id)
-        .order('created_at', { ascending: true }).limit(30),
-      // Additional tables for remediation
+        .gte('created_at', dateFromFilter).lte('created_at', dateToFilter)
+        .order('created_at', { ascending: false }).limit(100),
       supabase.from('ssl_logs').select('*').eq('organization_id', org_id)
         .order('checked_at', { ascending: false }).limit(1),
       supabase.from('ddos_risk_logs').select('*').eq('organization_id', org_id)
         .order('checked_at', { ascending: false }).limit(1),
       supabase.from('early_warning_logs').select('*').eq('organization_id', org_id)
-        .order('checked_at', { ascending: false }).limit(50),
+        .gte('checked_at', dateFromFilter).lte('checked_at', dateToFilter)
+        .order('checked_at', { ascending: false }).limit(200),
       supabase.from('tech_fingerprints').select('*').eq('organization_id', org_id)
         .order('checked_at', { ascending: false }).limit(1),
+      supabase.from('uptime_logs').select('*').eq('organization_id', org_id)
+        .gte('checked_at', dateFromFilter).lte('checked_at', dateToFilter)
+        .order('checked_at', { ascending: false }).limit(500),
+      supabase.from('phishing_domains').select('*').eq('organization_id', org_id),
+      supabase.from('threat_intelligence_logs').select('*').eq('organization_id', org_id)
+        .order('checked_at', { ascending: false }).limit(50),
     ]);
 
-    // Build remediations from monitoring data
-    const remediations = includeRemediation ? buildRemediations({
-      sslLog: sslData.data?.[0] || null,
-      ddosLog: ddosData.data?.[0] || null,
-      ewLogs: ewData.data || [],
-      techFp: techData.data?.[0] || null,
-    }) : [];
+    const sslLog = sslData.data?.[0] || null;
+    const ddosLog = ddosData.data?.[0] || null;
+    const ewLogs = ewData.data || [];
+    const techFp = techData.data?.[0] || null;
+
+    const remediations = includeRemediation ? buildRemediations({ sslLog, ddosLog, ewLogs, techFp }) : [];
 
     const pdfBytes = generatePDF({
       org: orgData.data,
-      checks: checksData.data || [],
       alerts: alertsData.data || [],
-      history: historyData.data || [],
       dateFrom: date_from || 'all time',
       dateTo: date_to || new Date().toISOString().split('T')[0],
       remediations,
       includeRemediation: !!includeRemediation,
+      sslLog, ddosLog, ewLogs,
+      uptimeLogs: uptimeData.data || [],
+      techFp,
+      phishingDomains: phishingData.data || [],
+      tiLogs: tiData.data || [],
+      sections: {
+        earlyWarning: includeEarlyWarning,
+        threatIntel: includeThreatIntel,
+        alertHistory: includeAlertHistory,
+      },
     });
 
     let binary = '';

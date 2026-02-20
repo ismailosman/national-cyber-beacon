@@ -470,6 +470,22 @@ const ThreatIntelligence: React.FC = () => {
       const { data, error } = await invokeWithRetry('check-breaches', { domains, orgTechnologies: techNames });
       if (error) throw error;
       setBreachResults(data.results || []);
+
+      // Persist breach results to DB
+      for (const result of (data.results || [])) {
+        const matchedOrg = orgList.find(o => extractDomain(o.url) === result.domain);
+        if (matchedOrg) {
+          try {
+            await supabase.from('threat_intelligence_logs').insert({
+              organization_id: matchedOrg.id,
+              organization_name: result.organization,
+              check_type: 'breach',
+              risk_level: result.riskLevel || 'info',
+              details: { breaches: result.breaches || [], allRecentBreaches: (result.allRecentBreaches || []).slice(0, 10) },
+            });
+          } catch { /* best effort */ }
+        }
+      }
     } catch (err) {
       console.error('Breach check error:', err);
     }
@@ -743,13 +759,57 @@ const ThreatIntelligence: React.FC = () => {
     }
   }, [orgs, runFingerprinting, runSecurityHeadersCheck, runEmailDnsCheck, runBlacklistCheck, runDefacementCheck, runPortsCheck, fetchThreatFeed, runPhishingCheck, runBreachCheck, calculateScorecards, toast]);
 
-  // Run on mount
+  // Load persisted data from DB on mount
   const initialRun = useRef(false);
   useEffect(() => {
     if (!loading && orgs.length > 0 && !initialRun.current) {
       initialRun.current = true;
+
+      // Load phishing from DB
+      supabase.from('phishing_domains').select('*').then(({ data: phishingData }) => {
+        if (phishingData && phishingData.length > 0) {
+          const grouped: Record<string, PhishingResult> = {};
+          for (const pd of phishingData) {
+            const key = pd.organization_name;
+            if (!grouped[key]) {
+              grouped[key] = {
+                organization: pd.organization_name, organizationId: pd.organization_id || '',
+                domain: pd.original_domain, lookalikeDomains: [], totalFound: 0,
+                checkedAt: pd.last_checked,
+              };
+            }
+            grouped[key].lookalikeDomains.push({
+              domain: pd.lookalike_domain, exists: true, ip: pd.ip_address,
+              hasWebsite: pd.has_website, risk: pd.risk_level,
+            });
+            grouped[key].totalFound = grouped[key].lookalikeDomains.length;
+          }
+          setPhishingResults(Object.values(grouped));
+        }
+      });
+
+      // Load breaches from DB
+      supabase.from('threat_intelligence_logs').select('*').eq('check_type', 'breach')
+        .order('checked_at', { ascending: false }).limit(100).then(({ data: breachData }) => {
+          if (breachData && breachData.length > 0) {
+            const results: BreachResult[] = breachData.map(bl => {
+              const det = bl.details as any;
+              return {
+                domain: bl.organization_name || '', organization: bl.organization_name || '',
+                breachesFound: det?.breaches?.length || 0, breaches: det?.breaches || [],
+                allRecentBreaches: det?.allRecentBreaches || [], riskLevel: bl.risk_level,
+                checkedAt: bl.checked_at, note: '',
+              };
+            });
+            setBreachResults(results);
+          }
+        });
+
+      // Auto-fetch threat feed immediately
+      fetchThreatFeed();
+
       // Load existing data first, then run scan
-      calculateScorecards(orgs).then(() => runFullScan());
+      calculateScorecards(orgs);
     }
   }, [loading, orgs.length]);
 
@@ -1006,7 +1066,12 @@ const ThreatIntelligence: React.FC = () => {
           )}
 
           {!threatFeed && !scanning && !feedLoading && (
-            <p className="text-center text-muted-foreground py-8">No threat data yet. Click "Run Full Scan" or "Refresh Feed" to fetch.</p>
+            <div className="text-center py-8">
+              <p className="text-muted-foreground mb-3">Loading threat feed data...</p>
+              <Button size="sm" variant="outline" onClick={fetchThreatFeed} className="text-xs border-neon-cyan/30 text-neon-cyan">
+                <RefreshCw className="w-3 h-3 mr-1" /> Fetch Now
+              </Button>
+            </div>
           )}
 
           {threatFeed && (() => {
