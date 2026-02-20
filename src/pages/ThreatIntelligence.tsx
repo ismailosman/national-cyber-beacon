@@ -86,6 +86,15 @@ function scoreToGrade(pct: number): string {
   return 'F';
 }
 
+/* ─── Manual name aliases for org ↔ log linkage ─── */
+const NAME_ALIASES: Record<string, string> = {
+  'salama bank': 'salaam bank',
+  'office of the president': 'villa somalia',
+  'ministry of fisheries': 'ministry of fishery',
+  'mogadishu university': 'mogadishu university',   // future
+  'simad university': 'simad university',             // future
+};
+
 /* ─── Fuzzy name matching for org ↔ log linkage ─── */
 function normalizeOrgName(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
@@ -96,6 +105,14 @@ function orgNameMatches(logName: string, orgName: string): boolean {
   const b = normalizeOrgName(orgName);
   if (a === b) return true;
   if (a.startsWith(b) || b.startsWith(a)) return true;
+  // Check alias mapping
+  const alias = NAME_ALIASES[a];
+  if (alias) {
+    const aliasNorm = normalizeOrgName(alias);
+    if (aliasNorm === b || b.startsWith(aliasNorm) || aliasNorm.startsWith(b)) return true;
+    if (aliasNorm.length > 4 && b.includes(aliasNorm)) return true;
+    if (b.length > 4 && aliasNorm.includes(b)) return true;
+  }
   // "contains" for short names (>4 chars) inside longer ones
   if (a.length > 4 && b.includes(a)) return true;
   if (b.length > 4 && a.includes(b)) return true;
@@ -550,6 +567,17 @@ const ThreatIntelligence: React.FC = () => {
     const results: BreachResult[] = [];
     setBreachProgress({ current: 0, total: orgList.length, currentOrg: '' });
 
+    // Try to read HIBP API key from settings table
+    let apiKey = '';
+    try {
+      const { data: settingsData } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'hibp_api_key')
+        .single();
+      apiKey = settingsData?.value || '';
+    } catch { /* no settings table or no key */ }
+
     for (let i = 0; i < orgList.length; i++) {
       if (scanAbort.current) break;
       const org = orgList[i];
@@ -558,7 +586,7 @@ const ThreatIntelligence: React.FC = () => {
 
       try {
         const { data, error } = await invokeWithRetry('check-breaches', {
-          domain, organizationName: org.name,
+          domain, organizationName: org.name, apiKey,
         }, 2, 120000); // 2min timeout for email-pattern search
 
         if (data?.success) {
@@ -1668,14 +1696,18 @@ const ThreatIntelligence: React.FC = () => {
                   </TableHeader>
                   <TableBody>
                     {breachResults.map((r, i) => {
-                      const statusBadge = r.error ? (
-                        <Badge className="bg-muted/50 text-muted-foreground border-border" variant="outline">? Unknown</Badge>
+                      const statusBadge = r.error === 'NO_API_KEY' ? (
+                        <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30" variant="outline">🔑 No API Key</Badge>
+                      ) : r.error ? (
+                        <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30" variant="outline">⚠ Error</Badge>
                       ) : r.isClean === true ? (
                         <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30" variant="outline">✓ Clean</Badge>
                       ) : r.breachCount > 0 ? (
                         <Badge className="bg-red-500/20 text-red-400 border-red-500/30" variant="outline">⚠ {r.breachCount} Breach{r.breachCount > 1 ? 'es' : ''}</Badge>
+                      ) : !r.checkedAt ? (
+                        <Badge className="bg-muted/50 text-muted-foreground border-border" variant="outline">⏳ Not Checked</Badge>
                       ) : (
-                        <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30" variant="outline">ℹ Limited</Badge>
+                        <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30" variant="outline">✓ Clean</Badge>
                       );
 
                       return (

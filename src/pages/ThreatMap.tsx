@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, Loader2, Activity, RefreshCw, Zap, X } from 'lucide-react';
+import logoImg from '@/assets/logo.png';
 import { useLiveAttacks, LiveThreat, AttackType } from '@/hooks/useLiveAttacks';
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from 'recharts';
 
@@ -972,11 +973,14 @@ const ThreatMap: React.FC = () => {
 
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-2 flex-shrink-0">
-        <div>
+        <div className="flex items-center gap-3">
+          <img src={logoImg} alt="Somalia Cyber Defense" className="w-10 h-10 object-contain" />
+          <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Threat Map</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
             {isLoading ? 'Loading...' : `${totalAlerts} open alerts · ${mapPoints.length} hotspots · Live attacks`}
           </p>
+        </div>
         </div>
         {/* Severity counters */}
         <div className="flex gap-1.5 sm:gap-2 flex-wrap">
