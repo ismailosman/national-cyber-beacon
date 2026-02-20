@@ -177,15 +177,7 @@ export type Database = {
           updated_at?: string
           url?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "baselines_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations_monitored"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       breach_check_results: {
         Row: {
@@ -508,15 +500,7 @@ export type Database = {
           server_header?: string | null
           url?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "ddos_risk_logs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations_monitored"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       early_warning_logs: {
         Row: {
@@ -552,15 +536,7 @@ export type Database = {
           risk_level?: string
           url?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "early_warning_logs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations_monitored"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       incident_reports: {
         Row: {
@@ -1021,15 +997,7 @@ export type Database = {
           valid_from?: string | null
           valid_to?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "ssl_logs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations_monitored"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       tech_fingerprints: {
         Row: {
@@ -1199,15 +1167,7 @@ export type Database = {
           status_code?: number | null
           url?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "uptime_logs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations_monitored"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       user_roles: {
         Row: {
