@@ -143,6 +143,50 @@ export type Database = {
           },
         ]
       }
+      baselines: {
+        Row: {
+          content_hash: string | null
+          created_at: string
+          dns_records: Json | null
+          id: string
+          organization_id: string | null
+          page_size: number | null
+          page_title: string | null
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          content_hash?: string | null
+          created_at?: string
+          dns_records?: Json | null
+          id?: string
+          organization_id?: string | null
+          page_size?: number | null
+          page_title?: string | null
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          content_hash?: string | null
+          created_at?: string
+          dns_records?: Json | null
+          id?: string
+          organization_id?: string | null
+          page_size?: number | null
+          page_title?: string | null
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baselines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cert_advisories: {
         Row: {
           affected_sectors: Database["public"]["Enums"]["sector_type"][]
@@ -347,6 +391,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "ddos_risk_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      early_warning_logs: {
+        Row: {
+          check_type: string
+          checked_at: string
+          details: Json
+          id: string
+          is_acknowledged: boolean
+          organization_id: string | null
+          organization_name: string
+          risk_level: string
+          url: string
+        }
+        Insert: {
+          check_type: string
+          checked_at?: string
+          details?: Json
+          id?: string
+          is_acknowledged?: boolean
+          organization_id?: string | null
+          organization_name: string
+          risk_level?: string
+          url: string
+        }
+        Update: {
+          check_type?: string
+          checked_at?: string
+          details?: Json
+          id?: string
+          is_acknowledged?: boolean
+          organization_id?: string | null
+          organization_name?: string
+          risk_level?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "early_warning_logs_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations_monitored"
