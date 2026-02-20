@@ -1,44 +1,51 @@
 
 
-## Fix Breaches Tab: Load from Correct Table and Show Actual Domains
+## Fix Scorecards: Match Monitoring Data by Name Instead of ID
 
-### Problems Identified
+### Root Cause
 
-1. **Breach data loaded from wrong table on mount**: Lines 898-919 load cached breach data from `threat_intelligence_logs` (the OLD table) instead of `breach_check_results` (the new table). This old data stores the organization name in the `domain` field, which is why the Domain column shows "Dahabshiil Bank" instead of "dahabshilbank.com".
+The scorecards show all F/0% because of an **organization ID mismatch**:
 
-2. **`breach_check_results` table is empty**: Even though the upsert code exists (lines 559-578), results never got persisted successfully (possibly due to RLS or the `as any` cast). The table remains empty, so it always falls back to the old broken data.
+- The `organizations` table (36 orgs) has one set of UUIDs
+- The monitoring logs (`uptime_logs`, `ssl_logs`, `ddos_risk_logs`, `early_warning_logs`) were populated by the scheduled scan using IDs from the `organizations_monitored` table -- a completely different set of UUIDs
+- The `calculateScorecards` function (line 301-305) filters logs by `organization_id === org.id`, which matches zero rows since the IDs come from different tables
+- Result: every check category returns "pending" status, giving 0 points and grade F
 
-3. **HIBP API key not being used**: The edge function times out (takes ~23s per org with 15 email checks at 1.5s each), but the frontend `invokeWithRetry` call at line 507 has a 120s timeout which should be sufficient. The issue is likely that the previous scan ran before the HIBP key was added, so the cached results from `threat_intelligence_logs` still show "Free Breach Check" as the source. Once a fresh scan completes with the key present, results should show HIBP data.
+The database has real data: 969 uptime logs, 204 SSL logs, 119 DDoS logs, and 615 early warning logs -- but none of it is being matched.
 
-### Changes
+### Fix Strategy
+
+Change `calculateScorecards` to match monitoring data to organizations by **name** instead of by `organization_id`. This requires a fuzzy name-matching function since the names don't always match exactly:
+
+| Log Name | Organizations Table Name |
+|---|---|
+| Dahabshiil Bank | Dahabshiil International Bank |
+| Ministry of Communications | Ministry of Communications & Technology |
+| Ministry of Education | Ministry of Education (trailing space) |
+| Ministry of Health | Ministry of Health Somalia |
+| Premier Bank | Premier Bank Somalia |
+
+### Technical Changes
 
 **File: `src/pages/ThreatIntelligence.tsx`**
 
-1. **Fix mount data loading (lines 898-919)**: Replace the `threat_intelligence_logs` query with a `breach_check_results` query. Map the correct columns:
-   - `domain` from `breach_check_results.domain` (actual domain like "dahabshilbank.com")
-   - `organization` from `breach_check_results.organization_name`
-   - `breachCount` from `breach_check_results.breach_count`
-   - `breaches` from `breach_check_results.breaches` (JSONB)
-   - `breachedEmails` from `breach_check_results.breached_emails`
-   - `isClean` from `breach_check_results.is_clean`
-   - `source` from `breach_check_results.source`
-   - `checkedAt` from `breach_check_results.checked_at`
+1. **Add a name-matching helper function** that normalizes and compares organization names:
+   - Trim whitespace, lowercase
+   - Try exact match first
+   - Then try "starts with" match (handles "Premier Bank" matching "Premier Bank Somalia")
+   - Then try "contains" match for partial names
 
-2. **Fix upsert persistence**: Remove the `as any` cast from the `breach_check_results` table reference since it now exists in the types. Ensure the upsert works correctly with the UNIQUE constraint on `organization_id`.
+2. **Update `calculateScorecards` (lines 289-427)** to match logs by name instead of by `organization_id`:
+   - Replace `filter(u => u.organization_id === org.id)` with name-based matching
+   - Apply to all 5 data sources: uptime_logs, ssl_logs, ddos_risk_logs, early_warning_logs, tech_fingerprints
+   - Also match by `organization_id` as a secondary match (for any data created by new scans that use correct IDs)
 
-3. **Show all 36 organizations**: When breach results are displayed, show ALL organizations (even those not yet checked) so the user sees the full list with "Not checked" status for orgs without cached results.
+3. **Increase query limits**: Currently limited to 200-500 rows per table. With 36 orgs and multiple checks, increase limits to ensure all data is fetched (especially uptime_logs at 969 rows -- current 500 limit truncates data).
 
-### Technical Details
+### Expected Outcome
 
-```text
--- Current broken loading (lines 898-919):
-supabase.from('threat_intelligence_logs').select('*').eq('check_type', 'breach')
-  --> sets domain = orgName (WRONG)
-
--- Fixed loading:
-supabase.from('breach_check_results').select('*').order('checked_at', { ascending: false })
-  --> sets domain = row.domain (CORRECT: "dahabshilbank.com")
-```
-
-The edge function itself is correct and already uses the HIBP API key when present. The fix is purely on the frontend data loading side.
+After the fix:
+- Organizations with existing monitoring data will show accurate scores based on their uptime, SSL validity, DDoS protection, email security, headers, ports, defacement, DNS, blacklist, and software checks
+- Organizations without monitoring data will still show "pending" (correctly indicating no data yet)
+- Running a new "Full Scan" will store data with the correct `organization_id` from the `organizations` table, so future matches will work by both name and ID
 
