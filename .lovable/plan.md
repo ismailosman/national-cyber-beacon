@@ -1,38 +1,50 @@
 
 
-## Limit Live Alerts Sidebar to 10 and Ensure Realtime Updates
+## Filter Live Alerts to Last Hour and Fix False Defacement Alerts
+
+### Problem
+1. The Live Alerts sidebar shows all open alerts regardless of age -- it should only show alerts created within the last hour
+2. The Hormuud Telecom "Website Defaced" alert is a false positive -- the defacement detection is too aggressive with keyword matching (the word "anonymous" appearing in legitimate content like privacy policies)
+3. False positives should be prevented by requiring stronger evidence before creating defacement alerts
 
 ### Changes
 
-**File: `src/components/dashboard/AlertSidebar.tsx`**
+**1. AlertSidebar.tsx -- Filter to last 1 hour only**
 
-1. Change `.limit(20)` to `.limit(10)` on line 24 so only the 10 most recent open alerts are fetched
-2. The badge counter currently shows `alerts.length` (the fetched count). It will now show up to 10, matching the displayed list
-3. Add a realtime subscription via `useEffect` that listens for changes on the `alerts` table and invalidates the `alerts-sidebar` query key -- this way new alerts appear immediately without waiting for the 30-second polling interval
-4. Import `useQueryClient` from `@tanstack/react-query` and `useEffect` from React
+Update the query to add a time filter: `.gte('created_at', oneHourAgo)` where `oneHourAgo` is computed as `new Date(Date.now() - 60 * 60 * 1000).toISOString()`. This ensures only alerts from the past hour appear in Live Alerts.
 
-### Technical Details
+**2. Delete the false Hormuud Telecom alert**
 
-The realtime subscription will use the same pattern as Dashboard.tsx:
+Run a SQL query to close/delete the false defacement alert for Hormuud Telecom:
+```sql
+UPDATE alerts SET status = 'resolved' WHERE title = 'Website Defaced: Hormuud Telecom' AND status = 'open';
+```
+Also resolve the other false defacement alerts (Immigration and Custom Authority, SALAMA BANK, Ministry of Education, Ministry of Fisheries) since they were created by the same scan with the same logic issues.
+
+**3. ThreatIntelligence.tsx -- Strengthen defacement alert threshold**
+
+Currently the code creates an alert when `r.status === 'defaced'` (2+ indicators with a phrase match). Strengthen this to require 3+ indicators before generating a critical alert. For 2 indicators, log it as `review_needed` without creating an alert:
 
 ```typescript
-const queryClient = useQueryClient();
-
-useEffect(() => {
-  const channel = supabase.channel('alerts-sidebar-realtime')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
-      queryClient.invalidateQueries({ queryKey: ['alerts-sidebar'] });
-    }).subscribe();
-
-  return () => { channel.unsubscribe(); };
-}, [queryClient]);
+// Only alert on high-confidence defacement (3+ indicators)
+if (r.status === 'defaced' && r.indicatorCount >= 3) {
+  await generateAlert('critical', `Website Defaced: ${org.name}`, ...);
+}
 ```
 
-The `alerts` table is already in the `supabase_realtime` publication (added in the previous migration), so no database changes are needed.
+**4. check-defacement edge function -- Remove ambiguous phrases**
+
+Remove or refine phrases that commonly appear in legitimate content:
+- Remove `'we are anonymous'` -- the word "anonymous" appears in privacy policies, terms of service
+- Remove `'expect us'` -- too generic
+- Add context requirement: only match if the phrase appears alongside other defacement indicators
 
 ### Files Changed
 
 | File | Action |
 |---|---|
-| `src/components/dashboard/AlertSidebar.tsx` | Reduce limit to 10, add realtime subscription |
+| `src/components/dashboard/AlertSidebar.tsx` | Add `.gte('created_at', oneHourAgo)` filter to query |
+| `src/pages/ThreatIntelligence.tsx` | Require `indicatorCount >= 3` for defacement alerts |
+| `supabase/functions/check-defacement/index.ts` | Remove ambiguous phrases (`we are anonymous`, `expect us`) from keyword list |
+| Database | Resolve false Hormuud and other false defacement alerts |
 
