@@ -278,7 +278,7 @@ const ThreatIntelligence: React.FC = () => {
       }
 
       // Email
-      const emailEw = orgEw.find(e => e.check_type === 'dns');
+      const emailEw = orgEw.find(e => e.check_type === 'email_security') || orgEw.find(e => e.check_type === 'dns');
       if (emailEw) {
         const det = emailEw.details as any;
         const es = det?.emailSecurity;
@@ -461,7 +461,162 @@ const ThreatIntelligence: React.FC = () => {
     }
   }, []);
 
-  /* ─── Alert Generation ─── */
+  /* ─── Security Headers Check ─── */
+  const runSecurityHeadersCheck = useCallback(async (orgList: MonitoredOrg[]) => {
+    try {
+      const urls = orgList.map(o => o.url);
+      const { data, error } = await invokeWithRetry('check-security-headers', { urls }, 2, 30000);
+      if (error) { console.error('Headers check error:', error); return; }
+      for (const r of data?.results || []) {
+        const org = orgList.find(o => o.url === r.url);
+        if (!org) continue;
+        const riskLevel = r.score >= 5 ? 'safe' : r.score >= 3 ? 'warning' : 'critical';
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: r.url,
+          check_type: 'security_headers', risk_level: riskLevel,
+          details: { score: r.score, maxScore: r.maxScore, grade: r.grade, headers: r.headers },
+        });
+      }
+    } catch (err) { console.error('Headers check error:', err); }
+  }, []);
+
+  /* ─── Email + DNS Check ─── */
+  const runEmailDnsCheck = useCallback(async (orgList: MonitoredOrg[]) => {
+    try {
+      const domains = orgList.map(o => extractDomain(o.url));
+      const { data, error } = await invokeWithRetry('check-dns', { domains }, 2, 30000);
+      if (error) { console.error('DNS check error:', error); return; }
+
+      // Load existing baselines for comparison
+      const { data: baselines } = await supabase.from('baselines').select('*');
+      const baselineMap = new Map((baselines || []).map(b => [b.url, b]));
+
+      for (const r of data?.results || []) {
+        const org = orgList.find(o => extractDomain(o.url) === r.domain);
+        if (!org) continue;
+
+        // Save email_security log
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: org.url,
+          check_type: 'email_security', risk_level: r.emailSecurity?.spfExists ? 'safe' : 'warning',
+          details: { emailSecurity: r.emailSecurity },
+        });
+
+        // Save dns log with baseline comparison
+        const baseline = baselineMap.get(org.url);
+        let dnsRisk = 'safe';
+        if (baseline?.dns_records) {
+          const oldRecords = baseline.dns_records as any;
+          const nsChanged = JSON.stringify(oldRecords?.NS?.sort()) !== JSON.stringify(r.records?.NS?.sort());
+          const aChanged = JSON.stringify(oldRecords?.A?.sort()) !== JSON.stringify(r.records?.A?.sort());
+          if (nsChanged) dnsRisk = 'critical';
+          else if (aChanged) dnsRisk = 'warning';
+        }
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: org.url,
+          check_type: 'dns', risk_level: dnsRisk,
+          details: { records: r.records, emailSecurity: r.emailSecurity },
+        });
+
+        // Upsert baseline
+        await supabase.from('baselines').upsert({
+          organization_id: org.id, url: org.url,
+          dns_records: r.records,
+        }, { onConflict: 'url' });
+      }
+    } catch (err) { console.error('DNS check error:', err); }
+  }, []);
+
+  /* ─── Blacklist Check ─── */
+  const runBlacklistCheck = useCallback(async (orgList: MonitoredOrg[]) => {
+    try {
+      const urls = orgList.map(o => o.url);
+      const { data, error } = await invokeWithRetry('check-blacklist', { urls }, 2, 30000);
+      if (error) { console.error('Blacklist check error:', error); return; }
+      for (const r of data?.results || []) {
+        const org = orgList.find(o => o.url === r.url);
+        if (!org) continue;
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: r.url,
+          check_type: 'blacklist', risk_level: r.blacklisted ? 'critical' : 'safe',
+          details: { blacklisted: r.blacklisted, blacklistSources: r.blacklistSources, reputation: r.reputation },
+        });
+        if (r.blacklisted) {
+          await generateAlert('critical', `Blacklisted: ${org.name}`, `${org.url} found on blacklist: ${r.blacklistSources?.join(', ')}`);
+        }
+      }
+    } catch (err) { console.error('Blacklist check error:', err); }
+  }, []);
+
+  /* ─── Defacement Check ─── */
+  const runDefacementCheck = useCallback(async (orgList: MonitoredOrg[]) => {
+    try {
+      // Load baselines
+      const { data: baselines } = await supabase.from('baselines').select('*');
+      const baselineMap = new Map((baselines || []).map(b => [b.url, b]));
+
+      const urlItems = orgList.map(o => {
+        const bl = baselineMap.get(o.url);
+        return { url: o.url, baselineHash: bl?.content_hash || null, baselineTitle: bl?.page_title || null, baselineSize: bl?.page_size || null };
+      });
+
+      const { data, error } = await invokeWithRetry('check-defacement', { urls: urlItems }, 2, 30000);
+      if (error) { console.error('Defacement check error:', error); return; }
+      for (const r of data?.results || []) {
+        const org = orgList.find(o => o.url === r.url);
+        if (!org) continue;
+        const riskLevel = r.isDefaced ? 'critical' : r.hashChanged ? 'warning' : 'safe';
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: r.url,
+          check_type: 'defacement', risk_level: riskLevel,
+          details: { hashChanged: r.hashChanged, titleChanged: r.titleChanged, sizeAnomaly: r.sizeAnomaly, defacementKeywordsFound: r.defacementKeywordsFound, isDefaced: r.isDefaced, currentHash: r.currentHash, currentTitle: r.currentTitle, currentSize: r.currentSize },
+        });
+
+        // Upsert baseline
+        if (r.currentHash) {
+          await supabase.from('baselines').upsert({
+            organization_id: org.id, url: r.url,
+            content_hash: r.currentHash, page_title: r.currentTitle, page_size: r.currentSize,
+          }, { onConflict: 'url' });
+        }
+
+        if (r.isDefaced) {
+          await generateAlert('critical', `Website Defaced: ${org.name}`, `Defacement detected on ${r.url}. Keywords: ${r.defacementKeywordsFound?.join(', ')}`);
+        }
+      }
+    } catch (err) { console.error('Defacement check error:', err); }
+  }, []);
+
+  /* ─── Ports Check ─── */
+  const runPortsCheck = useCallback(async (orgList: MonitoredOrg[]) => {
+    try {
+      const hostnames = orgList.map(o => extractDomain(o.url));
+      const { data, error } = await invokeWithRetry('check-ports', { hostnames }, 2, 60000);
+      if (error) { console.error('Ports check error:', error); return; }
+      for (const r of data?.results || []) {
+        const org = orgList.find(o => extractDomain(o.url) === r.hostname);
+        if (!org) continue;
+        let riskLevel = 'safe';
+        if (!r.portsAvailable) {
+          riskLevel = 'safe'; // Can't check = give benefit of doubt
+        } else if (r.criticalPorts > 0) {
+          riskLevel = 'critical';
+        } else if (r.totalOpen > 0) {
+          riskLevel = 'warning';
+        }
+        await supabase.from('early_warning_logs').insert({
+          organization_id: org.id, organization_name: org.name, url: org.url,
+          check_type: 'open_ports', risk_level: riskLevel,
+          details: { openPorts: r.openPorts, totalOpen: r.totalOpen, criticalPorts: r.criticalPorts, portsAvailable: r.portsAvailable, note: r.note },
+        });
+        if (r.criticalPorts > 0) {
+          await generateAlert('high', `Critical Ports Exposed: ${org.name}`, `${r.criticalPorts} critical port(s) open on ${r.hostname}: ${r.openPorts.filter((p: any) => p.risk === 'critical').map((p: any) => p.service).join(', ')}`);
+        }
+      }
+    } catch (err) { console.error('Ports check error:', err); }
+  }, []);
+
+
   const generateAlert = async (severity: string, title: string, description: string) => {
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -489,13 +644,28 @@ const ThreatIntelligence: React.FC = () => {
         if (i + batchSize < orgs.length) await new Promise(r => setTimeout(r, 2000));
       }
 
-      // Phase 2: Global checks in parallel
+      // Phase 2: Early Warning Checks in batches of 5
+      for (let i = 0; i < orgs.length; i += batchSize) {
+        if (scanAbort.current) break;
+        const batch = orgs.slice(i, i + batchSize);
+        setScanProgress({ current: i, total: orgs.length, currentOrg: batch.map(o => o.name).join(', '), phase: 'Security Checks' });
+        await Promise.all([
+          runSecurityHeadersCheck(batch),
+          runEmailDnsCheck(batch),
+          runBlacklistCheck(batch),
+          runDefacementCheck(batch),
+          runPortsCheck(batch),
+        ]);
+        if (i + batchSize < orgs.length) await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // Phase 3: Global checks in parallel
       if (!scanAbort.current) {
         setScanProgress({ current: 0, total: 3, currentOrg: 'Global feeds', phase: 'Threat Intelligence' });
         await Promise.all([fetchThreatFeed(), runPhishingCheck(orgs), runBreachCheck(orgs)]);
       }
 
-      // Phase 3: Recalculate scorecards
+      // Phase 4: Recalculate scorecards
       if (!scanAbort.current) {
         setScanProgress({ current: orgs.length, total: orgs.length, currentOrg: 'Calculating scores', phase: 'Scoring' });
         await calculateScorecards(orgs);
@@ -509,7 +679,7 @@ const ThreatIntelligence: React.FC = () => {
       setScanning(false);
       setScanProgress(null);
     }
-  }, [orgs, runFingerprinting, fetchThreatFeed, runPhishingCheck, runBreachCheck, calculateScorecards, toast]);
+  }, [orgs, runFingerprinting, runSecurityHeadersCheck, runEmailDnsCheck, runBlacklistCheck, runDefacementCheck, runPortsCheck, fetchThreatFeed, runPhishingCheck, runBreachCheck, calculateScorecards, toast]);
 
   // Run on mount
   const initialRun = useRef(false);
