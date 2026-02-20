@@ -506,6 +506,33 @@ export type Database = {
         }
         Relationships: []
       }
+      organizations_monitored: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sector: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sector?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sector?: string
+          url?: string
+        }
+        Relationships: []
+      }
       risk_history: {
         Row: {
           created_at: string | null
@@ -622,6 +649,47 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      uptime_logs: {
+        Row: {
+          checked_at: string
+          id: string
+          organization_id: string | null
+          organization_name: string
+          response_time_ms: number | null
+          status: string
+          status_code: number | null
+          url: string
+        }
+        Insert: {
+          checked_at?: string
+          id?: string
+          organization_id?: string | null
+          organization_name: string
+          response_time_ms?: number | null
+          status?: string
+          status_code?: number | null
+          url: string
+        }
+        Update: {
+          checked_at?: string
+          id?: string
+          organization_id?: string | null
+          organization_name?: string
+          response_time_ms?: number | null
+          status?: string
+          status_code?: number | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "uptime_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
             referencedColumns: ["id"]
           },
         ]
