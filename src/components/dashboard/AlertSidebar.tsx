@@ -18,10 +18,12 @@ const AlertSidebar: React.FC = () => {
   const { data: alerts = [] } = useQuery({
     queryKey: ['alerts-sidebar'],
     queryFn: async () => {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from('alerts')
         .select('*, organizations(name)')
         .eq('status', 'open')
+        .gte('created_at', oneHourAgo)
         .order('created_at', { ascending: false })
         .limit(10);
       return data || [];
