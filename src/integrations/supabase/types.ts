@@ -442,6 +442,39 @@ export type Database = {
           },
         ]
       }
+      dast_scan_results: {
+        Row: {
+          dast_score: number
+          id: string
+          organization_id: string
+          organization_name: string
+          results: Json
+          scanned_at: string
+          summary: Json
+          url: string
+        }
+        Insert: {
+          dast_score?: number
+          id?: string
+          organization_id: string
+          organization_name?: string
+          results?: Json
+          scanned_at?: string
+          summary?: Json
+          url?: string
+        }
+        Update: {
+          dast_score?: number
+          id?: string
+          organization_id?: string
+          organization_name?: string
+          results?: Json
+          scanned_at?: string
+          summary?: Json
+          url?: string
+        }
+        Relationships: []
+      }
       ddos_risk_logs: {
         Row: {
           availability_flapping: boolean
