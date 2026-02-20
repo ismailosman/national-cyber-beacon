@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { CheckSquare, Building2, Play, ClipboardEdit, Clock, Loader2 } from 'lucide-react';
+import { CheckSquare, Building2, Play, ClipboardEdit, Clock, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +29,90 @@ const domainColors: Record<string, string> = {
   Data: 'text-yellow-400',
   IR: 'text-red-400',
   Backup: 'text-emerald-400',
+};
+
+/* ─── CIS Controls v8 Reference Data ─── */
+const CIS_CONTROL_DETAILS: Record<string, { requirements: string; recommendations: string[] }> = {
+  'CIS-1.1': {
+    requirements: 'Establish and maintain an accurate, detailed, and up-to-date inventory of all enterprise assets with the potential to store or process data. This includes end-user devices, network devices, IoT devices, and servers.',
+    recommendations: ['Use automated tools for asset discovery and inventory management', 'Update asset inventory at least weekly', 'Include cloud-hosted and remote assets', 'Track asset ownership and business criticality'],
+  },
+  'CIS-2.1': {
+    requirements: 'Establish and maintain a detailed inventory of all licensed and authorized software installed on enterprise assets. The software inventory must document the title, publisher, initial install/use date, and business purpose.',
+    recommendations: ['Deploy software inventory tools across all endpoints', 'Maintain an approved software whitelist', 'Audit software inventory monthly', 'Remove unauthorized or end-of-life software'],
+  },
+  'CIS-3.1': {
+    requirements: 'Establish and maintain a data management process that addresses data sensitivity, data owner, handling of data, data retention limits, and disposal requirements.',
+    recommendations: ['Classify all data by sensitivity level', 'Document data flows and storage locations', 'Implement data retention and disposal policies', 'Train staff on data handling procedures'],
+  },
+  'CIS-3.10': {
+    requirements: 'Encrypt data in transit using strong cryptographic protocols (TLS 1.2+). Enforce HTTPS for all web-facing services and ensure HSTS headers are deployed to prevent downgrade attacks.',
+    recommendations: ['Enable TLS 1.2 or higher on all services', 'Deploy HSTS headers with a minimum 1-year max-age', 'Disable older protocols (SSLv3, TLS 1.0/1.1)', 'Use automated certificate management for timely renewals'],
+  },
+  'CIS-4.1': {
+    requirements: 'Establish and maintain a secure configuration process for enterprise assets (end-user devices, servers, network devices) and software. Review and update documentation annually or when significant changes occur.',
+    recommendations: ['Use CIS Benchmarks or DISA STIGs as configuration baselines', 'Automate configuration deployment with infrastructure-as-code', 'Implement security headers (CSP, X-Frame-Options, X-Content-Type-Options)', 'Reduce attack surface by closing unnecessary ports'],
+  },
+  'CIS-4.2': {
+    requirements: 'Establish and maintain a secure configuration process for network infrastructure, including firewalls, routers, switches, and wireless access points. Implement network segmentation and traffic filtering.',
+    recommendations: ['Deploy a Web Application Firewall (WAF)', 'Use a CDN for DDoS mitigation', 'Enable rate limiting on all public endpoints', 'Segment networks to isolate critical assets'],
+  },
+  'CIS-5.1': {
+    requirements: 'Establish and maintain an inventory of all accounts managed in the enterprise including end-user, administrative, service, and application accounts.',
+    recommendations: ['Implement centralized identity management', 'Enforce MFA for all privileged accounts', 'Review account access quarterly', 'Disable dormant accounts after 45 days'],
+  },
+  'CIS-6.1': {
+    requirements: 'Establish and maintain an access management process for granting, reviewing, and revoking access to enterprise assets and software, based on the principle of least privilege.',
+    recommendations: ['Implement role-based access control (RBAC)', 'Conduct access reviews at least quarterly', 'Automate provisioning and deprovisioning', 'Enforce separation of duties for critical functions'],
+  },
+  'CIS-7.1': {
+    requirements: 'Establish and maintain a documented vulnerability management process for enterprise assets. Review and update documentation annually or when significant enterprise changes occur.',
+    recommendations: ['Run vulnerability scans at least monthly', 'Prioritize patching by CVSS score and exploitability', 'Remediate critical vulnerabilities within 14 days', 'Track and report on patch compliance metrics'],
+  },
+  'CIS-8.1': {
+    requirements: 'Establish and maintain an audit log management process that defines logging requirements, review cadence, and retention period for enterprise assets.',
+    recommendations: ['Enable audit logging on all critical systems', 'Centralize logs in a SIEM platform', 'Retain logs for at least 90 days online, 1 year archived', 'Review high-severity alerts within 24 hours'],
+  },
+  'CIS-9.1': {
+    requirements: 'Establish and maintain email and web browser protections to reduce the attack surface and manage human vulnerabilities.',
+    recommendations: ['Deploy email filtering with anti-phishing capabilities', 'Implement DMARC, DKIM, and SPF records', 'Use browser isolation for high-risk browsing', 'Block known malicious URLs at the gateway'],
+  },
+  'CIS-10.1': {
+    requirements: 'Establish and maintain anti-malware software on all enterprise assets, with automatic updates and real-time scanning capabilities.',
+    recommendations: ['Deploy EDR/XDR on all endpoints', 'Enable real-time protection and behavioral analysis', 'Ensure signature updates occur at least daily', 'Monitor and respond to malware alerts promptly'],
+  },
+  'CIS-11.1': {
+    requirements: 'Establish and maintain a data recovery process. Include backup scope, frequency, and restoration testing requirements.',
+    recommendations: ['Implement automated daily backups for critical data', 'Store backups in geographically separate locations', 'Test backup restoration at least quarterly', 'Encrypt all backup data at rest and in transit'],
+  },
+  'CIS-12.1': {
+    requirements: 'Ensure network infrastructure is kept up-to-date. Use supported and patched versions of all network operating systems, firmware, and components.',
+    recommendations: ['Maintain a current inventory of network device firmware versions', 'Subscribe to vendor security advisories', 'Apply critical patches within 30 days of release', 'Replace end-of-life hardware and software'],
+  },
+  'CIS-13.1': {
+    requirements: 'Centralize security event alerting across enterprise assets for log correlation and analysis. Integrate all critical monitoring systems into a unified alerting framework.',
+    recommendations: ['Integrate uptime, SSL, DDoS, and threat monitoring feeds', 'Define escalation procedures for critical alerts', 'Implement correlation rules to reduce false positives', 'Ensure 24/7 coverage for high-severity alerts'],
+  },
+  'CIS-14.1': {
+    requirements: 'Establish and maintain a security awareness and training program. Ensure all workforce members receive appropriate training upon hire and annually thereafter.',
+    recommendations: ['Conduct phishing simulations at least quarterly', 'Track training completion rates', 'Customize training for role-specific risks', 'Include incident reporting procedures in training'],
+  },
+  'CIS-15.1': {
+    requirements: "Establish and maintain an inventory of service providers that process, store, or transmit enterprise data. Assess each provider's security posture.",
+    recommendations: ['Maintain a vendor risk register', 'Require SOC 2 or ISO 27001 from critical vendors', 'Review vendor security annually', 'Include security requirements in all contracts'],
+  },
+  'CIS-16.1': {
+    requirements: 'Establish and maintain a secure application development process. Deploy security headers (CSP, X-Frame-Options, X-Content-Type-Options) on all web applications.',
+    recommendations: ['Implement Content Security Policy (CSP) headers', 'Deploy X-Frame-Options to prevent clickjacking', 'Set X-Content-Type-Options: nosniff', 'Conduct regular application security testing (SAST/DAST)'],
+  },
+  'CIS-16.11': {
+    requirements: 'Harden database servers to prevent unauthorized access. Ensure database ports (MySQL 3306, PostgreSQL 5432, MongoDB 27017) are not publicly exposed.',
+    recommendations: ['Block database ports from public internet access', 'Use encrypted connections for database access', 'Implement database-level access controls', 'Enable database audit logging'],
+  },
+  'CIS-17.1': {
+    requirements: 'Establish and maintain an incident response plan that addresses roles, responsibilities, communication requirements, and phases of incident response.',
+    recommendations: ['Document incident classification and escalation procedures', 'Conduct tabletop exercises at least bi-annually', 'Define communication templates for stakeholders', 'Review and update the plan after each incident'],
+  },
 };
 
 /* ─── Auto-assessable controls ─── */
@@ -195,6 +279,7 @@ const Compliance: React.FC = () => {
   const [domainFilter, setDomainFilter] = useState('all');
   const [assessing, setAssessing] = useState(false);
   const [assessProgress, setAssessProgress] = useState('');
+  const [expandedControl, setExpandedControl] = useState<string | null>(null);
 
   // Manual assessment modal
   const [manualCtrl, setManualCtrl] = useState<any>(null);
@@ -377,42 +462,92 @@ const Compliance: React.FC = () => {
                     const assessment = getAssessment(ctrl.control_code);
                     const st = assessment ? (statusStyles[assessment.status] || statusStyles.not_assessed) : statusStyles.not_assessed;
                     const isAuto = AUTO_CONTROLS.has(ctrl.control_code);
+                    const isExpanded = expandedControl === ctrl.control_code;
+                    const details = CIS_CONTROL_DETAILS[ctrl.control_code];
 
                     return (
-                      <tr key={ctrl.id} className="border-b border-border/50 hover:bg-accent/20 transition-colors">
-                        <td className="p-3 font-mono text-xs text-neon-cyan">{ctrl.control_code}</td>
-                        <td className="p-3">
-                          <p className="font-medium text-sm">{ctrl.title}</p>
-                        </td>
-                        <td className="p-3 hidden sm:table-cell">
-                          <span className={cn('text-xs font-medium', domainColors[ctrl.domain] || 'text-muted-foreground')}>{ctrl.domain}</span>
-                        </td>
-                        <td className="p-3 hidden md:table-cell">
-                          <Badge variant="outline" className={cn('text-[10px]', isAuto ? 'border-blue-500/30 text-blue-400' : 'border-border text-muted-foreground')}>
-                            {isAuto ? 'Auto' : 'Manual'}
-                          </Badge>
-                        </td>
-                        <td className="p-3 text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <span className={cn('text-xs px-2 py-1 rounded-full font-bold uppercase border', st.className)}>
-                              {st.icon} {st.label}
+                      <React.Fragment key={ctrl.id}>
+                        <tr
+                          className={cn(
+                            'border-b border-border/50 hover:bg-accent/20 transition-colors cursor-pointer',
+                            isExpanded && 'bg-accent/10 border-b-0'
+                          )}
+                          onClick={() => setExpandedControl(isExpanded ? null : ctrl.control_code)}
+                        >
+                          <td className="p-3 font-mono text-xs text-neon-cyan">
+                            <span className="flex items-center gap-1.5">
+                              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+                              {ctrl.control_code}
                             </span>
-                            {assessment ? (
-                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                                <Clock className="w-2.5 h-2.5" /> {timeAgo(assessment.assessed_at)}
+                          </td>
+                          <td className="p-3">
+                            <p className="font-medium text-sm">{ctrl.title}</p>
+                          </td>
+                          <td className="p-3 hidden sm:table-cell">
+                            <span className={cn('text-xs font-medium', domainColors[ctrl.domain] || 'text-muted-foreground')}>{ctrl.domain}</span>
+                          </td>
+                          <td className="p-3 hidden md:table-cell">
+                            <Badge variant="outline" className={cn('text-[10px]', isAuto ? 'border-blue-500/30 text-blue-400' : 'border-border text-muted-foreground')}>
+                              {isAuto ? 'Auto' : 'Manual'}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={cn('text-xs px-2 py-1 rounded-full font-bold uppercase border', st.className)}>
+                                {st.icon} {st.label}
                               </span>
-                            ) : !isAuto ? (
-                              <Button size="sm" variant="ghost" className="text-[10px] h-5 px-2 text-neon-cyan"
-                                onClick={() => { setManualCtrl(ctrl); setManualStatus('passing'); setManualEvidence(''); }}>
-                                <ClipboardEdit className="w-3 h-3 mr-1" /> Assess
-                              </Button>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="p-3 hidden lg:table-cell">
-                          <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{assessment?.evidence || '—'}</p>
-                        </td>
-                      </tr>
+                              {assessment ? (
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <Clock className="w-2.5 h-2.5" /> {timeAgo(assessment.assessed_at)}
+                                </span>
+                              ) : !isAuto ? (
+                                <Button size="sm" variant="ghost" className="text-[10px] h-5 px-2 text-neon-cyan"
+                                  onClick={(e) => { e.stopPropagation(); setManualCtrl(ctrl); setManualStatus('passing'); setManualEvidence(''); }}>
+                                  <ClipboardEdit className="w-3 h-3 mr-1" /> Assess
+                                </Button>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="p-3 hidden lg:table-cell">
+                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{assessment?.evidence || '—'}</p>
+                          </td>
+                        </tr>
+                        {isExpanded && details && (
+                          <tr className="border-b border-border/50 bg-accent/5">
+                            <td colSpan={6} className="p-0">
+                              <div className="px-5 py-4 space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-mono uppercase tracking-wider text-neon-cyan flex items-center gap-1.5">
+                                      <CheckSquare className="w-3.5 h-3.5" /> Requirements
+                                    </h4>
+                                    <p className="text-sm text-muted-foreground leading-relaxed">{details.requirements}</p>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-mono uppercase tracking-wider text-neon-cyan flex items-center gap-1.5">
+                                      <ClipboardEdit className="w-3.5 h-3.5" /> Recommendations
+                                    </h4>
+                                    <ul className="space-y-1.5">
+                                      {details.recommendations.map((rec, i) => (
+                                        <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                                          <span className="text-neon-cyan mt-1 text-xs">•</span>
+                                          {rec}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </div>
+                                {assessment?.evidence && (
+                                  <div className="pt-2 border-t border-border/30">
+                                    <h4 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">Assessment Evidence</h4>
+                                    <p className="text-xs text-muted-foreground">{assessment.evidence}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
