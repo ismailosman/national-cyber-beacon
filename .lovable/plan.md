@@ -1,147 +1,126 @@
 
 
-## Fix False Defacement Detection + Populate Threat Feed, Phishing & Breaches
+## Automated Compliance Assessment Engine + Threat Feed Data Fix
 
 ### Overview
 
-Two major fixes: (1) Overhaul defacement detection to eliminate false positives from legitimate websites like fisheries.gov.so and hormuud.com. (2) Ensure Threat Feed, Phishing, and Breaches tabs display real data from free public APIs.
+Two changes: (1) Make the Compliance page functional by adding client-side auto-assessment logic that queries existing monitoring tables and maps results to CIS Controls, plus manual assessment forms for controls that cannot be auto-assessed. (2) Fix the Threat Feed tab which already has a working edge function (`fetch-threat-intel`) but the data may not be reaching the UI due to edge function timeout or rendering issues.
 
 ---
 
-### Part A: Fix False Defacement Detection
+### Part 1: Compliance Auto-Assessment
 
-#### 1. Rewrite `check-defacement` Edge Function
+#### 1A. New Database Table: `compliance_assessments`
 
-**File:** `supabase/functions/check-defacement/index.ts`
+Create via migration:
 
-Replace the current aggressive detection logic with a multi-indicator confirmation system:
+```sql
+CREATE TABLE public.compliance_assessments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  control_code text NOT NULL,
+  framework text NOT NULL DEFAULT 'cis-v8',
+  status text NOT NULL DEFAULT 'not_assessed',
+  assessment_type text NOT NULL DEFAULT 'manual',
+  evidence text DEFAULT '',
+  evidence_data jsonb DEFAULT '{}'::jsonb,
+  assessed_by text DEFAULT 'System (Auto)',
+  assessed_at timestamptz DEFAULT now(),
+  expires_at timestamptz,
+  UNIQUE(organization_id, control_code, framework)
+);
 
-**Keyword changes:**
-- Replace the 16-keyword list (which includes generic terms like "anonymous", "security breach", "was here") with 18 high-confidence defacement phrases that require context (e.g., "hacked by ", "defaced by ", "you have been hacked")
-- Match keywords only in visible page content -- strip `<script>`, `<style>`, `<meta>` tags before keyword search
+ALTER TABLE public.compliance_assessments ENABLE ROW LEVEL SECURITY;
 
-**New HTML cleaning function:**
-- Strip scripts, styles, comments, CSRF tokens, nonces, timestamps (unix and ISO), session IDs, cache-busting query strings, inline event handlers
-- Normalize all whitespace before hashing
-- This prevents dynamic content from causing false hash changes
-
-**Multi-indicator confirmation (new):**
-Instead of `isDefaced = keywords.length > 0 || (hashChanged && (titleChanged || sizeAnomaly))`, use a scoring system with 5 indicators:
-1. Defacement phrase found in visible content (not in scripts/meta)
-2. Page title does NOT contain expected org-related text
-3. Page size under 5KB (defaced pages are tiny)
-4. Missing normal HTML structure (no `<nav>`, `<footer>`, `<header>`)
-5. Fewer than 3 internal links
-
-Result classification:
-- 0 indicators = "clean"
-- 1 indicator = "review_needed" (yellow, not red)
-- 2+ indicators = "defaced" (high confidence)
-
-**Calibration period (new):**
-Accept a `checkCount` parameter from the caller. On check 1 (no baseline), mark as "baseline_set". On checks 2-3, mark as "calibrating" and update baseline if structurally similar. From check 4+, start real comparison.
-
-**Return enhanced data:**
-```typescript
-{
-  url, currentHash, currentTitle, currentSize,
-  hashChanged, titleChanged, sizeAnomaly,
-  defacementKeywordsFound,
-  indicators: { phraseFound, titleMismatch, smallPage, missingStructure, fewLinks },
-  indicatorCount,
-  status: "clean" | "baseline_set" | "calibrating" | "review_needed" | "defaced" | "error",
-  internalLinkCount, hasNormalStructure,
-  checkedAt
-}
+-- RLS policies matching existing pattern
+CREATE POLICY "All authenticated read compliance_assessments" ON public.compliance_assessments FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Analyst full compliance_assessments" ON public.compliance_assessments FOR ALL TO authenticated USING (has_role(auth.uid(), 'Analyst'::app_role)) WITH CHECK (has_role(auth.uid(), 'Analyst'::app_role));
+CREATE POLICY "Auditor read compliance_assessments" ON public.compliance_assessments FOR SELECT TO authenticated USING (has_role(auth.uid(), 'Auditor'::app_role));
+CREATE POLICY "SuperAdmin full compliance_assessments" ON public.compliance_assessments FOR ALL TO authenticated USING (has_role(auth.uid(), 'SuperAdmin'::app_role)) WITH CHECK (has_role(auth.uid(), 'SuperAdmin'::app_role));
 ```
 
-#### 2. Update Frontend Defacement Handling
+#### 1B. Client-Side Auto-Assessment Logic
 
-**File:** `src/pages/ThreatIntelligence.tsx` -- `runDefacementCheck` function
+Add an `assessOrganization` function in `Compliance.tsx` that queries existing monitoring tables and maps results to the 20 CIS Controls. No new edge function needed -- all data already exists in:
+- `organizations_monitored` -- for CIS-1.1
+- `tech_fingerprints` -- for CIS-2.1, CIS-7.1, CIS-12.1
+- `uptime_logs`, `ssl_logs`, `ddos_risk_logs`, `early_warning_logs` -- for CIS-3.10, CIS-4.1, CIS-4.2, CIS-13.1, CIS-16.1, CIS-16.11
+- `early_warning_logs` (check_type = 'security_headers') -- for CIS-4.1, CIS-16.1
+- `early_warning_logs` (check_type = 'open_ports') -- for CIS-4.1, CIS-16.11
 
-- Track check count per org by querying existing `early_warning_logs` with `check_type = 'defacement'` before calling the edge function
-- Pass `checkCount` to the edge function for each URL
-- Map the new `status` field to risk levels:
-  - "clean" / "baseline_set" / "calibrating" = 'safe'
-  - "review_needed" = 'warning'
-  - "defaced" = 'critical'
-- Only generate alerts for "defaced" status (2+ indicators), not "review_needed"
-- Only update baseline on first 3 checks or when user manually resets
-- Store enhanced details (indicators, internalLinkCount, etc.) in the `early_warning_logs.details` column
+**Control-to-data mapping (12 auto/hybrid, 8 manual):**
 
-#### 3. UI Status Display
+| Control | Type | Data Source | Pass Condition |
+|---|---|---|---|
+| CIS-1.1 | Hybrid | organizations_monitored + tech_fingerprints | Org record exists with complete fields AND tech fingerprint exists |
+| CIS-2.1 | Auto | tech_fingerprints | Record exists with detected technologies |
+| CIS-3.10 | Auto | ssl_logs + early_warning_logs (security_headers) | Valid SSL AND HSTS header present |
+| CIS-4.1 | Hybrid | early_warning_logs (security_headers + open_ports) | 5+ headers AND no critical ports |
+| CIS-4.2 | Hybrid | ddos_risk_logs | Has CDN AND WAF AND rate limiting |
+| CIS-7.1 | Hybrid | tech_fingerprints + threat_intelligence_logs | Tech fingerprint exists, no critical vulns |
+| CIS-12.1 | Hybrid | tech_fingerprints + early_warning_logs | Software versions current, HSTS present |
+| CIS-13.1 | Auto | uptime_logs + ssl_logs + ddos_risk_logs + early_warning_logs | Org appears in ALL four monitoring tables |
+| CIS-16.1 | Hybrid | early_warning_logs (security_headers) | CSP + X-Frame-Options + X-Content-Type-Options present |
+| CIS-16.11 | Hybrid | early_warning_logs (open_ports) | No database ports (3306, 5432, 27017) exposed |
+| CIS-5.1 through CIS-18.1 | Manual | User input | Manual assessment form |
 
-In the scorecard detail modal, show defacement status with the new categories:
-- "Clean" (green check)
-- "Baseline Set" (blue)
-- "Calibrating" (blue)
-- "Content Changed" (yellow) -- hash changed but no defacement phrases
-- "Review Needed" (yellow) -- 1 indicator
-- "DEFACED" (red pulsing) -- 2+ indicators
-- "Check Failed" (gray)
+Each auto-assessment result is upserted into `compliance_assessments` with `assessment_type = 'auto'` and `expires_at` set to 6 hours from now.
 
-Add a "Details" expandable section showing which indicators triggered and the surrounding text context for any matched phrases.
+#### 1C. Manual Assessment Modal
 
-Add "Mark as Clean" and "Reset Baseline" actions per organization (upserts to `baselines` table and inserts a new `early_warning_logs` entry with 'safe' status).
+For manual-only controls, add an "Assess" button in the Status column. Clicking it opens a Dialog with:
+- Control name and description
+- Radio buttons: Passing, Partial, Failing, Not Applicable
+- Evidence textarea
+- Save button that upserts to `compliance_assessments` with `assessment_type = 'manual'` and `expires_at` = 90 days from now
+
+#### 1D. "Run Assessment" Button
+
+Add next to the org/framework selectors. When clicked:
+- Shows progress indicator
+- Queries all monitoring tables for the selected org
+- Runs auto-assessment for each auto/hybrid control
+- Upserts results to `compliance_assessments`
+- Updates score cards in real-time
+
+#### 1E. Score Calculation Update
+
+Replace the current `control_results`-based scoring with `compliance_assessments`-based scoring:
+- Score = (passing * 1.0 + partial * 0.5) / total_assessed * 100
+- Show grade: 90-100% Compliant (green), 70-89% Partially Compliant (yellow), 50-69% Needs Improvement (orange), below 50% Non-Compliant (red)
+- Show "X/20 controls assessed" denominator
+
+#### 1F. Status Badges
+
+Replace generic status with:
+- Passing (green) -- auto or manual pass
+- Partial (yellow) -- partially compliant
+- Failing (red) -- non-compliant
+- Not Assessed (gray) -- manual control, not yet assessed
+- Check Failed (orange) -- auto-assessment data source unavailable
+
+Show "Last assessed: X ago" and assessment type (Auto/Manual) as small badges.
 
 ---
 
-### Part B: Populate Threat Feed, Phishing & Breaches
+### Part 2: Fix Threat Feed Data
 
-#### 4. Fix `fetch-threat-intel` Edge Function
+The `fetch-threat-intel` edge function already exists and fetches all 4 sources (CISA KEV, URLhaus, NVD, Feodo Tracker). The frontend already calls it via `fetchThreatFeed()` and renders the data. The issue is likely the edge function timing out or returning errors silently.
 
-**File:** `supabase/functions/fetch-threat-intel/index.ts`
+#### 2A. Improve Error Visibility
 
-The function already exists and fetches CISA KEV, URLhaus, and NVD data. Issues to fix:
-- URLhaus endpoint uses POST which may be less reliable -- add fallback to GET endpoint `https://urlhaus-api.abuse.ch/v1/urls/recent/limit/50/`
-- Add Feodo Tracker as a third source: `https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.json`
-- Increase timeout to 20s
-- Return combined `threats` array alongside the existing separate fields for backward compatibility
+Update `fetchThreatFeed` in `ThreatIntelligence.tsx` to:
+- Log the raw response for debugging
+- Show a warning banner if the response is empty or partial
+- Show which sources succeeded/failed
 
-The frontend already renders CISA KEV, NVD CVEs, and URLhaus in the Threat Feed tab. Add Feodo Tracker rendering in a new card section.
+#### 2B. Add Source Status Indicators
 
-Add a "Feodo Tracker" filter option to the threat filter dropdown.
+At the top of the Threat Feed tab, show:
+- "Sources: CISA KEV (40 entries), NVD (15 entries), URLhaus (30 entries), Feodo (20 entries)"
+- Or "CISA KEV (failed), NVD (15 entries), ..." if a source failed
 
-#### 5. Fix `check-phishing-domains` Edge Function
-
-**File:** `supabase/functions/check-phishing-domains/index.ts`
-
-The function already exists and works. No changes needed to the edge function itself -- it already generates typosquat variations and checks DNS via Google DNS API.
-
-The frontend already calls it and renders results. The only issue is if the edge function times out for large org lists. Already handled by `invokeWithRetry` with 2 retries.
-
-No changes needed here -- this tab should already populate after a full scan.
-
-#### 6. Fix `check-breaches` Edge Function
-
-**File:** `supabase/functions/check-breaches/index.ts`
-
-The function already exists and fetches the HIBP breach catalog. Issues to fix:
-- Cross-reference breaches with detected tech stacks from `tech_fingerprints` table
-- The current matching logic is too broad (matches on partial domain substrings). Improve to match on exact service names
-- Add the `relevantServices` list for better matching
-- Split the response into "relevant breaches" (matching org tech) and "global breaches" for the two-section UI
-
-Update the Breaches tab UI to show two sections:
-- Section A: "Breaches Affecting Our Organizations" -- filtered by tech stack match
-- Section B: "Recent Global Breaches" -- all significant recent breaches
-
-#### 7. Frontend: Threat Feed Tab Enhancements
-
-- Add Feodo Tracker card rendering
-- Add "Feodo" to the filter dropdown
-- Add "Affects Our Organizations" filter option that checks CISA KEV vendor/product against `tech_fingerprints`
-- Add search box for filtering threats
-- Show "Last updated" timestamp from `threatFeed.fetchedAt`
-- Add "Refresh" button that calls `fetchThreatFeed()` independently
-
-#### 8. Frontend: Breaches Tab Enhancements
-
-- Add two-section layout (relevant + global)
-- Show "Recommend password reset" action for relevant breaches
-- Add note about HIBP API key for domain-specific searches
-- Show "Last updated" timestamp
-- Add yellow "Relevant" badge for breaches matching org tech
+No new edge functions needed -- the existing `fetch-threat-intel` already handles all 4 sources with proper error handling per source.
 
 ---
 
@@ -149,18 +128,16 @@ Update the Breaches tab UI to show two sections:
 
 | File | Action |
 |---|---|
-| `supabase/functions/check-defacement/index.ts` | Major rewrite -- multi-indicator detection, calibration, better cleaning |
-| `supabase/functions/fetch-threat-intel/index.ts` | Edit -- add Feodo Tracker, URLhaus fallback, better error handling |
-| `supabase/functions/check-breaches/index.ts` | Edit -- improve matching, add relevant/global split |
-| `src/pages/ThreatIntelligence.tsx` | Major edit -- defacement UI, threat feed enhancements, breaches two-section layout, mark as clean / reset baseline actions |
+| Migration SQL | Create `compliance_assessments` table with RLS |
+| `src/pages/Compliance.tsx` | Major rewrite -- add auto-assessment logic, manual assessment modal, Run Assessment button, updated scoring |
+| `src/pages/ThreatIntelligence.tsx` | Minor edit -- add source status indicators to Threat Feed tab, improve error logging |
 
 ### Technical Notes
 
-- No database schema changes needed -- all existing tables suffice
-- The `baselines` table already has `content_hash`, `page_title`, `page_size`, and `dns_records` columns
-- Defacement check count is derived from existing `early_warning_logs` entries (count where check_type = 'defacement' and organization_id = X)
-- The "Mark as Clean" action upserts baseline and inserts a new early_warning_logs entry
-- Edge functions are deployed automatically after code changes
-- All free APIs used require NO API keys
-- Existing working checks (Uptime, SSL, DDoS, Headers, DNS, Ports, Email, Blacklist) are not modified
+- No new edge functions needed for compliance -- all assessment queries run client-side against existing tables
+- The `compliance_assessments` table uses a unique constraint on (organization_id, control_code, framework) for upsert
+- Auto-assessments expire after 6 hours; manual after 90 days
+- The existing `control_results` table is NOT used (it's empty and maps to control UUIDs); the new `compliance_assessments` table maps to control codes (text) for simplicity
+- The threat feed edge function already works -- changes are UI-side error visibility improvements only
+- All 20 existing CIS Controls in the `controls` table will be mapped to the assessment logic
 
