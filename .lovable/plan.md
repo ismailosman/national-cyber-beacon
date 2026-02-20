@@ -1,17 +1,29 @@
 
-## Add Hargeisa as a Target Location on the Cyber Threat Map
+
+## Make /cyber-map the Main Landing Page with Turnstile CAPTCHA
 
 ### What Changes
 
-Add Hargeisa (Somalia's second-largest city, capital of Somaliland) as a target in the `SOMALIA_TARGETS` array in `src/hooks/useLiveAttacks.ts`. This means simulated attacks will now randomly target both Mogadishu-area locations and Hargeisa, making the threat map more representative.
+The root route (`/`) will show the Turnstile CAPTCHA verification gate, and once verified, display the Cyber Attack Map (instead of the current Landing page). The existing Landing page moves to `/public`.
 
-### Technical Details
+### Changes Required
 
-**File: `src/hooks/useLiveAttacks.ts`**
+**1. Update `src/pages/TurnstileGate.tsx`**
+- Change the post-verification component from `<Landing />` to `<CyberMap />`
+- Update the import accordingly
 
-Add several Hargeisa-area coordinate entries to the `SOMALIA_TARGETS` array (around lines 82-89). Hargeisa coordinates center around lat 9.56, lng 44.06. Multiple slightly varied points will be added (similar to how Mogadishu has several district-level entries) to create natural spread on the map:
+**2. Update `src/App.tsx`**
+- Route `/` to `<TurnstileGate />` (re-enable the CAPTCHA gate)
+- Keep `/public` pointing to `<Landing />` so the old landing page remains accessible
+- Keep `/cyber-map` pointing directly to `<CyberMap />` (no CAPTCHA, for internal links)
+- Import `TurnstileGate`
 
-- Hargeisa city center (~9.560, 44.064)
-- Hargeisa district variants (e.g., Ahmed Dhagah, Ga'an Libah, Mohamed Mooge)
+### Summary
 
-No other files need to change -- the threat generator already picks randomly from `SOMALIA_TARGETS`, so adding entries automatically distributes attacks across both cities.
+| Route | Before | After |
+|-------|--------|-------|
+| `/` | Landing page (no CAPTCHA) | Turnstile CAPTCHA then Cyber Map |
+| `/public` | Landing page | Landing page (unchanged) |
+| `/cyber-map` | Cyber Map (direct) | Cyber Map (direct, unchanged) |
+
+Only two files need minor edits. No backend or database changes required.
