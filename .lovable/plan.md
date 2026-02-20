@@ -1,29 +1,27 @@
 
 
-## Make /cyber-map the Main Landing Page with Turnstile CAPTCHA
+## Randomize Attack Sources for Visual Variety
 
-### What Changes
+### Problem
+Currently, the threat generator uses a day-seeded deterministic PRNG. This means the same sequence of source countries plays out identically every session. The user sees repetitive patterns rather than a dynamic, varied stream.
 
-The root route (`/`) will show the Turnstile CAPTCHA verification gate, and once verified, display the Cyber Attack Map (instead of the current Landing page). The existing Landing page moves to `/public`.
+### Solution
+Replace the deterministic source selection with true randomness (`Math.random()`) so that each attack comes from a genuinely different country. The attack names, types, severities, and targets will also be randomized for full variety. The deterministic daily count and threat IDs will be preserved.
 
-### Changes Required
+### Technical Details
 
-**1. Update `src/pages/TurnstileGate.tsx`**
-- Change the post-verification component from `<Landing />` to `<CyberMap />`
-- Update the import accordingly
+**File: `src/hooks/useLiveAttacks.ts`**
 
-**2. Update `src/App.tsx`**
-- Route `/` to `<TurnstileGate />` (re-enable the CAPTCHA gate)
-- Keep `/public` pointing to `<Landing />` so the old landing page remains accessible
-- Keep `/cyber-map` pointing directly to `<CyberMap />` (no CAPTCHA, for internal links)
-- Import `TurnstileGate`
+Update the `generateDayThreat` function (around line 128) to use `Math.random()` instead of the seeded PRNG for selecting:
+- Source country (from `WEIGHTED_SOURCES`)
+- Target location (from `SOMALIA_TARGETS`)
+- Attack type
+- Attack signature name
+- Severity
 
-### Summary
+This ensures every attack displayed is from a different, randomly chosen country rather than following a fixed daily sequence.
 
-| Route | Before | After |
-|-------|--------|-------|
-| `/` | Landing page (no CAPTCHA) | Turnstile CAPTCHA then Cyber Map |
-| `/public` | Landing page | Landing page (unchanged) |
-| `/cyber-map` | Cyber Map (direct) | Cyber Map (direct, unchanged) |
+The deterministic day seed will still be used for the daily total count (`BASE_COUNT`), keeping that stat consistent across sessions.
 
-Only two files need minor edits. No backend or database changes required.
+Only one file changes: `src/hooks/useLiveAttacks.ts`.
+
