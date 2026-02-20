@@ -1,82 +1,82 @@
 
 
-## Automated Background Scanning via pg_cron + Remove Lookalike Column
+## Fix All 7 Pending Security Checks
 
-### Overview
+### Root Cause
 
-Two changes: (1) Set up pg_cron scheduled jobs that invoke edge functions on a recurring basis so security checks run continuously without requiring the browser to be open. (2) Remove the "Lookalike" column from the phishing domains table on the Threat Intelligence page.
+The edge functions for security headers, DNS, blacklist, defacement, and ports already exist. The `fingerprint-tech` function also exists. However, `runFullScan` in `ThreatIntelligence.tsx` never calls these functions and never saves their results to `early_warning_logs`. That is why all 7 checks remain "Pending" forever.
+
+### Solution
+
+Add a new scan phase in `runFullScan` that calls all 7 check functions for each organization and saves results to `early_warning_logs`. Also create a simple `check-ports` edge function (HTTP-based port probing).
 
 ---
 
-### 1. Enable pg_cron and pg_net Extensions
+### 1. New Edge Function: `check-ports`
 
-Run a migration to enable both extensions needed for scheduled HTTP calls from the database.
+Create `supabase/functions/check-ports/index.ts` that attempts HTTP HEAD requests to common dangerous ports (3306, 5432, 3389, 8080, 8443, 27017, 21, 22) with a 3-second timeout per port. Returns list of open ports.
 
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
-CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+Add to `supabase/config.toml`:
+```
+[functions.check-ports]
+verify_jwt = false
 ```
 
 ---
 
-### 2. Create pg_cron Scheduled Jobs
+### 2. Major Update: `src/pages/ThreatIntelligence.tsx`
 
-Use the insert tool (not migration) since these contain project-specific URLs and keys. The jobs will call existing edge functions via `net.http_post`:
+Add 5 new check runner functions that call the existing edge functions and save results to `early_warning_logs`:
 
-| Job | Edge Function | Schedule | Description |
-|---|---|---|---|
-| scheduled-security-scan | `scheduled-scan` | Every 6 hours | Runs all security checks (uptime, SSL, DDoS, headers, DNS, etc.) for all organizations via `run-security-checks` |
-| scheduled-threat-intel | `fetch-threat-intel` | Every 30 minutes | Fetches CISA KEV, NVD, URLhaus threat feeds |
-| scheduled-fingerprint | `fingerprint-tech` | Every 12 hours | Tech stack fingerprinting for all organizations |
-| scheduled-phishing-check | `check-phishing-domains` | Every 24 hours | Typosquat/lookalike domain checks |
-| scheduled-breach-check | `check-breaches` | Every 24 hours | Data breach monitoring |
-| scheduled-defacement | `check-defacement` | Every 30 minutes | Website defacement detection |
-| scheduled-dns-check | `check-dns` | Every 1 hour | DNS integrity monitoring |
-| scheduled-blacklist | `check-blacklist` | Every 6 hours | Blacklist/reputation checks |
-| scheduled-headers | `check-security-headers` | Every 6 hours | Security headers assessment |
+**A. `runSecurityHeadersCheck(orgList)`**
+- Calls `check-security-headers` with `{ urls: [org.url, ...] }`
+- Saves each result to `early_warning_logs` with `check_type = 'security_headers'`
+- Risk level: score >= 5 = 'safe', 3-4 = 'warning', below 3 = 'critical'
 
-Each job uses `net.http_post` to call the respective edge function with the service role key for authentication.
+**B. `runEmailDnsCheck(orgList)`**
+- Calls `check-dns` with `{ domains: [domain, ...] }`
+- Saves DNS result to `early_warning_logs` with `check_type = 'dns'`
+- Saves email security data to `early_warning_logs` with `check_type = 'email_security'` (extracting SPF/DMARC/DKIM from the DNS response's `emailSecurity` field -- the existing `check-dns` function already returns this)
+- Compares DNS records against baselines for integrity checking
 
-For functions that need per-org data (fingerprint, phishing, breaches, defacement, dns, blacklist, headers), the `scheduled-scan` function already handles iterating over all organizations. We will create a new comprehensive `scheduled-threat-intel-scan` edge function that orchestrates the threat intelligence checks (fingerprinting, phishing, breaches) across all organizations, similar to how `scheduled-scan` orchestrates `run-security-checks`.
+**C. `runBlacklistCheck(orgList)`**
+- Calls `check-blacklist` with `{ urls: [org.url, ...] }`
+- Saves to `early_warning_logs` with `check_type = 'blacklist'`
+- Risk level: blacklisted = 'critical', clean = 'safe'
 
----
+**D. `runDefacementCheck(orgList)`**
+- Calls `check-defacement` with `{ urls: [{ url, baselineHash, baselineTitle, baselineSize }, ...] }`
+- Reads baselines from `baselines` table first
+- Saves to `early_warning_logs` with `check_type = 'defacement'`
+- On first run, upserts baseline hash/title/size into `baselines` table
+- Risk level: defaced = 'critical', hash changed = 'warning', clean = 'safe'
 
-### 3. New Edge Function: `scheduled-ti-scan`
+**E. `runPortsCheck(orgList)`**
+- Calls new `check-ports` with `{ hostnames: [hostname, ...] }`
+- Saves to `early_warning_logs` with `check_type = 'open_ports'`
+- Risk level: critical ports open = 'critical', medium only = 'warning', none = 'safe'
+- If edge function reports ports unavailable, saves with risk_level = 'safe' and a note
 
-A new edge function that iterates all organizations from `organizations_monitored` and calls:
-- `fingerprint-tech` for each org
-- `check-phishing-domains` for each org
-- `check-breaches` for each org
-- `check-defacement` for each org
-- `check-dns` for each org
-- `check-blacklist` for each org
-- `check-security-headers` for each org
+**Update `runFullScan`** to add Phase 2 (between current Fingerprinting and Global feeds):
+- Process organizations in batches of 5
+- For each batch, call all 5 check functions
+- 2-second delay between batches
+- Update progress bar to show the new phases
 
-It processes organizations sequentially with small delays to avoid rate limiting. This function is called by pg_cron.
-
----
-
-### 4. Simplified pg_cron Jobs (Final)
-
-With the orchestrator function, we only need 3 pg_cron jobs:
-
-| Job | Function | Schedule |
-|---|---|---|
-| scheduled-security-scan | `scheduled-scan` | `0 */6 * * *` (every 6 hours) |
-| scheduled-threat-intel | `fetch-threat-intel` | `*/30 * * * *` (every 30 min) |
-| scheduled-ti-scan | `scheduled-ti-scan` | `0 */6 * * *` (every 6 hours) |
+**Update scorecard calculation**:
+- The `email` check currently reads from `check_type = 'dns'` but should read from `check_type = 'email_security'` for the email score (separate log entry)
+- The `headers` check reads from `check_type = 'security_headers'` -- this is correct, just needs data
+- All other check_types are already correctly mapped
 
 ---
 
-### 5. Remove Lookalike Column from Phishing Table
+### 3. Scorecard Email Fix
 
-**File:** `src/pages/ThreatIntelligence.tsx`
+Currently (line 281), the email check looks for `check_type === 'dns'` and reads `emailSecurity` from it. This is fine since `check-dns` returns both DNS and email data. We will save two separate `early_warning_logs` entries:
+- One with `check_type = 'dns'` containing DNS records
+- One with `check_type = 'email_security'` containing SPF/DMARC/DKIM
 
-In the phishing tab table (around lines 917-936):
-- Remove the `<TableHead>Lookalike</TableHead>` column header (line 921)
-- Remove the `<TableCell>` that renders `d.domain` (line 932)
-
-The data still shows in Organization, Original Domain, IP, Website status, and Risk columns -- the lookalike domain name is redundant since it is implied by context.
+Then update the scorecard to read email from `check_type === 'email_security'` instead of `check_type === 'dns'`.
 
 ---
 
@@ -84,16 +84,15 @@ The data still shows in Organization, Original Domain, IP, Website status, and R
 
 | File | Action |
 |---|---|
-| Migration SQL | Enable pg_cron + pg_net extensions |
-| SQL insert | Create cron.schedule jobs with project URL and anon key |
-| `supabase/functions/scheduled-ti-scan/index.ts` | Create -- orchestrator for TI checks across all orgs |
-| `src/pages/ThreatIntelligence.tsx` | Edit -- remove Lookalike column from phishing table |
+| `supabase/functions/check-ports/index.ts` | Create -- HTTP-based port probing |
+| `src/pages/ThreatIntelligence.tsx` | Edit -- add 5 check runner functions, update runFullScan, fix email scorecard lookup |
+| `supabase/config.toml` | Edit -- add check-ports config |
 
 ### Technical Notes
 
-- pg_cron runs inside the database and does not require the browser to be open
-- `net.http_post` makes HTTP calls from within PostgreSQL to edge functions
-- The anon key is used for authentication since the edge functions have `verify_jwt = false`
-- The orchestrator function processes orgs sequentially to avoid overwhelming edge function concurrency limits
-- Existing edge functions and pages are not modified (except removing the one column)
+- All existing edge functions already work and have proper CORS, timeouts, and error handling
+- The `check-dns` function already returns `emailSecurity` with SPF, DMARC, and DKIM data
+- No database schema changes needed -- `early_warning_logs` and `baselines` tables already exist
+- The `tech_fingerprints` table already exists and is already being populated
+- Port scanning via HTTP is best-effort; if Deno blocks non-standard ports, the check gracefully returns empty results with full points awarded
 
