@@ -1,94 +1,50 @@
 
 
-## Fix Empty Tech Stack, Phishing, and Breaches Tabs
+## Fix: Uptime Monitor Should Use Main Organizations Table
 
-### Root Cause
+### Problem
+The Uptime Monitor page queries `organizations_monitored` (17 entries) instead of the main `organizations` table (36 entries). This is a separate, outdated table that was likely created before the main organizations registry was fully built out.
 
-The database tables that back these three tabs are **completely empty**:
-- `tech_fingerprints`: **0 rows**
-- `phishing_domains`: **0 rows**  
-- `threat_intelligence_logs` (breach data): **0 rows**
+### Solution
+Change `UptimeMonitor.tsx` to fetch from the `organizations` table instead of `organizations_monitored`. The field mapping is straightforward:
 
-These tables only get populated when a **Full Scan** is run. Since no Full Scan has completed successfully, the on-mount DB queries return nothing and the tabs show "No data yet."
+| `organizations_monitored` | `organizations` |
+|---|---|
+| `name` | `name` |
+| `url` | `domain` (needs `https://` prefix) |
+| `sector` | `sector` |
+| `is_active` | always active (all 36 are monitored) |
 
-The on-mount code (lines 762-813) correctly tries to load from the DB, but there is nothing to load. Additionally, the **Tech Stack tab has no DB loading at all** -- it only reads from in-memory state set during a scan.
+### Changes
 
-### Fix Strategy
+**File: `src/pages/UptimeMonitor.tsx`**
 
-Rather than requiring the user to run a slow Full Scan (which processes 17 organizations sequentially with timeouts), add **per-tab scan buttons** and **load tech fingerprints from DB on mount**.
+1. **`loadOrgs` function (line 93-101)**: Change query from `organizations_monitored` to `organizations`. Map `domain` to `url` (prepending `https://` if not already present). Remove the `is_active` filter since all orgs in the main table are monitored.
 
-### Changes to `src/pages/ThreatIntelligence.tsx`
+2. **`handleAddOrg` function (line 414-429)**: Change insert target from `organizations_monitored` to `organizations`, mapping `url` to `domain` and adding required fields (`risk_score`, `status`, `region`).
 
-**1. Load tech fingerprints from DB on mount (add to existing useEffect at line 762)**
+3. **`handleRemoveOrg` function (line 432-438)**: Remove this functionality or change to delete from `organizations`. Since the main org table shouldn't have entries casually removed from uptime monitoring, the delete button can be hidden or repurposed.
 
-Inside the `initialRun` useEffect, add a query to `tech_fingerprints` table and convert to the `TechFingerprint` format keyed by URL:
+4. **Sector filter list (line 55)**: Update to match the sectors used in the `organizations` table: `Government`, `Bank`, `Telecom`, `Health`, `Education`, `Other` (currently has `Banking` and `Healthcare` which don't match).
 
-```typescript
-supabase.from('tech_fingerprints').select('*').then(({ data: techData }) => {
-  if (techData && techData.length > 0) {
-    const fp: Record<string, TechFingerprint> = {};
-    for (const t of techData) {
-      fp[t.url] = {
-        url: t.url,
-        technologies: {
-          webServer: t.web_server, webServerVersion: t.web_server_version,
-          language: t.language, languageVersion: t.language_version,
-          cms: t.cms, cmsVersion: t.cms_version,
-          cdn: t.cdn, jsLibraries: t.js_libraries || [],
-        },
-        error: null, checkedAt: t.checked_at,
-      };
-    }
-    setTechFingerprints(fp);
-  }
-});
+5. **URL handling**: The `organizations` table stores bare domains (e.g., `hormuud.com`), while the ping function needs full URLs. The mapping will prepend `https://` to domains that don't already have a protocol prefix.
+
+6. **Uptime history matching**: The `loadUptimeHistory` function matches by `organization_id`. Since both the org records and new pings will use the same IDs from the `organizations` table, this will work correctly. Historical logs from the old `organizations_monitored` IDs won't match, but new pings going forward will.
+
+### Technical Details
+
+The key query change:
 ```
+// Before:
+supabase.from('organizations_monitored').select('*').eq('is_active', true).order('name')
 
-**2. Add per-tab "Run Scan" buttons for each empty tab**
-
-Replace the static "No data yet" messages with actionable scan buttons:
-
-- **Tech Stack tab**: Add a "Scan Tech Stack" button that calls `runFingerprinting(orgs)` directly
-- **Phishing tab**: Add a "Scan for Phishing Domains" button that calls `runPhishingCheck(orgs)` directly
-- **Breaches tab**: Add a "Check for Breaches" button that calls `runBreachCheck(orgs)` directly
-
-Each button will show a loading spinner while the scan runs, using individual loading states (`techScanning`, `phishingScanning`, `breachScanning`).
-
-**3. Add individual scanning states**
-
-Add three new state variables:
-```typescript
-const [techScanning, setTechScanning] = useState(false);
-const [phishingScanning, setPhishingScanning] = useState(false);
-const [breachScanning, setBreachScanning] = useState(false);
-```
-
-**4. Empty state UI per tab**
-
-Replace each "No data yet" paragraph with a styled card containing:
-- An icon and description explaining what the scan does
-- A prominent "Run Scan" button
-- A note saying "or use 'Run Full Scan' above to run all checks"
-
-For example, the Tech Stack empty state:
-```
-[Shield Icon]
-No Tech Stack Data Yet
-Scan all 17 organizations to detect web servers, CMS platforms, programming languages, and CDN providers.
-[Scan Tech Stack Button]
-Or click "Run Full Scan" above to run all checks at once.
+// After:
+supabase.from('organizations').select('id, name, domain, sector').order('name')
+// Then map: { id, name, url: domain.startsWith('http') ? domain : `https://${domain}`, sector }
 ```
 
 ### Files Changed
 
 | File | Action |
 |---|---|
-| `src/pages/ThreatIntelligence.tsx` | Add tech fingerprint DB loading on mount, add per-tab scan buttons with individual loading states, replace static empty messages with actionable UI |
-
-### Technical Notes
-
-- No database or edge function changes needed -- the scan functions and persistence logic already exist and work correctly
-- The per-tab scan buttons call the exact same functions used by Full Scan, just individually
-- Once any scan runs successfully, the data persists to the DB and will load automatically on subsequent visits
-- The `tech_fingerprints` table uses `onConflict: 'url'` for upsert, which assumes a unique constraint on `url` -- if this fails silently, data still won't persist, but the in-memory state will still display correctly for the current session
-
+| `src/pages/UptimeMonitor.tsx` | Switch data source from `organizations_monitored` to `organizations`, update sector filters, adjust add/remove handlers |
