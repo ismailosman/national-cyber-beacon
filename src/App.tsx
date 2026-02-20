@@ -72,7 +72,11 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<TurnstileGate />} />
+            <Route path="/" element={
+              window.location.hostname.includes('lovable.app') || window.location.hostname === 'localhost'
+                ? <CyberMap />
+                : <TurnstileGate />
+            } />
             <Route path="/public" element={<Landing />} />
             <Route path="/cyber-map" element={<CyberMap />} />
             <Route path="/threat-map" element={<ThreatMap />} />
