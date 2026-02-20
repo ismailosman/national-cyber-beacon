@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { CheckSquare, Building2, Play, ClipboardEdit, Clock, Loader2, ChevronDown, ChevronRight, BarChart3 } from 'lucide-react';
+import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -267,6 +268,63 @@ const Compliance: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {/* ITU Radar Chart */}
+          {selectedFrameworkKey === 'itu-nci' && (() => {
+            const pillarDomains = ['Legal', 'Technical', 'Organizational', 'Capacity', 'Cooperation'];
+            const radarData = pillarDomains.map(domain => {
+              const domainControls = controls.filter(c => c.domain === domain);
+              const domainAssessments = domainControls
+                .map(c => getAssessment(c.code))
+                .filter((a): a is any => !!a && a.status !== 'not_assessed' && a.status !== 'check_failed');
+              const passing = domainAssessments.filter(a => a.status === 'passing').length;
+              const partial = domainAssessments.filter(a => a.status === 'partial').length;
+              const total = domainAssessments.length;
+              const pillarScore = total > 0 ? Math.round(((passing + partial * 0.5) / total) * 100) : 0;
+              return { pillar: domain, score: pillarScore, fullMark: 100 };
+            });
+            const overallItu = radarData.length > 0
+              ? Math.round(radarData.reduce((sum, d) => sum + d.score, 0) / radarData.length)
+              : 0;
+
+            return (
+              <div className="glass-card rounded-xl border border-border p-6">
+                <div className="flex flex-col lg:flex-row items-center gap-6">
+                  <div className="w-full lg:w-1/2" style={{ height: 320 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
+                        <PolarGrid stroke="hsl(216 28% 20%)" />
+                        <PolarAngleAxis dataKey="pillar" tick={{ fill: 'hsl(210 40% 85%)', fontSize: 12, fontFamily: 'monospace' }} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: 'hsl(215 20% 55%)', fontSize: 10 }} axisLine={false} />
+                        <Radar name="Score" dataKey="score" stroke="hsl(186 100% 50%)" fill="hsl(186 100% 50%)" fillOpacity={0.2} strokeWidth={2} />
+                        <Tooltip contentStyle={{ background: 'hsl(216 28% 10%)', border: '1px solid hsl(216 28% 20%)', borderRadius: 8, color: 'hsl(210 40% 95%)' }} formatter={(v: number) => [`${v}%`, 'Score']} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="w-full lg:w-1/2 space-y-4">
+                    <div className="text-center lg:text-left">
+                      <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-1">Overall ITU Score</p>
+                      <p className={cn('text-5xl font-bold font-mono', overallItu >= 70 ? 'text-neon-green' : overallItu >= 40 ? 'text-neon-amber' : 'text-neon-red')}>
+                        {overallItu}%
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">National Cybersecurity Maturity</p>
+                    </div>
+                    <div className="space-y-2">
+                      {radarData.map(d => (
+                        <div key={d.pillar} className="flex items-center gap-3">
+                          <span className={cn('text-xs font-mono w-28', domainColors[d.pillar] || 'text-muted-foreground')}>{d.pillar}</span>
+                          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-neon-cyan transition-all" style={{ width: `${d.score}%` }} />
+                          </div>
+                          <span className="text-xs font-mono text-foreground w-10 text-right">{d.score}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Domain filter */}
           <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit flex-wrap">
