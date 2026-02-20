@@ -1,50 +1,84 @@
 
 
-## Filter Live Alerts to Last Hour and Fix False Defacement Alerts
+## Fix Breach Data to Be Per-Organization and Add Clickable Detail View
 
 ### Problem
-1. The Live Alerts sidebar shows all open alerts regardless of age -- it should only show alerts created within the last hour
-2. The Hormuud Telecom "Website Defaced" alert is a false positive -- the defacement detection is too aggressive with keyword matching (the word "anonymous" appearing in legitimate content like privacy policies)
-3. False positives should be prevented by requiring stronger evidence before creating defacement alerts
+
+The `check-breaches` edge function receives a single flat `orgTechnologies` array containing tech from ALL organizations combined. It then applies the same filter to every domain, resulting in identical breach results for every organization (as seen in the screenshot -- every org shows "TroyHuntMailchimpList" with the same 16,627 records).
+
+### Root Cause
+
+In `ThreatIntelligence.tsx` line 470-472, all tech fingerprints are merged into one flat array:
+```typescript
+const techNames = Object.values(techFingerprints)
+  .flatMap(t => [t.webServer, t.cms, t.language].filter(Boolean));
+```
+
+The edge function then uses this single combined set for ALL domains, so every org gets the same matches.
 
 ### Changes
 
-**1. AlertSidebar.tsx -- Filter to last 1 hour only**
+**1. Edge Function `check-breaches/index.ts` -- Accept per-org tech stacks**
 
-Update the query to add a time filter: `.gte('created_at', oneHourAgo)` where `oneHourAgo` is computed as `new Date(Date.now() - 60 * 60 * 1000).toISOString()`. This ensures only alerts from the past hour appear in Live Alerts.
-
-**2. Delete the false Hormuud Telecom alert**
-
-Run a SQL query to close/delete the false defacement alert for Hormuud Telecom:
-```sql
-UPDATE alerts SET status = 'resolved' WHERE title = 'Website Defaced: Hormuud Telecom' AND status = 'open';
-```
-Also resolve the other false defacement alerts (Immigration and Custom Authority, SALAMA BANK, Ministry of Education, Ministry of Fisheries) since they were created by the same scan with the same logic issues.
-
-**3. ThreatIntelligence.tsx -- Strengthen defacement alert threshold**
-
-Currently the code creates an alert when `r.status === 'defaced'` (2+ indicators with a phrase match). Strengthen this to require 3+ indicators before generating a critical alert. For 2 indicators, log it as `review_needed` without creating an alert:
+Modify the function to accept `domains` as objects with per-org technology lists:
 
 ```typescript
-// Only alert on high-confidence defacement (3+ indicators)
-if (r.status === 'defaced' && r.indicatorCount >= 3) {
-  await generateAlert('critical', `Website Defaced: ${org.name}`, ...);
-}
+// Input format changes to:
+// domains: [{ domain: "hormuud.com", name: "Hormuud", technologies: ["nginx", "php"] }]
 ```
 
-**4. check-defacement edge function -- Remove ambiguous phrases**
+For each domain, only match breaches against THAT org's specific technologies rather than a global set. Remove the overly broad `RELEVANT_SERVICES` list -- it causes false matches (e.g., "mailchimp" matching every org even if they don't use Mailchimp).
 
-Remove or refine phrases that commonly appear in legitimate content:
-- Remove `'we are anonymous'` -- the word "anonymous" appears in privacy policies, terms of service
-- Remove `'expect us'` -- too generic
-- Add context requirement: only match if the phrase appears alongside other defacement indicators
+Instead, only match against:
+- The org's detected tech stack (per-org `technologies` array)
+- The org's actual domain name (exact match against breach domains)
+
+This ensures Dahabshiil Bank only gets breaches relevant to nginx/PHP (if that's what they use), not breaches for services used by other orgs.
+
+**2. Frontend `ThreatIntelligence.tsx` -- Send per-org tech data**
+
+Update `runBreachCheck` to pass each organization's individual tech fingerprint instead of a merged global list:
+
+```typescript
+const domains = orgList.map(o => {
+  const tf = techFingerprints[o.url];
+  const techs = tf?.technologies 
+    ? [tf.technologies.webServer, tf.technologies.cms, tf.technologies.language, 
+       ...(tf.technologies.jsLibraries || [])].filter(Boolean) 
+    : [];
+  return { domain: extractDomain(o.url), name: o.name, technologies: techs };
+});
+```
+
+Remove the separate `orgTechnologies` parameter.
+
+**3. Frontend `ThreatIntelligence.tsx` -- Make organizations clickable with detail view**
+
+Add a click handler on each organization row in the "Breaches Affecting Our Organizations" table. When clicked, show a Dialog/Sheet with:
+- Organization name and domain
+- Full list of matched breaches with descriptions
+- Data classes exposed
+- Breach dates and record counts
+- Risk level assessment
+
+Use a state variable `selectedBreachOrg` to track which org is selected, and render a Dialog showing that org's full breach details.
+
+**4. API Recommendation Note**
+
+Add a note in the UI recommending the HIBP (Have I Been Pwned) enterprise API key for domain-specific email breach lookups. The free `/api/v3/breaches` endpoint only returns the global breach catalog -- it cannot search if a specific domain's emails were in a breach. The paid HIBP API (`hibp-api-key` header with `/api/v3/breacheddomain/{domain}`) can search by domain directly. This is already partially noted in the existing UI but will be made more prominent.
 
 ### Files Changed
 
 | File | Action |
 |---|---|
-| `src/components/dashboard/AlertSidebar.tsx` | Add `.gte('created_at', oneHourAgo)` filter to query |
-| `src/pages/ThreatIntelligence.tsx` | Require `indicatorCount >= 3` for defacement alerts |
-| `supabase/functions/check-defacement/index.ts` | Remove ambiguous phrases (`we are anonymous`, `expect us`) from keyword list |
-| Database | Resolve false Hormuud and other false defacement alerts |
+| `supabase/functions/check-breaches/index.ts` | Accept per-org tech arrays, remove global RELEVANT_SERVICES matching, match only org-specific tech + domain |
+| `src/pages/ThreatIntelligence.tsx` | Send per-org tech data, add clickable org rows with breach detail dialog |
+
+### Result
+
+After this change:
+- Each organization will only show breaches relevant to its own detected tech stack and domain
+- Organizations without matching tech will show zero breaches (accurate)
+- Clicking an organization row opens a detailed breach view
+- The UI will recommend HIBP API key for deeper domain-specific breach searches
 
