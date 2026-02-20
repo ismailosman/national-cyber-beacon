@@ -129,7 +129,9 @@ serve(async (req) => {
         low: allFindings.filter((f: any) => f.severity === "low" && f.status === "fail").length,
         passed: allFindings.filter((f: any) => f.status === "pass").length,
       };
-      const dastScore = Math.max(0, 100 - (summary.critical * 25 + summary.high * 15 + summary.medium * 5 + summary.low * 2));
+      const weightedFail = summary.critical * 5 + summary.high * 3 + summary.medium * 2 + summary.low * 1;
+      const weightedPass = summary.passed * 1;
+      const dastScore = (weightedPass + weightedFail) === 0 ? 100 : Math.round(100 * weightedPass / (weightedPass + weightedFail));
 
       // Identify NEW critical/high findings and create alerts
       const newCriticalFindings = allFindings.filter(
