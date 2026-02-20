@@ -1,47 +1,38 @@
 
 
-## Ensure Dashboard Data Updates in Realtime
-
-### Problem
-
-The Dashboard has realtime subscriptions for `organizations`, `alerts`, and `threat_events`, but **none of these tables are in the Supabase realtime publication**. This means the subscriptions silently do nothing -- data only refreshes on page reload. Additionally, the `risk_history` table (which powers the 30-Day Risk Trend chart) has no realtime subscription at all.
-
-The actual data in the database is accurate and matches what's shown:
-- 36 organizations
-- 58 open alerts (40 critical, 12 high, 6 medium, 0 low)
-- Risk trend data across 9 days
+## Limit Live Alerts Sidebar to 10 and Ensure Realtime Updates
 
 ### Changes
 
-**1. Database Migration: Enable realtime for dashboard tables**
+**File: `src/components/dashboard/AlertSidebar.tsx`**
 
-Add `organizations`, `alerts`, `threat_events`, and `risk_history` to the `supabase_realtime` publication so that postgres_changes events are actually emitted.
+1. Change `.limit(20)` to `.limit(10)` on line 24 so only the 10 most recent open alerts are fetched
+2. The badge counter currently shows `alerts.length` (the fetched count). It will now show up to 10, matching the displayed list
+3. Add a realtime subscription via `useEffect` that listens for changes on the `alerts` table and invalidates the `alerts-sidebar` query key -- this way new alerts appear immediately without waiting for the 30-second polling interval
+4. Import `useQueryClient` from `@tanstack/react-query` and `useEffect` from React
 
-```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE public.organizations;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.threat_events;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.risk_history;
-```
+### Technical Details
 
-**2. File: `src/pages/Dashboard.tsx` -- Add risk_history realtime subscription**
-
-Add a fourth realtime channel that listens for changes on `risk_history` and invalidates the `score-history-all` query key. This ensures the 30-Day National Risk Trend chart updates live when new scan results are recorded.
+The realtime subscription will use the same pattern as Dashboard.tsx:
 
 ```typescript
-const ch4 = supabase.channel('risk-history-realtime')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'risk_history' }, () => {
-    queryClient.invalidateQueries({ queryKey: ['score-history-all'] });
-  }).subscribe();
+const queryClient = useQueryClient();
+
+useEffect(() => {
+  const channel = supabase.channel('alerts-sidebar-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-sidebar'] });
+    }).subscribe();
+
+  return () => { channel.unsubscribe(); };
+}, [queryClient]);
 ```
 
-Update the cleanup to also unsubscribe `ch4`.
+The `alerts` table is already in the `supabase_realtime` publication (added in the previous migration), so no database changes are needed.
 
-### Summary
+### Files Changed
 
-| Change | Purpose |
+| File | Action |
 |---|---|
-| DB migration: add 4 tables to realtime publication | Enable postgres_changes events for dashboard data |
-| Dashboard.tsx: add `risk_history` channel + cleanup | Live-update the 30-Day Risk Trend chart |
+| `src/components/dashboard/AlertSidebar.tsx` | Reduce limit to 10, add realtime subscription |
 
-After this, all dashboard cards (National Score, Monitored Orgs, Open Alerts, At Risk, severity breakdown) and the trend chart will update in realtime whenever scans complete or alerts are created/resolved.
