@@ -10,11 +10,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Crosshair, RefreshCw, Shield, Globe, Wrench, Fish, Database,
-  AlertTriangle, Check, X, ExternalLink, Search, Trophy, ChevronDown
+  AlertTriangle, Check, X, ExternalLink, Search, Trophy, RotateCw, Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -35,7 +36,7 @@ interface TechFingerprint {
     cms: string | null; cmsVersion: string | null;
     cdn: string | null; jsLibraries: string[];
   } | null;
-  error: string | null; checkedAt: string;
+  error: string | null; errorMessage?: string; success?: boolean; checkedAt: string;
 }
 
 interface PhishingResult {
@@ -50,22 +51,29 @@ interface BreachResult {
   checkedAt: string; note: string;
 }
 
+type CheckStatus = 'pending' | 'completed' | 'failed';
+interface BreakdownItem { points: number; max: number; status: CheckStatus; error?: string }
 interface OrgScorecard {
-  org: MonitoredOrg; score: number; grade: string;
-  breakdown: { uptime: number; ssl: number; ddos: number; email: number; headers: number; ports: number; defacement: number; dns: number; blacklist: number; software: number };
+  org: MonitoredOrg;
+  score: number; maxPossible: number; percentage: number;
+  grade: string; completedChecks: number; totalChecks: number; confidence: number;
+  breakdown: Record<string, BreakdownItem>;
+  lastUpdated: string | null;
 }
+
+interface ScanProgress { current: number; total: number; currentOrg: string; phase: string }
 
 /* ─── Helpers ─── */
 function extractDomain(url: string): string {
   try { return new URL(url).hostname; } catch { return url; }
 }
 
-function scoreToGrade(score: number): string {
-  if (score >= 90) return 'A+';
-  if (score >= 80) return 'A';
-  if (score >= 70) return 'B';
-  if (score >= 60) return 'C';
-  if (score >= 40) return 'D';
+function scoreToGrade(pct: number): string {
+  if (pct >= 90) return 'A+';
+  if (pct >= 80) return 'A';
+  if (pct >= 70) return 'B';
+  if (pct >= 60) return 'C';
+  if (pct >= 40) return 'D';
   return 'F';
 }
 
@@ -95,13 +103,62 @@ function severityBadge(severity: string) {
   return colors[severity] || colors.low;
 }
 
+function timeAgo(ts: string | null): string {
+  if (!ts) return 'Never';
+  const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+/* ─── invoke with retry ─── */
+async function invokeWithRetry(
+  fnName: string, body: any, maxRetries = 2, timeoutMs = 15000
+): Promise<{ data: any; error: any; errorType?: string }> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const { data, error } = await supabase.functions.invoke(fnName, {
+        body,
+        // @ts-ignore - AbortSignal support
+      });
+      clearTimeout(timer);
+      if (error) {
+        if (attempt < maxRetries) { await new Promise(r => setTimeout(r, 5000)); continue; }
+        return { data: null, error, errorType: 'EDGE_FUNCTION_ERROR' };
+      }
+      return { data, error: null };
+    } catch (err: any) {
+      if (attempt < maxRetries) { await new Promise(r => setTimeout(r, 5000)); continue; }
+      const msg = err?.message || '';
+      let errorType = 'UNKNOWN';
+      if (msg.includes('abort') || msg.includes('timeout')) errorType = 'CONNECTION_TIMEOUT';
+      else if (msg.includes('429')) errorType = 'RATE_LIMITED';
+      return { data: null, error: err, errorType };
+    }
+  }
+  return { data: null, error: new Error('Max retries reached'), errorType: 'UNKNOWN' };
+}
+
+async function logCheckError(orgId: string | null, orgName: string, url: string, checkType: string, errorType: string, errorMessage: string, retryCount: number) {
+  try {
+    await supabase.from('check_errors' as any).insert({
+      organization_id: orgId, organization_name: orgName, url, check_type: checkType,
+      error_type: errorType, error_message: errorMessage.slice(0, 500), retry_count: retryCount,
+    });
+  } catch { /* best effort */ }
+}
+
 /* ─── Circular Gauge ─── */
-const ScoreGauge: React.FC<{ score: number; size?: number }> = ({ score, size = 100 }) => {
-  const grade = scoreToGrade(score);
+const ScoreGauge: React.FC<{ score: number; maxScore?: number; size?: number; label?: string }> = ({ score, maxScore = 100, size = 100, label }) => {
+  const pct = maxScore > 0 ? (score / maxScore) * 100 : 0;
+  const grade = scoreToGrade(pct);
   const r = (size - 10) / 2;
   const circumference = 2 * Math.PI * r;
-  const offset = circumference - (score / 100) * circumference;
-  const strokeColor = score >= 80 ? '#10b981' : score >= 60 ? '#eab308' : score >= 40 ? '#f97316' : '#ef4444';
+  const offset = circumference - (pct / 100) * circumference;
+  const strokeColor = pct >= 80 ? '#10b981' : pct >= 60 ? '#eab308' : pct >= 40 ? '#f97316' : '#ef4444';
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
@@ -112,10 +169,17 @@ const ScoreGauge: React.FC<{ score: number; size?: number }> = ({ score, size = 
       </svg>
       <div className="absolute flex flex-col items-center">
         <span className={cn('text-lg font-bold', gradeColor(grade))}>{grade}</span>
-        <span className="text-xs text-muted-foreground">{score}</span>
+        <span className="text-[10px] text-muted-foreground">{Math.round(pct)}%</span>
       </div>
     </div>
   );
+};
+
+/* ─── Confidence Badge ─── */
+const ConfidenceBadge: React.FC<{ confidence: number; completed: number; total: number }> = ({ confidence, completed, total }) => {
+  if (confidence >= 80) return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]" variant="outline">✓ High ({completed}/{total})</Badge>;
+  if (confidence >= 50) return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 text-[10px]" variant="outline">Partial ({completed}/{total})</Badge>;
+  return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px]" variant="outline">⚠ Low ({completed}/{total})</Badge>;
 };
 
 /* ─── Main Component ─── */
@@ -126,8 +190,11 @@ const ThreatIntelligence: React.FC = () => {
   const [orgs, setOrgs] = useState<MonitoredOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('scorecards');
+  const [now, setNow] = useState(Date.now());
+  const scanAbort = useRef(false);
 
   // Data
   const [scorecards, setScorecards] = useState<OrgScorecard[]>([]);
@@ -135,6 +202,7 @@ const ThreatIntelligence: React.FC = () => {
   const [techFingerprints, setTechFingerprints] = useState<Record<string, TechFingerprint>>({});
   const [phishingResults, setPhishingResults] = useState<PhishingResult[]>([]);
   const [breachResults, setBreachResults] = useState<BreachResult[]>([]);
+  const [checkErrors, setCheckErrors] = useState<Record<string, { type: string; message: string }>>({});
 
   // Filters
   const [search, setSearch] = useState('');
@@ -143,6 +211,12 @@ const ThreatIntelligence: React.FC = () => {
 
   // Detail
   const [detailOrg, setDetailOrg] = useState<OrgScorecard | null>(null);
+
+  // Live clock for "ago" labels
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(iv);
+  }, []);
 
   /* ─── Load orgs ─── */
   useEffect(() => {
@@ -154,11 +228,10 @@ const ThreatIntelligence: React.FC = () => {
     load();
   }, []);
 
-  /* ─── Scorecard Calculation ─── */
+  /* ─── Scorecard Calculation (excludes pending) ─── */
   const calculateScorecards = useCallback(async (orgList: MonitoredOrg[]) => {
     const cards: OrgScorecard[] = [];
 
-    // Fetch all monitoring data
     const [uptimeRes, sslRes, ddosRes, ewRes, techRes] = await Promise.all([
       supabase.from('uptime_logs').select('*').order('checked_at', { ascending: false }).limit(500),
       supabase.from('ssl_logs').select('*').order('checked_at', { ascending: false }).limit(200),
@@ -167,75 +240,137 @@ const ThreatIntelligence: React.FC = () => {
       supabase.from('tech_fingerprints' as any).select('*').order('checked_at', { ascending: false }).limit(200),
     ]);
 
+    const MAXES: Record<string, number> = { uptime: 15, ssl: 15, ddos: 15, email: 10, headers: 10, ports: 10, defacement: 10, dns: 5, blacklist: 5, software: 5 };
+
     for (const org of orgList) {
-      const breakdown = { uptime: 0, ssl: 0, ddos: 0, email: 0, headers: 0, ports: 0, defacement: 0, dns: 0, blacklist: 0, software: 0 };
-
-      // Uptime (15 pts)
+      const breakdown: Record<string, BreakdownItem> = {};
       const orgUptime = (uptimeRes.data || []).filter(u => u.organization_id === org.id);
-      const upCount = orgUptime.filter(u => u.status === 'up').length;
-      const uptimePercent = orgUptime.length > 0 ? (upCount / orgUptime.length) * 100 : 0;
-      breakdown.uptime = uptimePercent >= 99 ? 15 : uptimePercent >= 95 ? 10 : uptimePercent >= 90 ? 5 : 0;
-
-      // SSL (15 pts)
       const orgSsl = (sslRes.data || []).find(s => s.organization_id === org.id);
-      if (orgSsl) {
-        breakdown.ssl = orgSsl.is_valid && !orgSsl.is_expiring_soon ? 15 : orgSsl.is_valid ? 8 : 0;
-      }
-
-      // DDoS (15 pts)
       const orgDdos = (ddosRes.data || []).find(d => d.organization_id === org.id);
-      if (orgDdos) {
-        let ddosScore = 0;
-        if (orgDdos.has_cdn) ddosScore += 5;
-        if (orgDdos.has_waf) ddosScore += 5;
-        if (orgDdos.has_rate_limiting) ddosScore += 5;
-        breakdown.ddos = ddosScore;
+      const orgEw = (ewRes.data || []).filter(e => e.organization_id === org.id);
+      const orgTech = (techRes.data || [] as any[]).find((t: any) => t.organization_id === org.id) as any;
+
+      // Uptime
+      if (orgUptime.length > 0) {
+        const upCount = orgUptime.filter(u => u.status === 'up').length;
+        const pct = (upCount / orgUptime.length) * 100;
+        breakdown.uptime = { points: pct >= 99 ? 15 : pct >= 95 ? 10 : pct >= 90 ? 5 : 0, max: 15, status: 'completed' };
+      } else {
+        breakdown.uptime = { points: 0, max: 15, status: 'pending' };
       }
 
-      // Early Warning checks
-      const orgEw = (ewRes.data || []).filter(e => e.organization_id === org.id);
+      // SSL
+      if (orgSsl) {
+        breakdown.ssl = { points: orgSsl.is_valid && !orgSsl.is_expiring_soon ? 15 : orgSsl.is_valid ? 8 : 0, max: 15, status: 'completed' };
+      } else {
+        breakdown.ssl = { points: 0, max: 15, status: 'pending' };
+      }
+
+      // DDoS
+      if (orgDdos) {
+        let pts = 0;
+        if (orgDdos.has_cdn) pts += 5;
+        if (orgDdos.has_waf) pts += 5;
+        if (orgDdos.has_rate_limiting) pts += 5;
+        breakdown.ddos = { points: pts, max: 15, status: 'completed' };
+      } else {
+        breakdown.ddos = { points: 0, max: 15, status: 'pending' };
+      }
+
+      // Email
       const emailEw = orgEw.find(e => e.check_type === 'dns');
       if (emailEw) {
         const det = emailEw.details as any;
         const es = det?.emailSecurity;
+        let pts = 0;
         if (es) {
-          if (es.spfExists && es.dmarcExists && es.dkimFound && es.dmarcPolicy === 'reject') breakdown.email = 10;
-          else if (es.spfExists && es.dmarcExists) breakdown.email = 7;
-          else if (es.spfExists) breakdown.email = 3;
+          if (es.spfExists && es.dmarcExists && es.dkimFound && es.dmarcPolicy === 'reject') pts = 10;
+          else if (es.spfExists && es.dmarcExists) pts = 7;
+          else if (es.spfExists) pts = 3;
         }
+        breakdown.email = { points: pts, max: 10, status: 'completed' };
+      } else {
+        breakdown.email = { points: 0, max: 10, status: 'pending' };
       }
 
+      // Headers
       const headersEw = orgEw.find(e => e.check_type === 'security_headers');
       if (headersEw) {
-        const det = headersEw.details as any;
-        const sc = det?.score || 0;
-        breakdown.headers = sc >= 7 ? 10 : sc >= 5 ? 7 : sc >= 3 ? 5 : sc >= 1 ? 2 : 0;
+        const sc = (headersEw.details as any)?.score || 0;
+        breakdown.headers = { points: sc >= 7 ? 10 : sc >= 5 ? 7 : sc >= 3 ? 5 : sc >= 1 ? 2 : 0, max: 10, status: 'completed' };
+      } else {
+        breakdown.headers = { points: 0, max: 10, status: 'pending' };
       }
 
+      // Ports
       const portsEw = orgEw.find(e => e.check_type === 'open_ports');
-      breakdown.ports = portsEw?.risk_level === 'safe' ? 10 : portsEw?.risk_level === 'warning' ? 5 : portsEw ? 0 : 5;
+      if (portsEw) {
+        breakdown.ports = { points: portsEw.risk_level === 'safe' ? 10 : portsEw.risk_level === 'warning' ? 5 : 0, max: 10, status: 'completed' };
+      } else {
+        breakdown.ports = { points: 0, max: 10, status: 'pending' };
+      }
 
+      // Defacement
       const defEw = orgEw.find(e => e.check_type === 'defacement');
-      breakdown.defacement = defEw?.risk_level === 'safe' ? 10 : defEw?.risk_level === 'warning' ? 5 : defEw ? 0 : 5;
+      if (defEw) {
+        breakdown.defacement = { points: defEw.risk_level === 'safe' ? 10 : defEw.risk_level === 'warning' ? 5 : 0, max: 10, status: 'completed' };
+      } else {
+        breakdown.defacement = { points: 0, max: 10, status: 'pending' };
+      }
 
+      // DNS
       const dnsEw = orgEw.find(e => e.check_type === 'dns');
-      breakdown.dns = dnsEw?.risk_level === 'safe' ? 5 : dnsEw?.risk_level === 'warning' ? 2 : dnsEw ? 0 : 3;
+      if (dnsEw) {
+        breakdown.dns = { points: dnsEw.risk_level === 'safe' ? 5 : dnsEw.risk_level === 'warning' ? 2 : 0, max: 5, status: 'completed' };
+      } else {
+        breakdown.dns = { points: 0, max: 5, status: 'pending' };
+      }
 
+      // Blacklist
       const blEw = orgEw.find(e => e.check_type === 'blacklist');
-      breakdown.blacklist = blEw?.risk_level === 'safe' ? 5 : 0;
+      if (blEw) {
+        breakdown.blacklist = { points: blEw.risk_level === 'safe' ? 5 : 0, max: 5, status: 'completed' };
+      } else {
+        breakdown.blacklist = { points: 0, max: 5, status: 'pending' };
+      }
 
-      // Software (5 pts)
-      const orgTech = (techRes.data || [] as any[]).find((t: any) => t.organization_id === org.id) as any;
-      breakdown.software = orgTech ? (orgTech?.outdated_count === 0 ? 5 : (orgTech?.outdated_count ?? 0) <= 2 ? 2 : 0) : 3;
+      // Software
+      if (orgTech) {
+        breakdown.software = { points: orgTech.outdated_count === 0 ? 5 : orgTech.outdated_count <= 2 ? 2 : 0, max: 5, status: 'completed' };
+      } else {
+        breakdown.software = { points: 0, max: 5, status: 'pending' };
+      }
 
-      const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-      cards.push({ org, score, grade: scoreToGrade(score), breakdown });
+      // Check for errors
+      const orgErrorKey = org.id;
+      if (checkErrors[orgErrorKey]) {
+        // Mark specific checks as failed if we have error data
+      }
+
+      const completedEntries = Object.values(breakdown).filter(b => b.status === 'completed');
+      const totalChecks = Object.keys(breakdown).length;
+      const completedChecks = completedEntries.length;
+      const earnedPoints = completedEntries.reduce((s, b) => s + b.points, 0);
+      const maxPossible = completedEntries.reduce((s, b) => s + b.max, 0);
+      const percentage = maxPossible > 0 ? Math.round((earnedPoints / maxPossible) * 100) : 0;
+      const confidence = Math.round((completedChecks / totalChecks) * 100);
+      const grade = scoreToGrade(percentage);
+
+      // Find latest checked_at across all data for this org
+      const timestamps = [
+        ...orgUptime.map(u => u.checked_at),
+        orgSsl?.checked_at, orgDdos?.checked_at,
+        ...orgEw.map(e => e.checked_at),
+        orgTech?.checked_at,
+      ].filter(Boolean) as string[];
+      const lastUpdated = timestamps.length > 0 ? timestamps.sort().reverse()[0] : null;
+
+      cards.push({ org, score: earnedPoints, maxPossible, percentage, grade, completedChecks, totalChecks, confidence, breakdown, lastUpdated });
     }
 
-    // Sort worst first
-    cards.sort((a, b) => a.score - b.score);
+    cards.sort((a, b) => a.percentage - b.percentage);
     setScorecards(cards);
-  }, []);
+  }, [checkErrors]);
 
   /* ─── Threat Feed ─── */
   const fetchThreatFeed = useCallback(async () => {
@@ -243,7 +378,7 @@ const ThreatIntelligence: React.FC = () => {
       const techNames = Object.values(techFingerprints)
         .filter(t => t.technologies)
         .flatMap(t => [t.technologies!.webServer, t.technologies!.cms, t.technologies!.language].filter(Boolean) as string[]);
-      const { data, error } = await supabase.functions.invoke('fetch-threat-intel', { body: { orgTechnologies: techNames } });
+      const { data, error } = await invokeWithRetry('fetch-threat-intel', { orgTechnologies: techNames });
       if (error) throw error;
       setThreatFeed(data);
     } catch (err) {
@@ -255,12 +390,16 @@ const ThreatIntelligence: React.FC = () => {
   const runFingerprinting = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
       const urls = orgList.map(o => o.url);
-      const { data, error } = await supabase.functions.invoke('fingerprint-tech', { body: { urls } });
-      if (error) throw error;
+      const { data, error, errorType } = await invokeWithRetry('fingerprint-tech', { urls });
+      if (error) {
+        for (const org of orgList) {
+          await logCheckError(org.id, org.name, org.url, 'tech_fingerprint', errorType || 'UNKNOWN', String(error), 2);
+        }
+        return;
+      }
       const newFp: Record<string, TechFingerprint> = {};
       for (const r of data.results || []) {
         newFp[r.url] = r;
-        // Save to DB
         const org = orgList.find(o => o.url === r.url);
         if (org && r.technologies) {
           await supabase.from('tech_fingerprints' as any).upsert({
@@ -271,9 +410,11 @@ const ThreatIntelligence: React.FC = () => {
             cdn: r.technologies.cdn, js_libraries: r.technologies.jsLibraries || [],
             checked_at: r.checkedAt,
           }, { onConflict: 'url' }).select();
+        } else if (org && r.error) {
+          await logCheckError(org.id, org.name, r.url, 'tech_fingerprint', r.error, r.errorMessage || '', 0);
         }
       }
-      setTechFingerprints(newFp);
+      setTechFingerprints(prev => ({ ...prev, ...newFp }));
     } catch (err) {
       console.error('Fingerprinting error:', err);
     }
@@ -283,11 +424,10 @@ const ThreatIntelligence: React.FC = () => {
   const runPhishingCheck = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
       const organizations = orgList.map(o => ({ id: o.id, name: o.name, domain: extractDomain(o.url) }));
-      const { data, error } = await supabase.functions.invoke('check-phishing-domains', { body: { organizations } });
+      const { data, error } = await invokeWithRetry('check-phishing-domains', { organizations });
       if (error) throw error;
       setPhishingResults(data.results || []);
 
-      // Save active phishing domains
       for (const r of data.results || []) {
         for (const d of r.lookalikeDomains) {
           if (d.exists) {
@@ -298,7 +438,6 @@ const ThreatIntelligence: React.FC = () => {
               risk_level: d.risk, last_checked: new Date().toISOString(),
             }, { onConflict: 'lookalike_domain' }).select();
 
-            // Alert for active phishing
             if (d.hasWebsite) {
               await generateAlert('critical', `Active Phishing Domain: ${d.domain}`, `Lookalike domain ${d.domain} targeting ${r.organization} has an active website at IP ${d.ip}`);
             }
@@ -314,7 +453,7 @@ const ThreatIntelligence: React.FC = () => {
   const runBreachCheck = useCallback(async (orgList: MonitoredOrg[]) => {
     try {
       const domains = orgList.map(o => ({ domain: extractDomain(o.url), name: o.name }));
-      const { data, error } = await supabase.functions.invoke('check-breaches', { body: { domains } });
+      const { data, error } = await invokeWithRetry('check-breaches', { domains });
       if (error) throw error;
       setBreachResults(data.results || []);
     } catch (err) {
@@ -332,25 +471,43 @@ const ThreatIntelligence: React.FC = () => {
     } catch (err) { console.error('Alert gen error:', err); }
   };
 
-  /* ─── Run Full Scan ─── */
+  /* ─── Queue-Based Full Scan ─── */
   const runFullScan = useCallback(async () => {
     if (orgs.length === 0) return;
+    scanAbort.current = false;
     setScanning(true);
     toast({ title: 'Running full threat intelligence scan...', description: `Analyzing ${orgs.length} organizations` });
+
     try {
-      await runFingerprinting(orgs);
-      await Promise.all([
-        fetchThreatFeed(),
-        runPhishingCheck(orgs),
-        runBreachCheck(orgs),
-      ]);
-      await calculateScorecards(orgs);
+      // Phase 1: Fingerprinting in batches of 5
+      const batchSize = 5;
+      for (let i = 0; i < orgs.length; i += batchSize) {
+        if (scanAbort.current) break;
+        const batch = orgs.slice(i, i + batchSize);
+        setScanProgress({ current: i, total: orgs.length, currentOrg: batch.map(o => o.name).join(', '), phase: 'Fingerprinting' });
+        await runFingerprinting(batch);
+        if (i + batchSize < orgs.length) await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // Phase 2: Global checks in parallel
+      if (!scanAbort.current) {
+        setScanProgress({ current: 0, total: 3, currentOrg: 'Global feeds', phase: 'Threat Intelligence' });
+        await Promise.all([fetchThreatFeed(), runPhishingCheck(orgs), runBreachCheck(orgs)]);
+      }
+
+      // Phase 3: Recalculate scorecards
+      if (!scanAbort.current) {
+        setScanProgress({ current: orgs.length, total: orgs.length, currentOrg: 'Calculating scores', phase: 'Scoring' });
+        await calculateScorecards(orgs);
+      }
+
       setLastChecked(new Date().toISOString());
       toast({ title: 'Scan complete', description: 'Threat intelligence updated' });
     } catch {
       toast({ title: 'Some checks failed', variant: 'destructive' });
     } finally {
       setScanning(false);
+      setScanProgress(null);
     }
   }, [orgs, runFingerprinting, fetchThreatFeed, runPhishingCheck, runBreachCheck, calculateScorecards, toast]);
 
@@ -359,9 +516,38 @@ const ThreatIntelligence: React.FC = () => {
   useEffect(() => {
     if (!loading && orgs.length > 0 && !initialRun.current) {
       initialRun.current = true;
-      runFullScan();
+      // Load existing data first, then run scan
+      calculateScorecards(orgs).then(() => runFullScan());
     }
-  }, [loading, orgs.length, runFullScan]);
+  }, [loading, orgs.length]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { scanAbort.current = true; };
+  }, []);
+
+  /* ─── Realtime Subscriptions ─── */
+  useEffect(() => {
+    const channel = supabase
+      .channel('threat-intel-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'uptime_logs' }, () => { if (orgs.length > 0) calculateScorecards(orgs); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ssl_logs' }, () => { if (orgs.length > 0) calculateScorecards(orgs); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ddos_risk_logs' }, () => { if (orgs.length > 0) calculateScorecards(orgs); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'early_warning_logs' }, () => { if (orgs.length > 0) calculateScorecards(orgs); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'threat_intelligence_logs' }, () => { if (orgs.length > 0) calculateScorecards(orgs); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [orgs, calculateScorecards]);
+
+  /* ─── Background Scheduling ─── */
+  useEffect(() => {
+    if (orgs.length === 0) return;
+    // Threat feed every 30 min
+    const threatIv = setInterval(() => fetchThreatFeed(), 30 * 60 * 1000);
+    // Scorecard recalc every 5 min
+    const scoreIv = setInterval(() => calculateScorecards(orgs), 5 * 60 * 1000);
+    return () => { clearInterval(threatIv); clearInterval(scoreIv); };
+  }, [orgs, fetchThreatFeed, calculateScorecards]);
 
   /* ─── National Threat Level ─── */
   const nationalThreatLevel = (() => {
@@ -376,6 +562,9 @@ const ThreatIntelligence: React.FC = () => {
   const totalPhishing = phishingResults.reduce((sum, r) => sum + r.totalFound, 0);
   const activePhishing = phishingResults.reduce((sum, r) => sum + r.lookalikeDomains.filter(d => d.hasWebsite).length, 0);
   const totalBreaches = breachResults.reduce((sum, r) => sum + r.breachesFound, 0);
+
+  const checksSucceeded = scorecards.reduce((s, c) => s + c.completedChecks, 0);
+  const checksTotal = scorecards.reduce((s, c) => s + c.totalChecks, 0);
 
   /* ─── Filtered scorecards ─── */
   const filteredScorecards = scorecards.filter(s => {
@@ -409,7 +598,14 @@ const ThreatIntelligence: React.FC = () => {
           <p className="text-sm text-muted-foreground mt-1">Complete threat prevention and security intelligence for monitored organizations</p>
         </div>
         <div className="flex items-center gap-3">
-          {lastChecked && <span className="text-xs text-muted-foreground font-mono">Last: {new Date(lastChecked).toLocaleTimeString()}</span>}
+          {checksTotal > 0 && (
+            <span className="text-xs text-muted-foreground font-mono">{checksSucceeded}/{checksTotal} checks</span>
+          )}
+          {lastChecked && (
+            <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
+              <Clock className="w-3 h-3" /> {timeAgo(lastChecked)}
+            </span>
+          )}
           <Button onClick={runFullScan} disabled={scanning} className="bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/30">
             <RefreshCw className={cn('w-4 h-4 mr-2', scanning && 'animate-spin')} />
             {scanning ? 'Scanning...' : 'Run Full Scan'}
@@ -417,13 +613,25 @@ const ThreatIntelligence: React.FC = () => {
         </div>
       </div>
 
+      {/* Progress Bar */}
+      {scanProgress && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{scanProgress.phase}: {scanProgress.currentOrg}</span>
+            <span>{scanProgress.current}/{scanProgress.total}</span>
+          </div>
+          <Progress value={scanProgress.total > 0 ? (scanProgress.current / scanProgress.total) * 100 : 0} className="h-2" />
+        </div>
+      )}
+
       {/* National Threat Level */}
       <div className={cn('rounded-lg border p-4 text-center', nationalThreatLevel.color, nationalThreatLevel.pulse && 'animate-pulse')}>
         <p className="text-xs font-mono uppercase tracking-wider opacity-70">National Threat Level</p>
         <p className="text-2xl font-bold">{nationalThreatLevel.level}</p>
         {scorecards.length > 0 && (
           <p className="text-xs mt-1 opacity-70">
-            Average Score: {Math.round(scorecards.reduce((s, c) => s + c.score, 0) / scorecards.length)} / 100
+            Average Score: {Math.round(scorecards.reduce((s, c) => s + c.percentage, 0) / scorecards.length)}%
+            ({scorecards.filter(s => s.confidence >= 50).length}/{scorecards.length} orgs assessed)
           </p>
         )}
       </div>
@@ -473,31 +681,42 @@ const ThreatIntelligence: React.FC = () => {
           {/* Cards grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredScorecards.map(sc => (
-              <Card key={sc.org.id} className={cn('border cursor-pointer hover:border-neon-cyan/30 transition-colors', gradeBg(sc.grade))}
+              <Card key={sc.org.id}
+                className={cn('border cursor-pointer hover:border-neon-cyan/30 transition-all duration-300', gradeBg(sc.grade))}
                 onClick={() => setDetailOrg(sc)}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold truncate">{sc.org.name}</h3>
                       <Badge variant="outline" className="text-xs mt-1">{sc.org.sector}</Badge>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <ConfidenceBadge confidence={sc.confidence} completed={sc.completedChecks} total={sc.totalChecks} />
+                      </div>
                     </div>
-                    <ScoreGauge score={sc.score} size={80} />
+                    <ScoreGauge score={sc.score} maxScore={sc.maxPossible} size={80} />
                   </div>
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {Object.entries(sc.breakdown).map(([key, val]) => {
-                      const maxes: Record<string, number> = { uptime: 15, ssl: 15, ddos: 15, email: 10, headers: 10, ports: 10, defacement: 10, dns: 5, blacklist: 5, software: 5 };
-                      const max = maxes[key] || 10;
-                      const pct = val / max;
-                      return (
-                        <span key={key} className={cn('text-[10px] px-1.5 py-0.5 rounded border font-mono',
-                          pct >= 0.8 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                          pct >= 0.5 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                          'bg-red-500/10 text-red-400 border-red-500/20'
-                        )}>
-                          {pct >= 0.8 ? '✓' : pct >= 0.5 ? '~' : '✗'} {key}
-                        </span>
-                      );
-                    })}
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {sc.score}/{sc.maxPossible} pts ({sc.percentage}%)
+                    </span>
+                    {sc.lastUpdated && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                        <Clock className="w-2.5 h-2.5" /> {timeAgo(sc.lastUpdated)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {Object.entries(sc.breakdown).map(([key, item]) => (
+                      <span key={key} className={cn('text-[10px] px-1.5 py-0.5 rounded border font-mono',
+                        item.status === 'pending' ? 'bg-muted/30 text-muted-foreground border-muted' :
+                        item.status === 'failed' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                        item.points / item.max >= 0.8 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                        item.points / item.max >= 0.5 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                        'bg-red-500/10 text-red-400 border-red-500/20'
+                      )}>
+                        {item.status === 'pending' ? '◌' : item.status === 'failed' ? '⚠' : item.points / item.max >= 0.8 ? '✓' : item.points / item.max >= 0.5 ? '~' : '✗'} {key}
+                      </span>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
@@ -528,7 +747,6 @@ const ThreatIntelligence: React.FC = () => {
 
           {threatFeed && (
             <div className="space-y-4">
-              {/* CISA KEV */}
               {(threatFilter === 'All' || threatFilter === 'CISA') && threatFeed.cisaKEV.length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-red-400" /> CISA Known Exploited Vulnerabilities</CardTitle></CardHeader>
@@ -554,7 +772,6 @@ const ThreatIntelligence: React.FC = () => {
                 </Card>
               )}
 
-              {/* NVD CVEs */}
               {(threatFilter === 'All' || threatFilter === 'NVD') && threatFeed.latestCVEs.length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-400" /> Latest High-Severity CVEs</CardTitle></CardHeader>
@@ -574,7 +791,6 @@ const ThreatIntelligence: React.FC = () => {
                 </Card>
               )}
 
-              {/* Malicious URLs */}
               {(threatFilter === 'All' || threatFilter === 'URLhaus') && threatFeed.maliciousUrls.length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Globe className="w-4 h-4 text-purple-400" /> Malicious URLs (Somalia-related)</CardTitle></CardHeader>
@@ -631,10 +847,12 @@ const ThreatIntelligence: React.FC = () => {
                           <TableCell colSpan={5} className="text-muted-foreground">Pending...</TableCell>
                         </TableRow>
                       );
-                      if (fp.error) return (
+                      if (fp.error || fp.success === false) return (
                         <TableRow key={org.id}>
                           <TableCell className="font-medium">{org.name}</TableCell>
-                          <TableCell colSpan={5} className="text-red-400">Check Failed</TableCell>
+                          <TableCell colSpan={5} className="text-orange-400">
+                            ⚠ Check Failed{fp.error ? `: ${fp.error}` : ''}
+                          </TableCell>
                         </TableRow>
                       );
                       const t = fp.technologies!;
@@ -790,7 +1008,7 @@ const ThreatIntelligence: React.FC = () => {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {detailOrg && <ScoreGauge score={detailOrg.score} size={60} />}
+              {detailOrg && <ScoreGauge score={detailOrg.score} maxScore={detailOrg.maxPossible} size={60} />}
               <div>
                 <p>{detailOrg?.org.name}</p>
                 <p className="text-xs text-muted-foreground font-normal">{detailOrg?.org.sector} — {detailOrg?.org.url}</p>
@@ -799,25 +1017,53 @@ const ThreatIntelligence: React.FC = () => {
           </DialogHeader>
           {detailOrg && (
             <div className="space-y-3">
-              <p className="text-sm">Overall Score: <span className={cn('font-bold', gradeColor(detailOrg.grade))}>{detailOrg.score}/100 ({detailOrg.grade})</span></p>
-              <div className="space-y-2">
-                {Object.entries(detailOrg.breakdown).map(([key, val]) => {
-                  const maxes: Record<string, number> = { uptime: 15, ssl: 15, ddos: 15, email: 10, headers: 10, ports: 10, defacement: 10, dns: 5, blacklist: 5, software: 5 };
-                  const max = maxes[key] || 10;
-                  return (
-                    <div key={key} className="flex items-center justify-between text-sm">
-                      <span className="capitalize">{key}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
-                          <div className={cn('h-full rounded-full', val / max >= 0.8 ? 'bg-emerald-500' : val / max >= 0.5 ? 'bg-yellow-500' : 'bg-red-500')}
-                            style={{ width: `${(val / max) * 100}%` }} />
-                        </div>
-                        <span className="text-xs font-mono w-10 text-right">{val}/{max}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="flex items-center justify-between">
+                <p className="text-sm">
+                  Score: <span className={cn('font-bold', gradeColor(detailOrg.grade))}>
+                    {detailOrg.score}/{detailOrg.maxPossible} ({detailOrg.percentage}%) — {detailOrg.grade}
+                  </span>
+                </p>
+                <ConfidenceBadge confidence={detailOrg.confidence} completed={detailOrg.completedChecks} total={detailOrg.totalChecks} />
               </div>
+              {detailOrg.confidence < 50 && (
+                <Alert className="bg-yellow-500/10 border-yellow-500/30">
+                  <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                  <AlertDescription className="text-xs text-yellow-400">
+                    Low confidence — only {detailOrg.completedChecks}/{detailOrg.totalChecks} checks completed. Score may change as more checks complete.
+                  </AlertDescription>
+                </Alert>
+              )}
+              <div className="space-y-2">
+                {Object.entries(detailOrg.breakdown).map(([key, item]) => (
+                  <div key={key} className="flex items-center justify-between text-sm">
+                    <span className={cn('capitalize', item.status === 'pending' && 'text-muted-foreground')}>
+                      {key}
+                      {item.status === 'pending' && <span className="text-[10px] ml-1 text-muted-foreground">(pending)</span>}
+                      {item.status === 'failed' && <span className="text-[10px] ml-1 text-orange-400">(failed)</span>}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {item.status === 'completed' ? (
+                        <>
+                          <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
+                            <div className={cn('h-full rounded-full transition-all duration-500',
+                              item.points / item.max >= 0.8 ? 'bg-emerald-500' :
+                              item.points / item.max >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
+                            )} style={{ width: `${(item.points / item.max) * 100}%` }} />
+                          </div>
+                          <span className="text-xs font-mono w-10 text-right">{item.points}/{item.max}</span>
+                        </>
+                      ) : item.status === 'failed' ? (
+                        <span className="text-xs text-orange-400 font-mono">⚠ Failed</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground font-mono">◌ Pending</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {detailOrg.lastUpdated && (
+                <p className="text-xs text-muted-foreground text-right">Last updated: {timeAgo(detailOrg.lastUpdated)}</p>
+              )}
             </div>
           )}
         </DialogContent>
