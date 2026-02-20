@@ -1,27 +1,37 @@
 
 
-## Randomize Attack Sources for Visual Variety
+## Diversify US and Canada Attack Sources Across Multiple States/Provinces
 
 ### Problem
-Currently, the threat generator uses a day-seeded deterministic PRNG. This means the same sequence of source countries plays out identically every session. The user sees repetitive patterns rather than a dynamic, varied stream.
+Currently, the USA has only one source entry (Virginia) and Canada has only one (Toronto). Every attack from these countries originates from the same static point on the map, which looks unrealistic.
 
 ### Solution
-Replace the deterministic source selection with true randomness (`Math.random()`) so that each attack comes from a genuinely different country. The attack names, types, severities, and targets will also be randomized for full variety. The deterministic daily count and threat IDs will be preserved.
+Replace the single USA and Canada entries with multiple state/province-level entries, each with accurate coordinates. When an attack comes from the US or Canada, it will randomly pick from different locations, creating visual variety on the map.
 
 ### Technical Details
 
 **File: `src/hooks/useLiveAttacks.ts`**
 
-Update the `generateDayThreat` function (around line 128) to use `Math.random()` instead of the seeded PRNG for selecting:
-- Source country (from `WEIGHTED_SOURCES`)
-- Target location (from `SOMALIA_TARGETS`)
-- Attack type
-- Attack signature name
-- Severity
+**1. Update `THREAT_SOURCES` array** -- replace the single USA and Canada entries with multiple:
 
-This ensures every attack displayed is from a different, randomly chosen country rather than following a fixed daily sequence.
+USA states (6-8 entries):
+- Virginia (VA) -- 37.43, -78.65
+- California (CA) -- 36.77, -119.41
+- Texas (TX) -- 31.96, -99.90
+- New York (NY) -- 40.71, -74.00
+- Florida (FL) -- 27.99, -81.76
+- Illinois (IL) -- 40.63, -89.39
+- Washington (WA) -- 47.75, -120.74
+- Georgia (GA) -- 32.16, -82.90
 
-The deterministic day seed will still be used for the daily total count (`BASE_COUNT`), keeping that stat consistent across sessions.
+Canada provinces (4-5 entries):
+- Ontario (Toronto) -- 43.65, -79.38
+- Quebec (Montreal) -- 45.50, -73.56
+- British Columbia (Vancouver) -- 49.28, -123.12
+- Alberta (Calgary) -- 51.04, -114.07
+- Manitoba (Winnipeg) -- 49.89, -97.13
 
-Only one file changes: `src/hooks/useLiveAttacks.ts`.
+**2. Update `WEIGHTED_SOURCES` array** -- replace the static USA/Canada fills with arrays that pick from these new entries. Instead of `Array(3).fill(single_usa)`, spread all USA entries with appropriate weighting, and similarly for Canada.
+
+No other files need changes. The `generateDayThreat` function already uses `Math.random()` to pick from `WEIGHTED_SOURCES`, so the variety will be automatic.
 
