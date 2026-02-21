@@ -173,7 +173,7 @@ const DastScanner: React.FC = () => {
         passed: allFindings.filter(f => f.status === 'pass').length,
       };
 
-      const weightedFail = summary.critical * 5 + summary.high * 3 + summary.medium * 2 + summary.low * 1;
+      const weightedFail = summary.critical * 3 + summary.high * 2 + summary.medium * 1.5 + summary.low * 0.5;
       const weightedPass = summary.passed * 1;
       const dastScore = (weightedPass + weightedFail) === 0 ? 100 : Math.round(100 * weightedPass / (weightedPass + weightedFail));
       setCurrentScore(dastScore);
