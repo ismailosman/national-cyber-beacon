@@ -963,6 +963,53 @@ export type Database = {
           },
         ]
       }
+      security_score_history: {
+        Row: {
+          id: string
+          organization_id: string | null
+          organization_name: string
+          recorded_at: string
+          recorded_date: string
+          sector: string
+          security_score: number
+          ssl_valid: boolean | null
+          threats_count: number | null
+          uptime_percent: number | null
+        }
+        Insert: {
+          id?: string
+          organization_id?: string | null
+          organization_name: string
+          recorded_at?: string
+          recorded_date?: string
+          sector?: string
+          security_score?: number
+          ssl_valid?: boolean | null
+          threats_count?: number | null
+          uptime_percent?: number | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string | null
+          organization_name?: string
+          recorded_at?: string
+          recorded_date?: string
+          sector?: string
+          security_score?: number
+          ssl_valid?: boolean | null
+          threats_count?: number | null
+          uptime_percent?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "security_score_history_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations_monitored"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       settings: {
         Row: {
           id: string
