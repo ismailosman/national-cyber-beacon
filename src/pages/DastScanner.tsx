@@ -204,9 +204,6 @@ const DastScanner: React.FC = () => {
           },
         });
         toast({ title: 'Report Sent', description: `PDF report emailed for ${scan.org.name}` });
-        if (reportData?.pdf) {
-          downloadPdfFromBase64(reportData.pdf, `DAST-Report-${scan.org.name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
-        }
       } catch (emailErr) {
         console.error('Email report failed:', emailErr);
       }
