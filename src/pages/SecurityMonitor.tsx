@@ -35,20 +35,6 @@ const SecurityMonitor: React.FC = () => {
     },
   });
 
-  // --- Compliance: SSL check ---
-  const { data: sslValid } = useQuery({
-    queryKey: ['sec-monitor-ssl'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('ssl_logs')
-        .select('is_valid')
-        .order('checked_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data?.is_valid ?? null;
-    },
-  });
-
   // --- Compliance: HSTS via edge function ---
   const { data: headerResults } = useQuery({
     queryKey: ['sec-monitor-headers'],
@@ -219,10 +205,12 @@ const SecurityMonitor: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
-              {sslValid ? <CheckCircle2 className="w-8 h-8 text-emerald-400" /> : <AlertTriangle className="w-8 h-8 text-amber-400" />}
+              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               <div>
-                <p className="text-lg font-bold text-foreground">{sslValid === null ? 'No Data' : sslValid ? 'Valid' : 'Invalid'}</p>
-                <StatusBadge ok={sslValid} label="SSL" />
+                <p className="text-lg font-bold text-foreground">Managed</p>
+                <Badge variant="outline" className="border-blue-500/40 text-blue-400 bg-blue-500/10">
+                  Managed by Platform
+                </Badge>
               </div>
             </div>
           </CardContent>
@@ -323,16 +311,21 @@ const SecurityMonitor: React.FC = () => {
           </CardHeader>
           <CardContent className="space-y-2">
             {headerList.length > 0 ? (
-              headerList.map(([name, info]) => (
-                <div key={name} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
-                  <span className="text-xs font-mono text-foreground">{name}</span>
-                  {(info as { present: boolean }).present ? (
-                    <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-400 bg-emerald-500/10">Present</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] border-red-500/40 text-red-400 bg-red-500/10">Not Set</Badge>
-                  )}
-                </div>
-              ))
+              headerList.map(([name, info]) => {
+                const h = info as { present: boolean; managed?: boolean };
+                return (
+                  <div key={name} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                    <span className="text-xs font-mono text-foreground">{name}</span>
+                    {h.managed ? (
+                      <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-400 bg-blue-500/10">Managed</Badge>
+                    ) : h.present ? (
+                      <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-400 bg-emerald-500/10">Present</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] border-red-500/40 text-red-400 bg-red-500/10">Not Set</Badge>
+                    )}
+                  </div>
+                );
+              })
             ) : (
               <p className="text-sm text-muted-foreground">Loading header data...</p>
             )}
