@@ -1,5 +1,6 @@
 /* ─── Compliance Assessment Engines ─── */
 import { supabase } from '@/integrations/supabase/client';
+import { runITUPreScans } from './itu-scanner';
 
 interface AssessmentResult {
   organization_id: string;
@@ -250,7 +251,19 @@ function assessOWASP(orgId: string, d: any): AssessmentResult[] {
 /* ═══════════════════════════════════════════════
    ITU National Cybersecurity Index
    ═══════════════════════════════════════════════ */
-async function assessITU(orgId: string, d: any): Promise<AssessmentResult[]> {
+async function assessITU(orgId: string, d: any, onProgress?: (msg: string) => void): Promise<AssessmentResult[]> {
+  // Phase 1: Run fresh scans for all orgs before evaluating
+  onProgress?.('Triggering real-time security scans...');
+  try {
+    await runITUPreScans(orgId, onProgress);
+  } catch (e) {
+    console.warn('[ITU] Pre-scan phase failed, falling back to existing data:', e);
+  }
+
+  // Phase 2: Re-fetch org data with fresh scan results
+  onProgress?.('Loading fresh monitoring data...');
+  d = await fetchOrgData(orgId);
+
   const r: AssessmentResult[] = [];
   const mk = (code: string, status: string, evidence: string, data: any = {}) => r.push(makeResult(orgId, 'itu-nci', code, status, evidence, data));
 
@@ -370,7 +383,7 @@ export async function runAssessment(
       break;
     case 'itu-nci':
       onProgress?.('Assessing ITU National Cybersecurity Index...');
-      results = await assessITU(orgId, data);
+      results = await assessITU(orgId, data, onProgress);
       break;
     default:
       return 0;
