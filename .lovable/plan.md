@@ -1,35 +1,67 @@
 
 
-## Fix WAF Detection False Positives for Cloudflare-Protected Sites
+## Add Logo to PDF Reports and Redesign Email Template
 
-### Problem
+### What's Changing
 
-When a site is behind Cloudflare (or any known WAF/CDN), the scanner still flags two false positives:
+1. **Logo in all PDF reports** -- The Somalia Cyber Defense logo will appear in the header bar of every page in both the DAST report and the general security report PDFs
+2. **Logo in email** -- The logo will appear at the top of the DAST report email
+3. **Email redesign** -- Switch from dark/black background to a clean white background matching the reference design
 
-1. **"Server Header Present: cloudflare"** (LOW) -- The "cloudflare" server header is set by Cloudflare itself, not the origin server. It is expected and harmless; flagging it as a security issue is incorrect.
-2. **"No Rate Limiting Detected"** (MEDIUM) -- Cloudflare handles rate limiting at its edge with sophisticated rules. A simple 5-request burst test will never trigger it. Reporting this as a failure is misleading for any WAF-protected site.
+---
 
-### Changes
+### Implementation Details
 
-**File: `supabase/functions/dast-waf-detection/index.ts`**
+#### 1. Copy logo to `public/logo.png`
 
-1. **Skip server header finding when it belongs to a detected WAF/CDN**: If a WAF is detected and the server header value matches the WAF name (e.g., "cloudflare", "CloudFront", "Sucuri", "DDoS-Guard"), mark it as `status: "pass"` with `severity: "info"` and a message like "Server header identifies the WAF/CDN provider (expected behavior)" instead of flagging it as a fail.
+Place the logo in the `public/` folder so it's served at a stable URL without Vite's content hash (`/logo.png` instead of `/assets/logo-C103sdBq.png`). This gives edge functions a reliable URL to fetch from: `https://national-cyber-beacon.lovable.app/logo.png`.
 
-2. **Skip rate limiting finding when a WAF with built-in rate limiting is detected**: Cloudflare, AWS WAF, Akamai, Imperva, Sucuri, and DDoS-Guard all provide rate limiting at the edge. If any of these WAFs are detected, mark the rate limiting check as `status: "pass"` with `severity: "info"` and note "Rate limiting is provided by the detected WAF (Cloudflare)" instead of running the naive 5-request test and reporting failure.
+#### 2. Create shared PNG parser: `supabase/functions/_shared/logoUtils.ts`
 
-3. **Only flag server header and rate limiting as issues when NO WAF is detected**, which is when these findings are genuinely actionable.
+A utility module that both report edge functions import. It will:
+- Fetch the logo PNG from the published app URL
+- Parse the PNG binary format (read IHDR chunk for width/height, extract IDAT chunks)
+- Decompress the pixel data and extract RGB values (compositing any alpha onto white)
+- Return `{ width, height, rgbBytes }` for embedding as a PDF Image XObject
+- Gracefully return `null` if the fetch fails (reports still generate without logo)
 
-### Logic Summary
+#### 3. Update `supabase/functions/send-dast-report/index.ts`
 
-```
-IF WAF detected:
-  - Server header matches WAF name -> INFO / PASS ("expected WAF identifier")
-  - Server header has version info AND is not WAF name -> MEDIUM / FAIL (origin server leaking through)
-  - Rate limiting -> INFO / PASS ("handled by WAF")
-ELSE (no WAF):
-  - Keep current server header checks (LOW/MEDIUM)
-  - Keep current rate limiting test (MEDIUM)
-```
+**PDF changes:**
+- Import the logo utility
+- Add an Image XObject (object 5) containing the logo's RGB pixel data
+- Update object numbering: fonts at obj 3-4, logo at obj 5, pages start at obj 6
+- Add `/XObject << /Logo 5 0 R >>` to each page's resource dictionary
+- Render the logo in each header bar using `q 36 0 0 36 32 798 cm /Logo Do Q` (36x36pt)
+- Shift branding text right by ~42pt to accommodate the logo
 
-No other files need changes. No database changes needed.
+**Email HTML changes:**
+- Replace dark `#0d1520` background with white `#ffffff`
+- Add logo `<img>` tag in the header referencing the published URL
+- Navy header bar with white text and red accent (matching reference)
+- Light gray `#f8fafc` card backgrounds with dark text for info sections
+- Clean severity count table with white background and colored numbers
+- Professional footer with subtle border
+
+#### 4. Update `supabase/functions/generate-report/index.ts`
+
+Same PDF logo embedding approach:
+- Import logo utility
+- Add Image XObject for the logo
+- Render 36x36pt logo in each page's header bar
+- Shift header text right to accommodate
+- Update object numbering
+
+---
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `public/logo.png` | New -- copy of `src/assets/logo.png` for stable URL |
+| `supabase/functions/_shared/logoUtils.ts` | New -- PNG fetch/parse utility for PDF embedding |
+| `supabase/functions/send-dast-report/index.ts` | Add logo to PDF headers, redesign email HTML to white background with logo |
+| `supabase/functions/generate-report/index.ts` | Add logo to PDF headers |
+
+No database changes needed.
 
