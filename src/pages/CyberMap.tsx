@@ -931,22 +931,23 @@ const CyberMap: React.FC = () => {
       mapboxglRef.current = mapboxgl;
       mapboxgl.accessToken = mapToken;
 
+      const isMobile = window.innerWidth < 768;
       const map = new mapboxgl.Map({
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/dark-v11',
-        center: window.innerWidth < 768 ? [38, 8] as [number, number] : [20, 10] as [number, number],
-        zoom: window.innerWidth < 768 ? 0.4 : 2,
-        minZoom: window.innerWidth < 768 ? 0.1 : 1,
+        center: isMobile ? [30, 10] as [number, number] : [20, 10] as [number, number],
+        zoom: isMobile ? 0.1 : 2,
+        minZoom: isMobile ? 0.1 : 1,
         projection: 'mercator',
         pitchWithRotate: false,
         attributionControl: false,
         interactive: true,
         scrollZoom: false,
         boxZoom: false,
-        dragPan: false,
+        dragPan: isMobile,
         dragRotate: false,
         doubleClickZoom: false,
-        touchZoomRotate: false,
+        touchZoomRotate: isMobile,
         touchPitch: false,
       });
 
