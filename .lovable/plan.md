@@ -1,50 +1,47 @@
 
 
-## Fix Cyber Map Mobile View -- Full Globe Fit and Better Visibility
+## Fix Mobile Feed Drawer -- Stop Covering the Full Map
 
 ### Problem
 
-On mobile devices, the Cyber Threat Map:
-1. Is too zoomed in (zoom 0.8) -- doesn't show the full world map, leaving large empty dark areas
-2. The center point [20, 10] puts too much ocean/empty space in view
-3. The dark-v11 Mapbox style is extremely dark on small screens with no visual texture
-4. The map doesn't adapt its viewport to different mobile screen sizes
+When tapping "Feed" on mobile, the attacks drawer covers the entire screen:
+- A full-screen dark overlay (`bg-black/40` on `fixed inset-0`) blocks the map
+- The feed panel itself takes `60vh` height with a mostly opaque background
 
-The desktop/laptop view is perfect and will NOT be changed.
+The user wants the feed to show attacks without hiding the map, similar to the reference screenshot where the map is still partially visible above the drawer.
 
 ### Solution
 
-Make three mobile-only adjustments:
+Three targeted changes to the mobile feed drawer in `src/pages/CyberMap.tsx`:
 
-**1. Lower mobile zoom and adjust center to fit the full globe**
+**1. Remove the full-screen dark overlay**
+Delete the `bg-black/40` backdrop div entirely. Instead, tapping outside the drawer (on the map) will still close it via the container div.
 
-Change the mobile zoom from `0.8` to `0.4` and adjust the center point for mobile to `[38, 8]` (centered closer to Somalia/Africa) so the entire world map is visible with Somalia prominently positioned. Also lower `minZoom` for mobile from `0.3` to `0.1`.
+**2. Shrink the feed panel to 45vh**
+Reduce from `60vh` to `45vh` so the top half of the map stays fully visible and interactive.
 
-**2. Add a subtle dot-grid background pattern on mobile for better contrast**
-
-Add a CSS-based repeating dot pattern behind the map container (visible through the dark Mapbox tiles) to match the reference image's dotted world aesthetic. This gives the dark background visual texture and depth instead of pure black emptiness.
-
-**3. Adjust the gradient overlay opacity on mobile**
-
-Reduce the header gradient overlay intensity on mobile so it doesn't darken the already-dark map further.
+**3. Make the container only cover the bottom, not the full screen**
+Change the container from `fixed inset-0` to `fixed bottom-0 left-0 right-0` so it only occupies the bottom portion of the screen, leaving the map above fully tappable.
 
 ### Files Changed
 
 | File | Change |
 |---|---|
-| `src/pages/CyberMap.tsx` | Adjust mobile zoom (0.8 to 0.4), center, and minZoom; reduce mobile header gradient opacity; add dot-pattern background div for mobile |
+| `src/pages/CyberMap.tsx` | Lines 1537-1541: Remove overlay div, change container positioning from full-screen to bottom-anchored, reduce panel height from 60vh to 45vh |
 
 ### Technical Details
 
-**Map initialization (line 934-951)**:
-- Change `zoom` from `window.innerWidth < 768 ? 0.8 : 2` to `window.innerWidth < 768 ? 0.4 : 2`
-- Change `center` from `[20, 10]` to `window.innerWidth < 768 ? [38, 8] : [20, 10]` -- centers on East Africa/Somalia on mobile
-- Change `minZoom` from `window.innerWidth < 768 ? 0.3 : 1` to `window.innerWidth < 768 ? 0.1 : 1`
+**Line 1537** -- Container div:
+- Change `fixed inset-0 z-50 flex flex-col justify-end` to `fixed bottom-0 left-0 right-0 z-50`
+- This anchors the drawer only to the bottom of the screen
 
-**Dot-grid background (new element in JSX, before map container)**:
-- Add a `<div>` with a CSS radial-gradient repeating dot pattern behind the map
-- Only visible on mobile (`lg:hidden`) as the desktop view should not change
-- Uses subtle purple/slate dots on dark background matching the reference image
+**Line 1538** -- Dark overlay div:
+- Remove entirely (the `bg-black/40` absolute overlay)
+- The map above the drawer will remain fully visible and interactive
 
-**Header gradient (line 1336)**:
-- On mobile, use a less intense gradient so the map remains more visible under the title/counter area
+**Line 1541** -- Feed panel:
+- Change `height: '60vh'` to `height: '45vh'`
+- Keep the existing glassmorphism background (`rgba(5, 7, 15, 0.72)` + backdrop blur) so entries remain readable
+
+This matches the reference screenshot where the map is visible above the attacks list, and the drawer only occupies the lower portion of the screen.
+
