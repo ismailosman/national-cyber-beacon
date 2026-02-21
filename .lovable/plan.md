@@ -1,41 +1,69 @@
 
 
-## Suppress Three More DAST False Positives
+## Make ITU Assessment Trigger Real Scans Before Evaluating
 
 ### Problem
 
-Three findings are flagged but should not penalize the score:
+When you run the ITU National Cybersecurity Index assessment for a telecom organization, it only reads existing data from the database. If no recent scans have been run for that organization (or others), the assessment produces inaccurate results -- showing controls as "failing" simply because monitoring data is missing, not because the organization is actually non-compliant.
 
-1. **TLS-CAA** (Missing CAA DNS Record) -- SSL is managed by Lovable's platform, so CAA records are not the site owner's responsibility
-2. **JS-SRI** (Missing Subresource Integrity) -- External scripts injected by the platform/CDN should not be flagged as vulnerabilities
-3. **DNS-DMARC-NONE** (DMARC policy set to none) -- "none" is a valid monitoring phase; it should be downgraded to a low/informational finding rather than a medium/fail
+### Solution
+
+Modify the ITU assessment flow to trigger real security scans for the selected organization (and optionally all monitored organizations) before evaluating the ITU controls. This ensures the assessment is based on fresh, real data.
 
 ### Files Modified
 
 | File | Change |
 |---|---|
-| `supabase/functions/dast-tls-deep-scan/index.ts` | Reclassify TLS-CAA as info/pass when no CAA record is found, noting SSL is platform-managed |
-| `supabase/functions/dast-js-libraries/index.ts` | Downgrade JS-SRI from medium/fail to low/info, as SRI is a defense-in-depth measure not a critical vulnerability |
-| `supabase/functions/dast-dns-security/index.ts` | Reclassify DNS-DMARC-NONE from medium/fail to low/info, noting it is a valid monitoring phase |
+| `src/lib/compliance/assess.ts` | Add a `runFreshScans()` helper inside `assessITU` that triggers `run-security-checks`, `check-ssl`, `check-dns`, `fingerprint-tech`, and `fetch-threat-intel` edge functions for the target org before reading the data. Also trigger `run-security-checks` for all monitored orgs (needed for national-level ITU controls like government SSL coverage). |
+| `src/lib/compliance/assess.ts` | Update the `runAssessment` entry point to pass the `onProgress` callback into `assessITU` so users see scan progress ("Scanning telecom org...", "Checking SSL across 12 orgs...", etc.) |
 
 ### Technical Details
 
-**1. TLS-CAA -- Platform-Managed SSL (dast-tls-deep-scan/index.ts, line 75)**
+**1. Pre-scan step in assessITU (assess.ts)**
 
-Change the "no CAA record" branch from `severity: "medium", status: "fail"` to `severity: "info", status: "pass"` with updated detail: "No CAA record found, but SSL certificates are managed by the hosting platform."
+Before the existing cross-organization data fetch, add a new phase:
 
-**2. JS-SRI -- Downgrade to Informational (dast-js-libraries/index.ts, line 83)**
+```
+Phase 1: Trigger fresh scans for the selected org
+  - invoke('run-security-checks', { org_id })  -- covers uptime, SSL, headers, DNS, DDoS, WAF
+  - invoke('check-dns', { domains: [org.domain] })  -- email auth (SPF/DMARC/DKIM)
+  - invoke('fingerprint-tech', { url: org.url })  -- tech stack detection
+  - invoke('fetch-threat-intel', { org_id })  -- threat intelligence
 
-Change from `severity: "medium", status: "fail"` to `severity: "low", status: "info"` with updated detail noting SRI is a best practice but not a direct vulnerability.
+Phase 2: Trigger run-security-checks for ALL monitored orgs
+  - Loop through all active organizations_monitored
+  - Invoke 'run-security-checks' for each (with 1s delay between calls)
+  - This ensures national-level controls (ITU-T4 gov SSL, ITU-T5 DDoS coverage) have current data
 
-**3. DNS-DMARC-NONE -- Monitoring Phase (dast-dns-security/index.ts, line 75)**
+Phase 3: Short delay (2 seconds) to allow database writes to settle
 
-Change from `severity: "medium", status: "fail"` to `severity: "low", status: "info"` with updated detail: "DMARC policy is 'none' (monitoring mode). This is a valid initial deployment phase."
+Phase 4: Proceed with the existing assessITU logic (read data, evaluate controls)
+```
+
+**2. Progress reporting**
+
+The `assessITU` function signature changes to accept `onProgress` callback:
+
+```typescript
+async function assessITU(orgId: string, d: any, onProgress?: (msg: string) => void)
+```
+
+Progress messages will be:
+- "Running security scans for [org name]..."
+- "Scanning DNS & email authentication..."  
+- "Fingerprinting technology stack..."
+- "Scanning all organizations for national assessment (X/Y)..."
+- "Evaluating ITU controls..."
+
+**3. Error handling**
+
+Individual scan failures will be caught and logged but won't block the assessment. If a scan fails, the assessment falls back to existing data (same as current behavior) for that specific check.
 
 ### Expected Result
 
-- TLS-CAA no longer penalizes the score
-- JS-SRI becomes informational instead of a failing check
-- DMARC "none" policy is treated as a low-priority observation
-- Combined score improvement: removal of 2 medium fails and 1 medium fail = approximately +9-12 points
+- Clicking "Run Assessment" on ITU-NCI now triggers real scans first
+- The assessment takes longer (30-60 seconds depending on org count) but produces accurate, real-time results
+- Progress messages keep the user informed during the scan phase
+- All ITU technical controls (T1-T7) reflect actual current security posture
+- Works for any sector including telecom
 
