@@ -1,67 +1,37 @@
 
 
-## Add Logo to PDF Reports and Redesign Email Template
+## Fix Broken Logo in Email and PDF Reports
 
-### What's Changing
+### Problem
 
-1. **Logo in all PDF reports** -- The Somalia Cyber Defense logo will appear in the header bar of every page in both the DAST report and the general security report PDFs
-2. **Logo in email** -- The logo will appear at the top of the DAST report email
-3. **Email redesign** -- Switch from dark/black background to a clean white background matching the reference design
+The logo URL `https://national-cyber-beacon.lovable.app/logo.png` is served by the SPA router, which returns `index.html` instead of the actual PNG file. This causes:
+- The email `<img>` tag to show a broken image
+- The PDF PNG parser to fail silently (it tries to parse HTML as PNG), so no logo appears in the PDF
 
----
+### Solution
 
-### Implementation Details
+Upload `logo.png` to the project's public `media` storage bucket, which serves files directly. Then update both references to use the storage URL.
 
-#### 1. Copy logo to `public/logo.png`
+The new URL will be:
+`https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png`
 
-Place the logo in the `public/` folder so it's served at a stable URL without Vite's content hash (`/logo.png` instead of `/assets/logo-C103sdBq.png`). This gives edge functions a reliable URL to fetch from: `https://national-cyber-beacon.lovable.app/logo.png`.
-
-#### 2. Create shared PNG parser: `supabase/functions/_shared/logoUtils.ts`
-
-A utility module that both report edge functions import. It will:
-- Fetch the logo PNG from the published app URL
-- Parse the PNG binary format (read IHDR chunk for width/height, extract IDAT chunks)
-- Decompress the pixel data and extract RGB values (compositing any alpha onto white)
-- Return `{ width, height, rgbBytes }` for embedding as a PDF Image XObject
-- Gracefully return `null` if the fetch fails (reports still generate without logo)
-
-#### 3. Update `supabase/functions/send-dast-report/index.ts`
-
-**PDF changes:**
-- Import the logo utility
-- Add an Image XObject (object 5) containing the logo's RGB pixel data
-- Update object numbering: fonts at obj 3-4, logo at obj 5, pages start at obj 6
-- Add `/XObject << /Logo 5 0 R >>` to each page's resource dictionary
-- Render the logo in each header bar using `q 36 0 0 36 32 798 cm /Logo Do Q` (36x36pt)
-- Shift branding text right by ~42pt to accommodate the logo
-
-**Email HTML changes:**
-- Replace dark `#0d1520` background with white `#ffffff`
-- Add logo `<img>` tag in the header referencing the published URL
-- Navy header bar with white text and red accent (matching reference)
-- Light gray `#f8fafc` card backgrounds with dark text for info sections
-- Clean severity count table with white background and colored numbers
-- Professional footer with subtle border
-
-#### 4. Update `supabase/functions/generate-report/index.ts`
-
-Same PDF logo embedding approach:
-- Import logo utility
-- Add Image XObject for the logo
-- Render 36x36pt logo in each page's header bar
-- Shift header text right to accommodate
-- Update object numbering
-
----
-
-### Files Changed
+### Changes
 
 | File | Change |
 |---|---|
-| `public/logo.png` | New -- copy of `src/assets/logo.png` for stable URL |
-| `supabase/functions/_shared/logoUtils.ts` | New -- PNG fetch/parse utility for PDF embedding |
-| `supabase/functions/send-dast-report/index.ts` | Add logo to PDF headers, redesign email HTML to white background with logo |
-| `supabase/functions/generate-report/index.ts` | Add logo to PDF headers |
+| Storage: `media` bucket | Upload `src/assets/logo.png` as `logo.png` |
+| `supabase/functions/_shared/logoUtils.ts` | Change `LOGO_URL` from the broken app URL to the storage bucket URL |
+| `supabase/functions/send-dast-report/index.ts` | Change the email `logoUrl` variable (line 320) to the storage bucket URL |
 
-No database changes needed.
+### Technical Details
+
+1. **Upload logo to storage**: Read the binary content of `src/assets/logo.png` and upload it to the `media` bucket. The bucket is already public, so no RLS changes needed.
+
+2. **Update `logoUtils.ts` line 4**: Change `LOGO_URL` to `https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png`
+
+3. **Update `send-dast-report/index.ts` line 320**: Change `logoUrl` to the same storage URL
+
+4. **Redeploy both edge functions** (`send-dast-report` and `generate-report`) so they pick up the new shared utility URL
+
+No database migrations needed. No other files affected.
 
