@@ -1,69 +1,123 @@
 
 
-## Make ITU Assessment Trigger Real Scans Before Evaluating
+## Interactive Dashboard Redesign -- Command Center with Charts and Visualizations
 
-### Problem
+This is a major redesign of the Dashboard page into a full command center with interactive charts, clickable elements, and real-time data visualization. The work is split into manageable components.
 
-When you run the ITU National Cybersecurity Index assessment for a telecom organization, it only reads existing data from the database. If no recent scans have been run for that organization (or others), the assessment produces inaccurate results -- showing controls as "failing" simply because monitoring data is missing, not because the organization is actually non-compliant.
+### New Database Table
 
-### Solution
+Create a `security_score_history` table to store daily score snapshots for trend tracking:
 
-Modify the ITU assessment flow to trigger real security scans for the selected organization (and optionally all monitored organizations) before evaluating the ITU controls. This ensures the assessment is based on fresh, real data.
+- `id` (uuid, PK)
+- `organization_id` (uuid, references organizations_monitored)
+- `organization_name` (text)
+- `sector` (text)
+- `security_score` (integer)
+- `uptime_percent` (numeric)
+- `ssl_valid` (boolean)
+- `threats_count` (integer)
+- `recorded_date` (date, default CURRENT_DATE)
+- `recorded_at` (timestamptz, default now())
+- UNIQUE constraint on (organization_id, recorded_date)
+- RLS: authenticated users can read, SuperAdmin/Analyst can write
 
-### Files Modified
+### Files to Create
+
+| File | Purpose |
+|---|---|
+| `src/lib/dashboard/calculateScore.ts` | Security score calculator -- computes score from SSL, uptime, headers, ports, DDoS, email checks |
+| `src/lib/dashboard/snapshotScores.ts` | Daily snapshot function -- checks if today's snapshot exists, calculates and stores scores |
+| `src/components/dashboard/TopStatsBar.tsx` | 5 clickable stat cards: Orgs, Uptime Rate, SSL Valid, Avg Security, Active Alerts |
+| `src/components/dashboard/OrgScoresBarChart.tsx` | Horizontal bar chart of all org scores with sector filters, clickable bars navigate to org detail |
+| `src/components/dashboard/ThreatDonutChart.tsx` | Donut chart showing threat distribution by severity, clickable segments |
+| `src/components/dashboard/ScoreTrendChart.tsx` | 30-day area chart with overall/best/worst sector lines from security_score_history |
+| `src/components/dashboard/ThreatTimelineChart.tsx` | Stacked area chart of daily threats by severity over 30 days |
+| `src/components/dashboard/OrgCard.tsx` | Rich org card with mini sparkline, key metrics, progress bar, status icons |
+| `src/components/dashboard/SectorComparison.tsx` | Collapsible table + radar chart comparing sectors |
+| `src/components/dashboard/RiskHeatMap.tsx` | Grid heatmap: orgs (rows) vs security dimensions (columns) with colored cells |
+
+### File to Modify
 
 | File | Change |
 |---|---|
-| `src/lib/compliance/assess.ts` | Add a `runFreshScans()` helper inside `assessITU` that triggers `run-security-checks`, `check-ssl`, `check-dns`, `fingerprint-tech`, and `fetch-threat-intel` edge functions for the target org before reading the data. Also trigger `run-security-checks` for all monitored orgs (needed for national-level ITU controls like government SSL coverage). |
-| `src/lib/compliance/assess.ts` | Update the `runAssessment` entry point to pass the `onProgress` callback into `assessITU` so users see scan progress ("Scanning telecom org...", "Checking SSL across 12 orgs...", etc.) |
+| `src/pages/Dashboard.tsx` | Complete rewrite to compose all new sections: TopStatsBar, charts row, trend row, org grid, sector comparison, risk heat map |
 
 ### Technical Details
 
-**1. Pre-scan step in assessITU (assess.ts)**
+**Score Calculation** (`calculateScore.ts`):
+- Queries latest SSL, uptime, early_warning, ddos_risk, dast_scan data for each org
+- Scoring: SSL valid (+20), Uptime >99% (+15) / >95% (+10), No critical warnings (+20), Security headers per header (+3, max +21), No exposed ports (+10), CDN/WAF (+7), SPF/DMARC (+7)
+- Returns breakdown object with total score and individual metrics
 
-Before the existing cross-organization data fetch, add a new phase:
+**Daily Snapshot** (`snapshotScores.ts`):
+- Called once when dashboard loads
+- Checks if today's date exists in security_score_history
+- If not, calculates scores for all active orgs in organizations_monitored and bulk inserts
+- Uses the calculateScore function
 
-```
-Phase 1: Trigger fresh scans for the selected org
-  - invoke('run-security-checks', { org_id })  -- covers uptime, SSL, headers, DNS, DDoS, WAF
-  - invoke('check-dns', { domains: [org.domain] })  -- email auth (SPF/DMARC/DKIM)
-  - invoke('fingerprint-tech', { url: org.url })  -- tech stack detection
-  - invoke('fetch-threat-intel', { org_id })  -- threat intelligence
+**TopStatsBar** component:
+- 5 cards in a row: Organizations count, Uptime %, SSL valid ratio, Avg security score, Active alerts
+- Each card clickable (navigates to relevant page via react-router)
+- Pulse animation on alerts card when critical alerts exist
+- Trend comparison vs last week shown as small arrow + text
 
-Phase 2: Trigger run-security-checks for ALL monitored orgs
-  - Loop through all active organizations_monitored
-  - Invoke 'run-security-checks' for each (with 1s delay between calls)
-  - This ensures national-level controls (ITU-T4 gov SSL, ITU-T5 DDoS coverage) have current data
+**OrgScoresBarChart** (Recharts BarChart, horizontal):
+- Queries all orgs and their calculated scores
+- Color-coded bars: green (90+), light green (75-89), yellow (60-74), orange (40-59), red (0-39)
+- Sector filter buttons above chart
+- onClick handler navigates to `/organizations/{id}`
+- Dashed reference line at score 70
 
-Phase 3: Short delay (2 seconds) to allow database writes to settle
+**ThreatDonutChart** (Recharts PieChart with inner radius):
+- Aggregates severity counts from alerts + early_warning_logs
+- Center label shows total count
+- onClick on segments can set a filter state lifted to Dashboard
 
-Phase 4: Proceed with the existing assessITU logic (read data, evaluate controls)
-```
+**ScoreTrendChart** (Recharts AreaChart):
+- Reads from security_score_history grouped by date
+- 3 lines: overall average, best sector avg, worst sector avg
+- Shaded area between best/worst
+- Shows "Collecting trend data..." if fewer than 2 days of data
 
-**2. Progress reporting**
+**ThreatTimelineChart** (Recharts AreaChart, stacked):
+- Groups early_warning_logs + alerts by day and severity over 30 days
+- 4 stacked colored areas
+- Spike detection: marks days with 3x average
 
-The `assessITU` function signature changes to accept `onProgress` callback:
+**OrgCard** component:
+- Mini Recharts sparkline (tiny AreaChart, 14-day data from security_score_history)
+- Key metrics: SSL status, uptime %, active threats, DAST grade
+- Bottom progress bar colored by score
+- Status icons row: Headers, Ports, Email, DNS, WAF
+- Click navigates to org detail page
 
-```typescript
-async function assessITU(orgId: string, d: any, onProgress?: (msg: string) => void)
-```
+**SectorComparison** (collapsible):
+- Table grouping orgs by sector with averages
+- Recharts RadarChart comparing sectors across 5 dimensions
+- Click sector row to filter org grid
 
-Progress messages will be:
-- "Running security scans for [org name]..."
-- "Scanning DNS & email authentication..."  
-- "Fingerprinting technology stack..."
-- "Scanning all organizations for national assessment (X/Y)..."
-- "Evaluating ITU controls..."
+**RiskHeatMap**:
+- Table with orgs as rows, security dimensions as columns
+- Each cell colored green/yellow/red based on latest check data
+- Tooltip on hover showing details
 
-**3. Error handling**
+**Responsive Layout**:
+- Desktop: 2 charts per row, 3 org cards per row
+- Tablet: 1 chart per row, 2 cards per row
+- Mobile: fully stacked
 
-Individual scan failures will be caught and logged but won't block the assessment. If a scan fails, the assessment falls back to existing data (same as current behavior) for that specific check.
+**Auto-refresh**:
+- React Query refetchInterval of 5 minutes on all dashboard queries
+- "Last updated: X min ago" indicator in header
 
-### Expected Result
-
-- Clicking "Run Assessment" on ITU-NCI now triggers real scans first
-- The assessment takes longer (30-60 seconds depending on org count) but produces accurate, real-time results
-- Progress messages keep the user informed during the scan phase
-- All ITU technical controls (T1-T7) reflect actual current security posture
-- Works for any sector including telecom
+**Data Sources** (all from existing tables, no new edge functions):
+- `organizations_monitored` -- org list
+- `ssl_logs` -- SSL validity
+- `uptime_logs` -- uptime status
+- `early_warning_logs` -- headers, ports, email, DNS checks
+- `ddos_risk_logs` -- CDN/WAF status
+- `dast_scan_results` -- DAST grades
+- `alerts` -- active alerts
+- `threat_events` -- threat counts
+- `security_score_history` (new) -- daily score snapshots for trends
 
