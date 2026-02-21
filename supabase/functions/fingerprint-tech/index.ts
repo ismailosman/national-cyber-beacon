@@ -51,8 +51,15 @@ serve(async (req) => {
 
         const serverHeader = headers.get('server') || '';
         const serverParts = serverHeader.match(/^([a-zA-Z-]+)\/?(.*)$/);
-        const webServer = serverParts ? serverParts[1] : serverHeader || null;
-        const webServerVersion = serverParts?.[2] || null;
+        let webServer = serverParts ? serverParts[1] : serverHeader || null;
+        let webServerVersion = serverParts?.[2] || null;
+
+        // If server header belongs to a known CDN/WAF, don't report it as the origin web server
+        const cdnServerNames = ['cloudflare', 'cloudfront', 'sucuri', 'ddos-guard', 'akamaighost', 'fastly'];
+        if (webServer && cdnServerNames.some(c => webServer!.toLowerCase().includes(c))) {
+          webServer = null;
+          webServerVersion = null;
+        }
 
         const poweredBy = headers.get('x-powered-by') || '';
         const langParts = poweredBy.match(/^([a-zA-Z.]+)\/?(.*)$/);

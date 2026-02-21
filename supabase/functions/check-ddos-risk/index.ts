@@ -105,8 +105,22 @@ async function checkUrl(url: string): Promise<{ url: string; ddosProtection: Ddo
     // Cloudflare WAF implied
     if (result.cdnProvider === 'Cloudflare') result.hasWAF = true;
 
+    // If behind a known WAF/CDN, rate limiting is handled at the edge
+    if (result.hasCDN || result.hasWAF) {
+      result.hasRateLimiting = true;
+    }
+
     // Origin exposed = no CDN
     result.originExposed = !result.hasCDN;
+
+    // Server header: if it matches the CDN provider, it's expected — clear it to avoid false flags
+    if (result.serverHeader && result.cdnProvider) {
+      const serverLower = result.serverHeader.toLowerCase();
+      const cdnLower = result.cdnProvider.toLowerCase();
+      if (serverLower.includes(cdnLower.split(' ')[0].toLowerCase())) {
+        result.serverHeader = null; // Not an origin server leak
+      }
+    }
 
   } catch {
     // Request failed - leave defaults (no protection detected)
