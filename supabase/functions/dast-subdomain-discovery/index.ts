@@ -46,7 +46,9 @@ serve(async (req) => {
     const subdomainList = Array.from(subdomains);
     findings.push({ id: "SUB-COUNT", test: "Subdomain Count", severity: subdomainList.length > 20 ? "medium" : "info", status: subdomainList.length > 20 ? "fail" : "info", detail: `Found ${subdomainList.length} unique subdomain(s) for ${rootDomain}`, recommendation: subdomainList.length > 20 ? "Large attack surface. Review and decommission unused subdomains." : undefined, evidence: { rootDomain, totalSubdomains: subdomainList.length } });
 
-    const dangerousPatterns = ["admin", "test", "dev", "staging", "beta", "old", "backup", "internal", "vpn", "ftp", "db", "database", "phpmyadmin", "cpanel", "webmail", "jenkins", "gitlab", "git", "jira", "debug", "temp", "demo", "sandbox", "uat"];
+    const dangerousPatterns = ["admin", "test", "dev", "staging", "beta", "old", "backup", "internal", "vpn", "ftp", "db", "database", "phpmyadmin", "cpanel", "jenkins", "gitlab", "git", "jira", "debug", "temp", "demo", "sandbox", "uat"];
+    // Mail subdomains are expected infrastructure and should not be flagged
+    const excludedPatterns = ["mail", "webmail", "smtp", "imap", "pop3", "mx"];
     const liveSubdomains: any[] = [];
     const dangerousSubdomains: any[] = [];
     const toCheck = subdomainList.slice(0, 30);
@@ -61,7 +63,7 @@ serve(async (req) => {
           liveSubdomains.push(entry);
 
           const subPrefix = subdomain.split(".")[0].toLowerCase();
-          if (dangerousPatterns.some(p => subPrefix.includes(p))) {
+          if (dangerousPatterns.some(p => subPrefix.includes(p)) && !excludedPatterns.some(p => subPrefix === p)) {
             dangerousSubdomains.push({ subdomain, ip, pattern: subPrefix });
           }
 
