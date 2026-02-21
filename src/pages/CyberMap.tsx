@@ -954,6 +954,11 @@ const CyberMap: React.FC = () => {
       map.on('load', () => {
         if (cancelled) return;
 
+        // On mobile, fit the entire world into the viewport
+        if (isMobile) {
+          map.fitBounds([[-180, -60], [180, 75]], { padding: 0, animate: false });
+        }
+
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
         map.addSource('attack-arcs-source', { type: 'geojson', data: emptyFC });
