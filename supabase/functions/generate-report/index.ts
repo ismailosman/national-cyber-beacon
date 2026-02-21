@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { fetchLogoPngData } from "../_shared/logoUtils.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -93,6 +94,11 @@ function s(text: string | null | undefined, maxLen = 90): string {
   return (text || '').replace(/[()\\]/g, ' ').substring(0, maxLen);
 }
 
+function buildLogoXObject(logoData: { width: number; height: number; rgbHex: string }, objId: number): string {
+  const { width, height, rgbHex } = logoData;
+  return `${objId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${rgbHex.length} /Filter /ASCIIHexDecode >>\nstream\n${rgbHex}>\nendstream\nendobj\n`;
+}
+
 /* ─── PDF Generator ─── */
 function generatePDF(data: {
   org: any; alerts: any[]; dateFrom: string; dateTo: string;
@@ -100,22 +106,32 @@ function generatePDF(data: {
   sslLog: any; ddosLog: any; ewLogs: any[]; uptimeLogs: any[];
   techFp: any; phishingDomains: any[]; tiLogs: any[];
   sections: { earlyWarning: boolean; threatIntel: boolean; alertHistory: boolean };
+  logoData: { width: number; height: number; rgbHex: string } | null;
 }): Uint8Array {
   const { org, alerts, dateFrom, dateTo, remediations, includeRemediation,
-    sslLog, ddosLog, ewLogs, uptimeLogs, techFp, phishingDomains, tiLogs, sections } = data;
+    sslLog, ddosLog, ewLogs, uptimeLogs, techFp, phishingDomains, tiLogs, sections, logoData } = data;
   const now = new Date().toISOString().split('T')[0];
   const scoreColor = org.risk_score >= 75 ? '0.2 0.8 0.4' : org.risk_score >= 50 ? '1 0.7 0' : '0.9 0.2 0.2';
   const orgName = s(org.name);
   const domain = s(org.domain);
+  const hasLogo = !!logoData;
+  const tx = hasLogo ? 82 : 40; // text x-offset after logo
 
   const pages: string[][] = [];
 
+  // Helper to add header with logo to any page
+  function addHeader(p: string[], title: string, subtitle: string) {
+    p.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
+    if (hasLogo) {
+      p.push(`q 36 0 0 36 40 798 cm /Logo Do Q`);
+    }
+    p.push(`BT /F2 18 Tf 1 1 1 rg ${tx} 810 Td (${title}) Tj ET`);
+    p.push(`BT /F1 10 Tf 1 1 1 rg ${tx} 797 Td (${subtitle}) Tj ET`);
+  }
+
   // ── Page 1: Executive Summary ──
   const p1: string[] = [];
-  // Header bar
-  p1.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-  p1.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (SOMALIA CYBER DEFENSE OBSERVATORY) Tj ET`);
-  p1.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (Security Risk Assessment Report) Tj ET`);
+  addHeader(p1, 'SOMALIA CYBER DEFENSE OBSERVATORY', 'Security Risk Assessment Report');
 
   // Background
   p1.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
@@ -138,14 +154,12 @@ function generatePDF(data: {
   // Build check results
   const checks: { name: string; status: string; color: string; detail: string; time: string }[] = [];
 
-  // SSL
   if (sslLog) {
     const st = sslLog.is_valid && !sslLog.is_expired ? 'PASS' : 'FAIL';
     const detail = sslLog.is_valid ? `Valid, expires in ${sslLog.days_until_expiry || '?'} days` : 'Invalid or expired';
     checks.push({ name: 'SSL Certificate', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : '0.9 0.2 0.2', detail, time: (sslLog.checked_at || '').substring(0, 16) });
   }
 
-  // Uptime
   if (uptimeLogs.length > 0) {
     const upCount = uptimeLogs.filter((u: any) => u.status === 'up').length;
     const pct = Math.round((upCount / uptimeLogs.length) * 100);
@@ -153,14 +167,12 @@ function generatePDF(data: {
     checks.push({ name: 'Uptime', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : st === 'WARN' ? '1 0.7 0' : '0.9 0.2 0.2', detail: `${pct}% uptime (${uptimeLogs.length} checks)`, time: (uptimeLogs[0]?.checked_at || '').substring(0, 16) });
   }
 
-  // DDoS
   if (ddosLog) {
     const protections = [ddosLog.has_cdn && 'CDN', ddosLog.has_waf && 'WAF', ddosLog.has_rate_limiting && 'Rate Limit'].filter(Boolean);
     const st = protections.length >= 2 ? 'PASS' : protections.length >= 1 ? 'WARN' : 'FAIL';
     checks.push({ name: 'DDoS Protection', status: st, color: st === 'PASS' ? '0.2 0.8 0.4' : st === 'WARN' ? '1 0.7 0' : '0.9 0.2 0.2', detail: protections.length > 0 ? protections.join(', ') : 'No protection', time: (ddosLog.checked_at || '').substring(0, 16) });
   }
 
-  // Early Warning checks
   const ewTypes = ['security_headers', 'email_security', 'open_ports', 'defacement', 'dns', 'blacklist'];
   const ewLabels: Record<string, string> = {
     security_headers: 'Security Headers', email_security: 'Email Security',
@@ -186,12 +198,10 @@ function generatePDF(data: {
     }
   }
 
-  // Render checks table
   const passCount = checks.filter(c => c.status === 'PASS').length;
   const failCount = checks.filter(c => c.status === 'FAIL').length;
   const warnCount = checks.filter(c => c.status === 'WARN').length;
 
-  // Summary boxes
   p1.push(`0.12 0.15 0.2 rg`);
   p1.push(`50 635 130 40 re f`, `200 635 130 40 re f`, `350 635 130 40 re f`);
   p1.push(`BT /F2 18 Tf 0.2 0.9 0.4 rg 90 653 Td (${passCount}) Tj ET`);
@@ -201,7 +211,6 @@ function generatePDF(data: {
   p1.push(`BT /F2 18 Tf 1 0.8 0 rg 395 653 Td (${warnCount}) Tj ET`);
   p1.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 387 640 Td (Warnings) Tj ET`);
 
-  // Table header
   p1.push(`0.12 0.15 0.2 rg`, `50 588 480 24 re f`);
   p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 55 596 Td (CHECK TYPE) Tj ET`);
   p1.push(`BT /F2 9 Tf 0.6 0.7 0.8 rg 220 596 Td (STATUS) Tj ET`);
@@ -217,14 +226,12 @@ function generatePDF(data: {
     p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 450 ${y + 3} Td (${s(c.time?.replace('T', ' '), 16)}) Tj ET`);
   });
 
-  // Alert summary at bottom
   const alertY = 160;
   p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 ${alertY} Td (Alert Summary) Tj ET`);
   const openAlerts = alerts.filter((a: any) => a.status === 'open').length;
   const critAlerts = alerts.filter((a: any) => a.severity === 'critical').length;
   p1.push(`BT /F1 10 Tf 0.9 0.95 1 rg 50 ${alertY - 18} Td (${alerts.length} total alerts | ${openAlerts} open | ${critAlerts} critical) Tj ET`);
 
-  // Tech stack summary
   if (techFp) {
     p1.push(`BT /F2 11 Tf ${scoreColor} rg 50 ${alertY - 45} Td (Technology Stack) Tj ET`);
     const techInfo = [techFp.web_server, techFp.cms, techFp.language, techFp.cdn].filter(Boolean).join(' | ') || 'Unknown';
@@ -234,7 +241,6 @@ function generatePDF(data: {
     }
   }
 
-  // Footer
   p1.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
   p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (Somalia Cyber Defense Observatory | ${now} | CONFIDENTIAL) Tj ET`);
   p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 40 18 Td (This report contains sensitive security information. Handle with appropriate care.) Tj ET`);
@@ -243,12 +249,9 @@ function generatePDF(data: {
   // ── Page 2: Early Warning Details ──
   if (sections.earlyWarning && ewLogs.length > 0) {
     const p2: string[] = [];
-    p2.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-    p2.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (EARLY WARNING DETAILS) Tj ET`);
-    p2.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - All Security Check Results) Tj ET`);
+    addHeader(p2, 'EARLY WARNING DETAILS', `${orgName} - All Security Check Results`);
     p2.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
-    // Group by check_type
     const byType: Record<string, any[]> = {};
     for (const log of ewLogs) {
       const ct = log.check_type;
@@ -260,9 +263,8 @@ function generatePDF(data: {
     for (const [checkType, logs] of Object.entries(byType)) {
       if (y < 120) break;
       const label = ewLabels[checkType] || checkType;
-      const latest = logs[0]; // already sorted desc
+      const latest = logs[0];
 
-      // Section header
       const rlColor = latest.risk_level === 'safe' ? '0.2 0.8 0.4' : latest.risk_level === 'warning' ? '1 0.7 0' : '0.9 0.2 0.2';
       p2.push(`${rlColor} rg`, `50 ${y - 3} 6 12 re f`);
       p2.push(`BT /F2 10 Tf 0.9 0.95 1 rg 62 ${y} Td (${s(label)}) Tj ET`);
@@ -271,7 +273,6 @@ function generatePDF(data: {
       p2.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 460 ${y} Td (${logs.length} checks) Tj ET`);
       y -= 16;
 
-      // Show detail for latest
       const det = latest.details as any;
       if (det) {
         let detailStr = '';
@@ -301,14 +302,11 @@ function generatePDF(data: {
   // ── Page 3: Threat Intelligence ──
   if (sections.threatIntel) {
     const p3: string[] = [];
-    p3.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-    p3.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (THREAT INTELLIGENCE) Tj ET`);
-    p3.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - Phishing, Breaches, and Technology Risks) Tj ET`);
+    addHeader(p3, 'THREAT INTELLIGENCE', `${orgName} - Phishing, Breaches, and Technology Risks`);
     p3.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
     let y = 760;
 
-    // Phishing Domains
     p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Phishing / Lookalike Domains) Tj ET`);
     y -= 18;
     if (phishingDomains.length === 0) {
@@ -338,7 +336,6 @@ function generatePDF(data: {
 
     y -= 15;
 
-    // Breach Summary
     const breachLogs = tiLogs.filter(l => l.check_type === 'breach');
     p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Data Breach Exposure) Tj ET`);
     y -= 18;
@@ -354,7 +351,6 @@ function generatePDF(data: {
         p3.push(`BT /F2 9 Tf ${rlColor} rg 50 ${y} Td (${s(bl.organization_name || 'Unknown', 40)}) Tj ET`);
         p3.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 280 ${y} Td (${bCount} breaches found | Risk: ${bl.risk_level}) Tj ET`);
         y -= 16;
-        // List breach names
         for (const b of (det?.breaches || []).slice(0, 3)) {
           if (y < 120) break;
           p3.push(`BT /F1 8 Tf 0.6 0.7 0.8 rg 65 ${y} Td (- ${s(b.name || b.title, 70)} ${b.breachDate ? '(' + b.breachDate + ')' : ''}) Tj ET`);
@@ -366,7 +362,6 @@ function generatePDF(data: {
 
     y -= 15;
 
-    // Tech Stack Risks
     if (techFp) {
       p3.push(`BT /F2 12 Tf 0 0.8 0.85 rg 50 ${y} Td (Technology Stack Analysis) Tj ET`);
       y -= 18;
@@ -394,12 +389,9 @@ function generatePDF(data: {
   // ── Page 4: Alert History ──
   if (sections.alertHistory && alerts.length > 0) {
     const p4: string[] = [];
-    p4.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-    p4.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (ALERT HISTORY) Tj ET`);
-    p4.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - ${alerts.length} Alerts in Period) Tj ET`);
+    addHeader(p4, 'ALERT HISTORY', `${orgName} - ${alerts.length} Alerts in Period`);
     p4.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
-    // Severity breakdown
     const sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const a of alerts) sevCounts[a.severity as keyof typeof sevCounts] = (sevCounts[a.severity as keyof typeof sevCounts] || 0) + 1;
     const statusCounts = { open: 0, acknowledged: 0, closed: 0 };
@@ -420,7 +412,6 @@ function generatePDF(data: {
     p4.push(`BT /F1 9 Tf 0.7 0.8 0.9 rg 50 ${y} Td (Open: ${statusCounts.open} | Acknowledged: ${statusCounts.acknowledged} | Closed: ${statusCounts.closed}) Tj ET`);
     y -= 25;
 
-    // Alert table
     p4.push(`0.12 0.15 0.2 rg`, `50 ${y - 4} 480 18 re f`);
     p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 55 ${y + 2} Td (SEVERITY) Tj ET`);
     p4.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 115 ${y + 2} Td (TITLE) Tj ET`);
@@ -446,9 +437,7 @@ function generatePDF(data: {
   // ── Page 5: Remediation Plan ──
   if (includeRemediation && remediations.length > 0) {
     const p5: string[] = [];
-    p5.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-    p5.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (REMEDIATION ACTION PLAN) Tj ET`);
-    p5.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${orgName} - Step-by-Step Fix Instructions) Tj ET`);
+    addHeader(p5, 'REMEDIATION ACTION PLAN', `${orgName} - Step-by-Step Fix Instructions`);
     p5.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
 
     const critCount = remediations.filter(r => r.severity === 'critical').length;
@@ -482,10 +471,15 @@ function generatePDF(data: {
   const fontObj1 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
   const fontObj2 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>`;
   const streams = pages.map(p => new TextEncoder().encode(p.join('\n')));
-  const baseObj = 5;
+
+  const baseObj = hasLogo ? 6 : 5;
   const pageObjIds = pages.map((_, i) => baseObj + i * 2);
   const streamObjIds = pages.map((_, i) => baseObj + i * 2 + 1);
   const totalObjects = baseObj + pageCount * 2;
+
+  const resourceDict = hasLogo
+    ? `/Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Logo 5 0 R >>`
+    : `/Font << /F1 3 0 R /F2 4 0 R >>`;
 
   let pdf = `%PDF-1.4\n`;
   pdf += `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
@@ -493,8 +487,12 @@ function generatePDF(data: {
   pdf += `3 0 obj\n${fontObj1}\nendobj\n`;
   pdf += `4 0 obj\n${fontObj2}\nendobj\n`;
 
+  if (hasLogo && logoData) {
+    pdf += buildLogoXObject(logoData, 5);
+  }
+
   for (let i = 0; i < pageCount; i++) {
-    pdf += `${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`;
+    pdf += `${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${resourceDict} >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`;
     pdf += `${streamObjIds[i]} 0 obj\n<< /Length ${streams[i].length} >>\nstream\n`;
     pdf += new TextDecoder().decode(streams[i]);
     pdf += `\nendstream\nendobj\n`;
@@ -528,8 +526,8 @@ Deno.serve(async (req: Request) => {
     const dateFromFilter = date_from || '2020-01-01';
     const dateToFilter = (date_to || new Date().toISOString().split('T')[0]) + 'T23:59:59';
 
-    // Fetch all data in parallel from real monitoring tables
-    const [orgData, alertsData, sslData, ddosData, ewData, techData, uptimeData, phishingData, tiData] = await Promise.all([
+    // Fetch all data in parallel from real monitoring tables + logo
+    const [orgData, alertsData, sslData, ddosData, ewData, techData, uptimeData, phishingData, tiData, logoData] = await Promise.all([
       supabase.from('organizations').select('*').eq('id', org_id).single(),
       supabase.from('alerts').select('*').eq('organization_id', org_id)
         .gte('created_at', dateFromFilter).lte('created_at', dateToFilter)
@@ -549,6 +547,7 @@ Deno.serve(async (req: Request) => {
       supabase.from('phishing_domains').select('*').eq('organization_id', org_id),
       supabase.from('threat_intelligence_logs').select('*').eq('organization_id', org_id)
         .order('checked_at', { ascending: false }).limit(50),
+      fetchLogoPngData(),
     ]);
 
     const sslLog = sslData.data?.[0] || null;
@@ -575,6 +574,7 @@ Deno.serve(async (req: Request) => {
         threatIntel: includeThreatIntel,
         alertHistory: includeAlertHistory,
       },
+      logoData,
     });
 
     let binary = '';
