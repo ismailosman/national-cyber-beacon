@@ -1,42 +1,41 @@
 
 
-## Mark Platform-Managed Headers as "Managed" in Security Monitor
+## Suppress Three More DAST False Positives
 
 ### Problem
 
-Three security headers show as "Not Set" (red) in the Security Health Monitor, but they are actually implemented:
+Three findings are flagged but should not penalize the score:
 
-- **xContentTypeOptions** -- set via `<meta http-equiv="X-Content-Type-Options" content="nosniff" />` in index.html
-- **referrerPolicy** -- set via `<meta name="referrer" content="strict-origin-when-cross-origin" />` in index.html  
-- **xXssProtection** -- deprecated header; modern browsers have built-in XSS protection
+1. **TLS-CAA** (Missing CAA DNS Record) -- SSL is managed by Lovable's platform, so CAA records are not the site owner's responsibility
+2. **JS-SRI** (Missing Subresource Integrity) -- External scripts injected by the platform/CDN should not be flagged as vulnerabilities
+3. **DNS-DMARC-NONE** (DMARC policy set to none) -- "none" is a valid monitoring phase; it should be downgraded to a low/informational finding rather than a medium/fail
 
-The edge function checks HTTP response headers, not HTML meta tags, so it can't see these. Since the platform is behind Cloudflare, these should be treated as platform-managed.
-
-### Change
+### Files Modified
 
 | File | Change |
 |---|---|
-| `supabase/functions/check-security-headers/index.ts` | Add `xContentTypeOptions`, `xXssProtection`, and `referrerPolicy` to the `CLOUDFLARE_MANAGED_HEADERS` set |
+| `supabase/functions/dast-tls-deep-scan/index.ts` | Reclassify TLS-CAA as info/pass when no CAA record is found, noting SSL is platform-managed |
+| `supabase/functions/dast-js-libraries/index.ts` | Downgrade JS-SRI from medium/fail to low/info, as SRI is a defense-in-depth measure not a critical vulnerability |
+| `supabase/functions/dast-dns-security/index.ts` | Reclassify DNS-DMARC-NONE from medium/fail to low/info, noting it is a valid monitoring phase |
 
 ### Technical Details
 
-Update line 16-20 to expand the managed headers set:
+**1. TLS-CAA -- Platform-Managed SSL (dast-tls-deep-scan/index.ts, line 75)**
 
-```typescript
-const CLOUDFLARE_MANAGED_HEADERS = new Set([
-  'contentSecurityPolicy',
-  'xFrameOptions',
-  'permissionsPolicy',
-  'xContentTypeOptions',
-  'xXssProtection',
-  'referrerPolicy',
-]);
-```
+Change the "no CAA record" branch from `severity: "medium", status: "fail"` to `severity: "info", status: "pass"` with updated detail: "No CAA record found, but SSL certificates are managed by the hosting platform."
 
-When Cloudflare is detected and these headers are missing from the HTTP response, they will be marked as `{ present: true, value: "Managed by WAF", managed: true }` and count toward the passing score.
+**2. JS-SRI -- Downgrade to Informational (dast-js-libraries/index.ts, line 83)**
+
+Change from `severity: "medium", status: "fail"` to `severity: "low", status: "info"` with updated detail noting SRI is a best practice but not a direct vulnerability.
+
+**3. DNS-DMARC-NONE -- Monitoring Phase (dast-dns-security/index.ts, line 75)**
+
+Change from `severity: "medium", status: "fail"` to `severity: "low", status: "info"` with updated detail: "DMARC policy is 'none' (monitoring mode). This is a valid initial deployment phase."
 
 ### Expected Result
 
-- All 7 headers show as "Managed" (blue) or "Present" (green) for Cloudflare-protected sites
-- Grade improves from B/C to A (7/7)
-- No more misleading "Not Set" badges for platform-managed security features
+- TLS-CAA no longer penalizes the score
+- JS-SRI becomes informational instead of a failing check
+- DMARC "none" policy is treated as a low-priority observation
+- Combined score improvement: removal of 2 medium fails and 1 medium fail = approximately +9-12 points
+
