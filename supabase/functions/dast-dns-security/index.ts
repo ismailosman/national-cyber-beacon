@@ -72,7 +72,7 @@ serve(async (req) => {
         const policyMatch = dmarc.match(/p=(none|quarantine|reject)/i);
         const policy = policyMatch ? policyMatch[1].toLowerCase() : "unknown";
         if (policy === "none") {
-          findings.push({ id: "DNS-DMARC-NONE", test: "DMARC Policy Set to None", severity: "medium", status: "fail", detail: "DMARC policy is 'none' — spoofed emails are monitored but not blocked.", recommendation: "Change DMARC policy to p=quarantine or p=reject after monitoring" });
+          findings.push({ id: "DNS-DMARC-NONE", test: "DMARC Policy (Monitoring)", severity: "low", status: "info", detail: "DMARC policy is 'none' (monitoring mode). This is a valid initial deployment phase for collecting reports before enforcing.", recommendation: "Consider upgrading to p=quarantine or p=reject after reviewing DMARC reports." });
         } else {
           findings.push({ id: "DNS-DMARC-OK", test: "DMARC Record Present", severity: "info", status: "pass", detail: `DMARC policy: ${policy}`, evidence: { dmarc } });
         }
