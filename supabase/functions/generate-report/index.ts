@@ -481,31 +481,38 @@ function generatePDF(data: {
     ? `/Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Logo 5 0 R >>`
     : `/Font << /F1 3 0 R /F2 4 0 R >>`;
 
+  const encoder = new TextEncoder();
+  const offsets: number[] = [];
   let pdf = `%PDF-1.4\n`;
-  pdf += `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
-  pdf += `2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageCount} >>\nendobj\n`;
-  pdf += `3 0 obj\n${fontObj1}\nendobj\n`;
-  pdf += `4 0 obj\n${fontObj2}\nendobj\n`;
+
+  function addObj(content: string) {
+    offsets.push(encoder.encode(pdf).length);
+    pdf += content;
+  }
+
+  addObj(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`);
+  addObj(`2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageCount} >>\nendobj\n`);
+  addObj(`3 0 obj\n${fontObj1}\nendobj\n`);
+  addObj(`4 0 obj\n${fontObj2}\nendobj\n`);
 
   if (hasLogo && logoData) {
-    pdf += buildLogoXObject(logoData, 5);
+    addObj(buildLogoXObject(logoData, 5));
   }
 
   for (let i = 0; i < pageCount; i++) {
-    pdf += `${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${resourceDict} >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`;
-    pdf += `${streamObjIds[i]} 0 obj\n<< /Length ${streams[i].length} >>\nstream\n`;
-    pdf += new TextDecoder().decode(streams[i]);
-    pdf += `\nendstream\nendobj\n`;
+    addObj(`${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${resourceDict} >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`);
+    const streamContent = new TextDecoder().decode(streams[i]);
+    addObj(`${streamObjIds[i]} 0 obj\n<< /Length ${streams[i].length} >>\nstream\n${streamContent}\nendstream\nendobj\n`);
   }
 
-  const xrefOffset = new TextEncoder().encode(pdf).length;
+  const xrefOffset = encoder.encode(pdf).length;
   pdf += `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
-  for (let i = 0; i < totalObjects; i++) {
-    pdf += `${String(i * 100).padStart(10, '0')} 00000 n \n`;
+  for (const offset of offsets) {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
   }
   pdf += `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
 
-  return new TextEncoder().encode(pdf);
+  return encoder.encode(pdf);
 }
 
 Deno.serve(async (req: Request) => {
