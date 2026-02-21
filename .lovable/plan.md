@@ -1,37 +1,24 @@
 
 
-## Fix Broken Logo in Email and PDF Reports
+## Replace Logo in Storage Bucket, Email, and PDF Reports
 
-### Problem
+### What's Changing
 
-The logo URL `https://national-cyber-beacon.lovable.app/logo.png` is served by the SPA router, which returns `index.html` instead of the actual PNG file. This causes:
-- The email `<img>` tag to show a broken image
-- The PDF PNG parser to fail silently (it tries to parse HTML as PNG), so no logo appears in the PDF
+Replace the current `logo.png` in the storage bucket with the new Somalia Cyber Defense logo (dark background with shield emblem and yellow/white text). Both the email template and PDF reports will use this new logo automatically since they already reference the storage URL.
 
-### Solution
+### Steps
 
-Upload `logo.png` to the project's public `media` storage bucket, which serves files directly. Then update both references to use the storage URL.
+1. **Upload new logo to storage bucket**: Upload the user-provided image (`user-uploads://3843ECF6-...`) to the `media` storage bucket as `logo.png`, replacing the existing file.
 
-The new URL will be:
-`https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png`
+2. **No code changes needed**: Both `logoUtils.ts` (PDF) and `send-dast-report/index.ts` (email) already point to `https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png`, so they will automatically pick up the new image.
 
-### Changes
+3. **Redeploy edge functions**: Redeploy `send-dast-report` and `generate-report` to clear any cached logo data.
+
+### Files Changed
 
 | File | Change |
 |---|---|
-| Storage: `media` bucket | Upload `src/assets/logo.png` as `logo.png` |
-| `supabase/functions/_shared/logoUtils.ts` | Change `LOGO_URL` from the broken app URL to the storage bucket URL |
-| `supabase/functions/send-dast-report/index.ts` | Change the email `logoUrl` variable (line 320) to the storage bucket URL |
+| Storage: `media/logo.png` | Replace with new Somalia Cyber Defense logo |
 
-### Technical Details
-
-1. **Upload logo to storage**: Read the binary content of `src/assets/logo.png` and upload it to the `media` bucket. The bucket is already public, so no RLS changes needed.
-
-2. **Update `logoUtils.ts` line 4**: Change `LOGO_URL` to `https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png`
-
-3. **Update `send-dast-report/index.ts` line 320**: Change `logoUrl` to the same storage URL
-
-4. **Redeploy both edge functions** (`send-dast-report` and `generate-report`) so they pick up the new shared utility URL
-
-No database migrations needed. No other files affected.
+No code or database changes required.
 
