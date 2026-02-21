@@ -934,9 +934,9 @@ const CyberMap: React.FC = () => {
       const map = new mapboxgl.Map({
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/dark-v11',
-        center: [20, 10],
-        zoom: window.innerWidth < 768 ? 0.8 : 2,
-        minZoom: window.innerWidth < 768 ? 0.3 : 1,
+        center: window.innerWidth < 768 ? [38, 8] as [number, number] : [20, 10] as [number, number],
+        zoom: window.innerWidth < 768 ? 0.4 : 2,
+        minZoom: window.innerWidth < 768 ? 0.1 : 1,
         projection: 'mercator',
         pitchWithRotate: false,
         attributionControl: false,
@@ -1331,9 +1331,16 @@ const CyberMap: React.FC = () => {
         {/* ── Map container ─────────────────────────────────────────────── */}
         <div className="relative flex-1 min-w-0">
 
+          {/* ── Mobile dot-grid background for contrast ─────────────────── */}
+          <div className="absolute inset-0 z-[1] lg:hidden pointer-events-none"
+               style={{
+                 backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.12) 1px, transparent 1px)',
+                 backgroundSize: '14px 14px',
+               }} />
+
           {/* ── Header overlay ──────────────────────────────────────────── */}
           <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-4 sm:pt-6 pb-3 sm:pb-4 pointer-events-none"
-               style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
+               style={{ background: window.innerWidth < 768 ? 'linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%)' : 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
             <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
               <img src={logoSrc} alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain opacity-90" />
               <div className="text-center">
