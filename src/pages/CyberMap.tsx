@@ -935,7 +935,7 @@ const CyberMap: React.FC = () => {
       const map = new mapboxgl.Map({
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/dark-v11',
-        center: isMobile ? [30, 10] as [number, number] : [20, 10] as [number, number],
+        center: isMobile ? [45, 5] as [number, number] : [20, 10] as [number, number],
         zoom: isMobile ? 0.1 : 2,
         minZoom: isMobile ? 0.1 : 1,
         projection: 'mercator',
@@ -956,7 +956,7 @@ const CyberMap: React.FC = () => {
 
         // On mobile, fit the entire world into the viewport
         if (isMobile) {
-          map.fitBounds([[-180, -60], [180, 75]], { padding: 0, animate: false });
+          map.fitBounds([[-130, -55], [180, 72]], { padding: { top: 80, bottom: 60, left: 0, right: 0 }, animate: false });
         }
 
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
