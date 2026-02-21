@@ -27,6 +27,7 @@ import EarlyWarning from "@/pages/EarlyWarning";
 import ThreatIntelligence from "@/pages/ThreatIntelligence";
 import Playbooks from "@/pages/Playbooks";
 import DastScanner from "@/pages/DastScanner";
+import SecurityMonitor from "@/pages/SecurityMonitor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -66,6 +67,7 @@ const ProtectedRoutes = () => {
         <Route path="/threat-intelligence" element={<ThreatIntelligence />} />
         <Route path="/playbooks" element={<Playbooks />} />
         <Route path="/dast-scanner" element={<DastScanner />} />
+        <Route path="/admin/security-monitor" element={<SecurityMonitor />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<NotFound />} />
