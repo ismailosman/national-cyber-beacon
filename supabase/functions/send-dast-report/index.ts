@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { fetchLogoPngData } from "../_shared/logoUtils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,14 +26,20 @@ function getRiskLabel(score: number): { label: string; color: string } {
   return { label: "Critical", color: "0.8 0.15 0.15" };
 }
 
+function buildLogoXObject(logoData: { width: number; height: number; rgbHex: string }, objId: number): string {
+  const { width, height, rgbHex } = logoData;
+  return `${objId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${rgbHex.length} /Filter /ASCIIHexDecode >>\nstream\n${rgbHex}>\nendstream\nendobj\n`;
+}
+
 function generateDastPDF(data: {
   organizationName: string;
   url: string;
   dastScore: number;
   summary: any;
   results: any[];
+  logoData: { width: number; height: number; rgbHex: string } | null;
 }): Uint8Array {
-  const { organizationName, url, dastScore, summary, results } = data;
+  const { organizationName, url, dastScore, summary, results, logoData } = data;
   const grade = getGrade(dastScore);
   const risk = getRiskLabel(dastScore);
   const now = new Date().toISOString().split("T")[0];
@@ -47,33 +54,37 @@ function generateDastPDF(data: {
   const totalFindings = summary?.totalFindings || 0;
   const totalFailed = crit + high + med + low;
 
+  const hasLogo = !!logoData;
+  // Text x-offset: shift right if logo present
+  const tx = hasLogo ? 72 : 30;
+
   const pages: string[][] = [];
 
   // ── Page 1: Executive Summary ──
   const p1: string[] = [];
-
-  // White background
   p1.push(`1 1 1 rg`, `0 0 595 842 re f`);
 
   // Top header bar - dark navy
   p1.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
-  // Red accent stripe
   p1.push(`0.8 0.15 0.15 rg`, `0 788 595 3 re f`);
 
+  // Logo
+  if (hasLogo) {
+    p1.push(`q 36 0 0 36 30 798 cm /Logo Do Q`);
+  }
+
   // Branding text
-  p1.push(`BT /F2 16 Tf 1 1 1 rg 30 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
-  p1.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg 30 798 Td (National Cybersecurity Authority) Tj ET`);
+  p1.push(`BT /F2 16 Tf 1 1 1 rg ${tx} 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
+  p1.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 798 Td (National Cybersecurity Authority) Tj ET`);
   p1.push(`BT /F2 11 Tf 1 1 1 rg 400 810 Td (DAST Scan Report) Tj ET`);
   p1.push(`BT /F1 8 Tf 0.8 0.85 0.9 rg 400 798 Td (Detailed Security Assessment) Tj ET`);
 
   // Info section
   p1.push(`0.95 0.96 0.97 rg`, `30 720 535 60 re f`);
   p1.push(`0.85 0.87 0.9 rg`, `30 720 535 0.5 re f`);
-
   p1.push(`BT /F2 9 Tf 0.3 0.3 0.35 rg 40 762 Td (TARGET) Tj ET`);
   p1.push(`BT /F1 10 Tf 0.15 0.15 0.2 rg 40 750 Td (${s(url, 60)}) Tj ET`);
   p1.push(`BT /F2 9 Tf 0.3 0.3 0.35 rg 40 736 Td (Organization: ${orgName}) Tj ET`);
-
   p1.push(`BT /F2 9 Tf 0.3 0.3 0.35 rg 350 762 Td (SCAN DATE) Tj ET`);
   p1.push(`BT /F1 10 Tf 0.15 0.15 0.2 rg 350 750 Td (${now} ${timeStr} UTC) Tj ET`);
   p1.push(`BT /F2 9 Tf 0.3 0.3 0.35 rg 350 736 Td (Grade: ${grade.grade} - ${grade.label}) Tj ET`);
@@ -85,8 +96,6 @@ function generateDastPDF(data: {
 
   // Score section
   p1.push(`BT /F2 12 Tf 0.15 0.15 0.2 rg 30 700 Td (Security Score) Tj ET`);
-
-  // Score circle area
   p1.push(`0.95 0.96 0.97 rg`, `30 640 120 50 re f`);
   const scoreColor = dastScore >= 75 ? "0.2 0.7 0.3" : dastScore >= 50 ? "0.9 0.7 0.1" : "0.8 0.15 0.15";
   p1.push(`BT /F2 28 Tf ${scoreColor} rg 50 655 Td (${dastScore}) Tj ET`);
@@ -95,42 +104,33 @@ function generateDastPDF(data: {
   // Vulnerability summary boxes
   p1.push(`BT /F2 12 Tf 0.15 0.15 0.2 rg 30 625 Td (Vulnerability Summary) Tj ET`);
 
-  // Box 1: IDENTIFIED
   p1.push(`0.93 0.94 0.96 rg`, `30 575 120 40 re f`);
   p1.push(`BT /F2 20 Tf 0.2 0.25 0.4 rg 55 590 Td (${totalFindings}) Tj ET`);
   p1.push(`BT /F1 7 Tf 0.4 0.4 0.5 rg 40 578 Td (IDENTIFIED) Tj ET`);
 
-  // Box 2: FAILED
   p1.push(`0.93 0.94 0.96 rg`, `160 575 120 40 re f`);
   p1.push(`BT /F2 20 Tf 0.8 0.15 0.15 rg 190 590 Td (${totalFailed}) Tj ET`);
   p1.push(`BT /F1 7 Tf 0.4 0.4 0.5 rg 175 578 Td (FAILED) Tj ET`);
 
-  // Box 3: PASSED
   p1.push(`0.93 0.94 0.96 rg`, `290 575 120 40 re f`);
   p1.push(`BT /F2 20 Tf 0.2 0.7 0.3 rg 315 590 Td (${passed}) Tj ET`);
   p1.push(`BT /F1 7 Tf 0.4 0.4 0.5 rg 300 578 Td (PASSED) Tj ET`);
 
-  // Box 4: SCORE
   p1.push(`0.93 0.94 0.96 rg`, `420 575 140 40 re f`);
   p1.push(`BT /F2 20 Tf ${scoreColor} rg 455 590 Td (${grade.grade}) Tj ET`);
   p1.push(`BT /F1 7 Tf 0.4 0.4 0.5 rg 435 578 Td (GRADE) Tj ET`);
 
   // Severity breakdown
   p1.push(`BT /F2 11 Tf 0.15 0.15 0.2 rg 30 550 Td (Severity Breakdown) Tj ET`);
-
-  // Severity row boxes
   const sevBoxes = [
     { label: "CRITICAL", count: crit, color: "0.8 0.15 0.15", bg: "0.95 0.9 0.9" },
     { label: "HIGH", count: high, color: "0.9 0.45 0.1", bg: "0.97 0.93 0.88" },
     { label: "MEDIUM", count: med, color: "0.85 0.7 0.1", bg: "0.97 0.96 0.88" },
     { label: "LOW", count: low, color: "0.3 0.5 0.85", bg: "0.9 0.93 0.97" },
   ];
-
   let bx = 30;
   for (const sev of sevBoxes) {
-    // Colored left stripe
     p1.push(`${sev.color} rg`, `${bx} 510 4 30 re f`);
-    // Background
     p1.push(`${sev.bg} rg`, `${bx + 4} 510 126 30 re f`);
     p1.push(`BT /F2 16 Tf ${sev.color} rg ${bx + 50} 522 Td (${sev.count}) Tj ET`);
     p1.push(`BT /F1 7 Tf 0.4 0.4 0.5 rg ${bx + 15} 514 Td (${sev.label}) Tj ET`);
@@ -139,8 +139,6 @@ function generateDastPDF(data: {
 
   // Test results table
   p1.push(`BT /F2 11 Tf 0.15 0.15 0.2 rg 30 490 Td (Test Module Results) Tj ET`);
-
-  // Table header
   p1.push(`0.08 0.12 0.2 rg`, `30 468 535 18 re f`);
   p1.push(`BT /F2 8 Tf 1 1 1 rg 35 472 Td (TEST MODULE) Tj ET`);
   p1.push(`BT /F2 8 Tf 1 1 1 rg 280 472 Td (FINDINGS) Tj ET`);
@@ -157,7 +155,6 @@ function generateDastPDF(data: {
     const statusText = fails.length === 0 ? "PASS" : hasCrit ? "FAIL" : "WARN";
     const stColor = statusText === "PASS" ? "0.2 0.7 0.3" : statusText === "FAIL" ? "0.8 0.15 0.15" : "0.85 0.7 0.1";
 
-    // Alternating rows
     if (results.indexOf(test) % 2 === 0) {
       p1.push(`0.96 0.97 0.98 rg`, `30 ${y - 4} 535 16 re f`);
     }
@@ -166,7 +163,6 @@ function generateDastPDF(data: {
     p1.push(`BT /F1 8 Tf 0.8 0.15 0.15 rg 350 ${y} Td (${fails.length}) Tj ET`);
     p1.push(`BT /F2 8 Tf ${stColor} rg 405 ${y} Td (${statusText}) Tj ET`);
 
-    // Highest severity in test
     const maxSev = fails.some((f: any) => f.severity === "critical") ? "CRITICAL" :
       fails.some((f: any) => f.severity === "high") ? "HIGH" :
       fails.some((f: any) => f.severity === "medium") ? "MEDIUM" :
@@ -196,15 +192,16 @@ function generateDastPDF(data: {
     const perPage = 18;
     for (let pageIdx = 0; pageIdx < Math.ceil(allFails.length / perPage); pageIdx++) {
       const p: string[] = [];
-
-      // White background
       p.push(`1 1 1 rg`, `0 0 595 842 re f`);
 
       // Header bar
       p.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
       p.push(`0.8 0.15 0.15 rg`, `0 788 595 3 re f`);
-      p.push(`BT /F2 14 Tf 1 1 1 rg 30 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
-      p.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg 30 798 Td (Failed Findings Detail) Tj ET`);
+      if (hasLogo) {
+        p.push(`q 36 0 0 36 30 798 cm /Logo Do Q`);
+      }
+      p.push(`BT /F2 14 Tf 1 1 1 rg ${tx} 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
+      p.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 798 Td (Failed Findings Detail) Tj ET`);
       p.push(`BT /F1 8 Tf 0.8 0.85 0.9 rg 400 810 Td (${orgName}) Tj ET`);
       p.push(`BT /F1 8 Tf 0.8 0.85 0.9 rg 400 798 Td (${s(url, 30)}) Tj ET`);
 
@@ -224,20 +221,15 @@ function generateDastPDF(data: {
         const sevText = (f.severity || "").toUpperCase().substring(0, 4);
         const sevColor = f.severity === "critical" ? "0.8 0.15 0.15" : f.severity === "high" ? "0.9 0.45 0.1" : f.severity === "medium" ? "0.85 0.7 0.1" : "0.3 0.5 0.85";
 
-        // Alternating rows
         if (i % 2 === 0) {
           p.push(`0.96 0.97 0.98 rg`, `30 ${fy - 8} 535 34 re f`);
         }
-
-        // Severity badge
         p.push(`${sevColor} rg`, `35 ${fy - 2} 35 12 re f`);
         p.push(`BT /F2 6 Tf 1 1 1 rg 38 ${fy} Td (${sevText}) Tj ET`);
-
         p.push(`BT /F1 7 Tf 0.15 0.15 0.2 rg 80 ${fy} Td (${s(testName, 18)}) Tj ET`);
         p.push(`BT /F1 7 Tf 0.25 0.25 0.3 rg 200 ${fy} Td (${s(f.test || f.detail, 28)}) Tj ET`);
         p.push(`BT /F1 6 Tf 0.3 0.5 0.6 rg 380 ${fy} Td (${s(f.recommendation || "", 28)}) Tj ET`);
 
-        // Detail line
         fy -= 12;
         p.push(`BT /F1 6 Tf 0.4 0.4 0.5 rg 80 ${fy} Td (${s(f.detail, 75)}) Tj ET`);
         fy -= 22;
@@ -256,10 +248,16 @@ function generateDastPDF(data: {
   const fontObj1 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
   const fontObj2 = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>`;
   const streams = pages.map((p) => new TextEncoder().encode(p.join("\n")));
-  const baseObj = 5;
+
+  // Object layout: 1=catalog, 2=pages, 3=font1, 4=font2, 5=logo (if present), then page+stream pairs
+  const baseObj = hasLogo ? 6 : 5;
   const pageObjIds = pages.map((_, i) => baseObj + i * 2);
   const streamObjIds = pages.map((_, i) => baseObj + i * 2 + 1);
   const totalObjects = baseObj + pageCount * 2;
+
+  const resourceDict = hasLogo
+    ? `/Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Logo 5 0 R >>`
+    : `/Font << /F1 3 0 R /F2 4 0 R >>`;
 
   let pdf = `%PDF-1.4\n`;
   pdf += `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
@@ -267,8 +265,12 @@ function generateDastPDF(data: {
   pdf += `3 0 obj\n${fontObj1}\nendobj\n`;
   pdf += `4 0 obj\n${fontObj2}\nendobj\n`;
 
+  if (hasLogo && logoData) {
+    pdf += buildLogoXObject(logoData, 5);
+  }
+
   for (let i = 0; i < pageCount; i++) {
-    pdf += `${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`;
+    pdf += `${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${resourceDict} >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`;
     pdf += `${streamObjIds[i]} 0 obj\n<< /Length ${streams[i].length} >>\nstream\n`;
     pdf += new TextDecoder().decode(streams[i]);
     pdf += `\nendstream\nendobj\n`;
@@ -302,50 +304,92 @@ serve(async (req) => {
     const grade = getGrade(dastScore);
     const scanDate = new Date().toISOString().split("T")[0];
 
+    // Fetch logo for PDF
+    const logoData = await fetchLogoPngData();
+
     // Generate PDF
-    const pdfBytes = generateDastPDF({ organizationName, url, dastScore, summary, results });
+    const pdfBytes = generateDastPDF({ organizationName, url, dastScore, summary, results, logoData });
     let binary = "";
     for (let i = 0; i < pdfBytes.length; i++) {
       binary += String.fromCharCode(pdfBytes[i]);
     }
     const pdfBase64 = btoa(binary);
 
-    // Brief HTML summary email body
+    // White background email HTML
     const scoreColor = dastScore >= 75 ? "#22c55e" : dastScore >= 50 ? "#eab308" : "#dc2626";
+    const logoUrl = "https://national-cyber-beacon.lovable.app/logo.png";
     const html = `
-<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#0d1520;color:#e2e8f0;padding:32px;border-radius:8px">
-  <div style="border-bottom:3px solid #cc2626;padding-bottom:16px;margin-bottom:20px">
-    <h1 style="color:#ffffff;margin:0;font-size:20px">SOMALIA CYBER DEFENCE</h1>
-    <p style="color:#94a3b8;margin:4px 0 0;font-size:13px">DAST Security Scan Report</p>
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#ffffff;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+  <!-- Header -->
+  <div style="background:#0d1520;padding:20px 30px;border-bottom:3px solid #cc2626">
+    <table style="width:100%"><tr>
+      <td style="vertical-align:middle"><img src="${logoUrl}" alt="Logo" width="40" height="40" style="display:block;border-radius:4px" /></td>
+      <td style="vertical-align:middle;padding-left:12px">
+        <div style="color:#ffffff;font-size:18px;font-weight:bold;margin:0">SOMALIA CYBER DEFENCE</div>
+        <div style="color:#94a3b8;font-size:12px;margin-top:2px">DAST Security Scan Report</div>
+      </td>
+      <td style="vertical-align:middle;text-align:right">
+        <div style="color:#94a3b8;font-size:11px">${scanDate}</div>
+      </td>
+    </tr></table>
   </div>
-  <table style="width:100%;margin-bottom:20px">
-    <tr>
-      <td style="padding:12px;background:#1e293b;border-radius:8px 0 0 8px">
-        <div style="font-size:12px;color:#94a3b8">Organization</div>
-        <div style="font-size:16px;font-weight:bold;margin-top:4px">${organizationName}</div>
-      </td>
-      <td style="padding:12px;background:#1e293b">
-        <div style="font-size:12px;color:#94a3b8">URL</div>
-        <div style="font-size:14px;margin-top:4px">${url}</div>
-      </td>
-      <td style="padding:12px;background:#1e293b;text-align:center;border-radius:0 8px 8px 0">
-        <div style="font-size:12px;color:#94a3b8">DAST Score</div>
-        <div style="font-size:28px;font-weight:bold;color:${scoreColor}">${dastScore}/100</div>
-        <div style="font-size:12px;color:${scoreColor}">Grade ${grade.grade} - ${grade.label}</div>
-      </td>
-    </tr>
-  </table>
-  <table style="width:100%;margin-bottom:20px;text-align:center">
-    <tr>
-      <td style="padding:10px;background:#1e293b;border-radius:8px 0 0 8px"><div style="font-size:11px;color:#94a3b8">CRITICAL</div><div style="font-size:22px;font-weight:bold;color:#dc2626">${summary?.critical || 0}</div></td>
-      <td style="padding:10px;background:#1e293b"><div style="font-size:11px;color:#94a3b8">HIGH</div><div style="font-size:22px;font-weight:bold;color:#f97316">${summary?.high || 0}</div></td>
-      <td style="padding:10px;background:#1e293b"><div style="font-size:11px;color:#94a3b8">MEDIUM</div><div style="font-size:22px;font-weight:bold;color:#eab308">${summary?.medium || 0}</div></td>
-      <td style="padding:10px;background:#1e293b"><div style="font-size:11px;color:#94a3b8">LOW</div><div style="font-size:22px;font-weight:bold;color:#3b82f6">${summary?.low || 0}</div></td>
-      <td style="padding:10px;background:#1e293b;border-radius:0 8px 8px 0"><div style="font-size:11px;color:#94a3b8">PASSED</div><div style="font-size:22px;font-weight:bold;color:#22c55e">${summary?.passed || 0}</div></td>
-    </tr>
-  </table>
-  <p style="color:#94a3b8;font-size:13px">The full DAST report with detailed findings is attached as a PDF.</p>
-  <p style="color:#64748b;font-size:11px;margin:20px 0 0;border-top:1px solid #333;padding-top:12px">Somalia Cyber Defence DAST Scanner | ${scanDate} | CONFIDENTIAL</p>
+
+  <div style="padding:24px 30px">
+    <!-- Info Cards -->
+    <table style="width:100%;margin-bottom:20px;border-collapse:collapse">
+      <tr>
+        <td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px 0 0 8px;width:40%">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Organization</div>
+          <div style="font-size:16px;font-weight:bold;color:#0f172a;margin-top:4px">${organizationName}</div>
+          <div style="font-size:13px;color:#475569;margin-top:2px">${url}</div>
+        </td>
+        <td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;text-align:center;width:30%">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Security Score</div>
+          <div style="font-size:36px;font-weight:bold;color:${scoreColor};margin-top:4px">${dastScore}</div>
+          <div style="font-size:12px;color:#475569">/100</div>
+        </td>
+        <td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;text-align:center;border-radius:0 8px 8px 0;width:30%">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Grade</div>
+          <div style="font-size:36px;font-weight:bold;color:${scoreColor};margin-top:4px">${grade.grade}</div>
+          <div style="font-size:12px;color:#475569">${grade.label}</div>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Severity Summary -->
+    <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px">Vulnerability Summary</div>
+    <table style="width:100%;margin-bottom:24px;text-align:center;border-collapse:collapse">
+      <tr>
+        <td style="padding:12px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px 0 0 8px">
+          <div style="font-size:10px;color:#991b1b;text-transform:uppercase;font-weight:bold">Critical</div>
+          <div style="font-size:24px;font-weight:bold;color:#dc2626">${summary?.critical || 0}</div>
+        </td>
+        <td style="padding:12px 8px;background:#fff7ed;border:1px solid #fed7aa">
+          <div style="font-size:10px;color:#9a3412;text-transform:uppercase;font-weight:bold">High</div>
+          <div style="font-size:24px;font-weight:bold;color:#f97316">${summary?.high || 0}</div>
+        </td>
+        <td style="padding:12px 8px;background:#fefce8;border:1px solid #fef08a">
+          <div style="font-size:10px;color:#854d0e;text-transform:uppercase;font-weight:bold">Medium</div>
+          <div style="font-size:24px;font-weight:bold;color:#eab308">${summary?.medium || 0}</div>
+        </td>
+        <td style="padding:12px 8px;background:#eff6ff;border:1px solid #bfdbfe">
+          <div style="font-size:10px;color:#1e40af;text-transform:uppercase;font-weight:bold">Low</div>
+          <div style="font-size:24px;font-weight:bold;color:#3b82f6">${summary?.low || 0}</div>
+        </td>
+        <td style="padding:12px 8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:0 8px 8px 0">
+          <div style="font-size:10px;color:#166534;text-transform:uppercase;font-weight:bold">Passed</div>
+          <div style="font-size:24px;font-weight:bold;color:#22c55e">${summary?.passed || 0}</div>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#475569;font-size:13px;line-height:1.6;margin:0">The full DAST report with detailed findings and recommendations is attached as a PDF document.</p>
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:16px 30px;border-top:1px solid #e2e8f0;background:#f8fafc">
+    <p style="color:#94a3b8;font-size:11px;margin:0">Somalia Cyber Defence &bull; DAST Scanner &bull; ${scanDate} &bull; CONFIDENTIAL</p>
+  </div>
 </div>`;
 
     const safeOrgName = organizationName.replace(/[^a-zA-Z0-9-_]/g, "-");
