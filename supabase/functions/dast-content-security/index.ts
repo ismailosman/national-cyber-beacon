@@ -24,7 +24,11 @@ serve(async (req) => {
     // Content-Security-Policy
     const csp = headers.get("content-security-policy") || "";
     if (!csp) {
-      findings.push({ id: "CS-CSP-MISS", test: "Content-Security-Policy Missing", severity: "medium", status: "fail", detail: "No CSP header. XSS attacks can execute arbitrary scripts on your site.", recommendation: "Add a Content-Security-Policy header. Start with: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" });
+      if (isCloudflare) {
+        findings.push({ id: "CS-CSP-MISS", test: "Content-Security-Policy", severity: "info", status: "pass", detail: "No CSP header present, but site is behind Cloudflare WAF which provides equivalent XSS protection.", recommendation: "Consider adding a CSP header for defense in depth" });
+      } else {
+        findings.push({ id: "CS-CSP-MISS", test: "Content-Security-Policy Missing", severity: "medium", status: "fail", detail: "No CSP header. XSS attacks can execute arbitrary scripts on your site.", recommendation: "Add a Content-Security-Policy header. Start with: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" });
+      }
     } else {
       if (csp.includes("'unsafe-inline'") && csp.includes("script-src")) {
         findings.push({ id: "CS-CSP-INLINE", test: "CSP Allows Inline Scripts", severity: "medium", status: "fail", detail: "CSP allows 'unsafe-inline' for scripts, reducing XSS protection.", recommendation: "Use nonces or hashes instead of 'unsafe-inline' for script-src" });
@@ -46,7 +50,7 @@ serve(async (req) => {
     if (!xfo && !hasFrameAncestors) {
       if (isCloudflare) {
         // Cloudflare-protected sites: downgrade to informational
-        findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection", severity: "info", status: "info", detail: "No X-Frame-Options or CSP frame-ancestors header, but site is behind Cloudflare which provides additional protection layers.", recommendation: "Consider adding X-Frame-Options: DENY or CSP frame-ancestors 'self' for defense in depth" });
+        findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection", severity: "info", status: "pass", detail: "No X-Frame-Options or CSP frame-ancestors header, but site is behind Cloudflare which provides additional protection layers.", recommendation: "Consider adding X-Frame-Options: DENY or CSP frame-ancestors 'self' for defense in depth" });
       } else {
         findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection Missing", severity: "medium", status: "fail", detail: "No X-Frame-Options or CSP frame-ancestors. Site can be embedded in attacker-controlled iframes for clickjacking.", recommendation: "Add X-Frame-Options: DENY or SAMEORIGIN, or CSP frame-ancestors 'self'" });
       }

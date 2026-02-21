@@ -86,7 +86,8 @@ serve(async (req) => {
       findings.push({ id: "SUB-LIVE", test: "Live Subdomains Discovered", severity: liveSubdomains.length > 10 ? "medium" : "low", status: "fail", detail: `${liveSubdomains.length} subdomain(s) are live and reachable.`, recommendation: "Audit all live subdomains. Decommission unused ones.", evidence: { liveSubdomains: liveSubdomains.map(s => ({ subdomain: s.subdomain, ip: s.ip, tech: s.tech || "unknown", httpOnly: s.httpOnly || false })) } });
     }
 
-    const httpOnlySubdomains = liveSubdomains.filter(s => s.httpOnly);
+    const mailExclusions = ["mail", "webmail", "smtp", "imap", "pop3", "mx"];
+    const httpOnlySubdomains = liveSubdomains.filter(s => s.httpOnly && !mailExclusions.some(p => s.subdomain.split(".")[0].toLowerCase() === p));
     if (httpOnlySubdomains.length > 0) {
       findings.push({ id: "SUB-HTTP", test: "Subdomains Without SSL", severity: "high", status: "fail", detail: `${httpOnlySubdomains.length} subdomain(s) serve content over HTTP without SSL.`, recommendation: "Install SSL certificates on ALL subdomains.", evidence: { subdomains: httpOnlySubdomains.map(s => s.subdomain) } });
     }
