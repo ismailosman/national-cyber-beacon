@@ -1,74 +1,60 @@
 
 
-## Fix DAST False Positives and Scoring
+## Fix DAST Content Security False Positives and Scoring
 
-### Root Cause
+### Problems Identified
 
-The DAST scanner has two major problems generating inaccurate results:
+1. **Content Security severity too aggressive**: Missing CSP header and missing X-Frame-Options are flagged as "high" severity. For most websites (especially government CMS sites), these are common configurations and should be "medium" -- they are recommendations, not active vulnerabilities.
 
-**Problem 1: Massive False Positives in API Discovery**
-The `dast-api-discovery` edge function checks 20+ paths like `/graphiql`, `/debug/`, `/actuator`, `/actuator/env`, etc. It flags them as "Exposed" if the HTTP response is 200. However, most CMS sites (WordPress, Joomla) return a 200 status code with their homepage or a generic page for ANY URL -- this is called a "soft 404." The function does not validate whether the response body actually contains the expected content (GraphQL schema, Spring Actuator data, debug output, etc.), so it incorrectly reports these endpoints as critical/high findings. This is why the screenshot shows "Exposed: GraphQL IDE", "Exposed: Debug Endpoint", "Exposed: Spring Actuator" on sites that clearly don't run those technologies.
+2. **Module status badge incorrectly shows "Critical"**: The `getTestStatus` function treats any "high" finding the same as "critical", causing the Content Security module to display a red "Critical" badge when it only has "high" findings. This is misleading.
 
-**Problem 2: False Positives in Info Disclosure**
-The `dast-info-disclosure` function has similar issues. It flags `robots.txt` and `sitemap.xml` as security failures when they return 200, but these are standard, expected files on any website. It also suffers from the same soft-404 problem for paths like `/.env`, `/.git/HEAD`, etc.
-
-**Problem 3: Score of 0**
-The false positive critical/high findings inflate the `weightedFail` score so much that legitimate passes are drowned out, resulting in scores near or at 0.
+3. **Scoring formula still too punitive**: The current weighted-ratio formula (passes vs weighted fails) produces a score of 48 for a site with 16 passes, 0 critical, 2 high, 7 medium, 5 low findings. A deduction-based model (start at 100, subtract for failures) is more intuitive and industry-standard.
 
 ---
 
 ### Changes
 
-#### 1. `supabase/functions/dast-api-discovery/index.ts` -- Content Validation
+#### 1. `supabase/functions/dast-content-security/index.ts` -- Downgrade Severities
 
-For each path check, after receiving a 200 response, read the response body and validate it actually contains relevant content before flagging it:
+- Change "Content-Security-Policy Missing" from **high** to **medium** (CSP is best practice, not a critical gap)
+- Change "Clickjacking Protection Missing" from **high** to **medium** (most CMS frameworks handle this at the application level)
+- Keep CSP Wildcard as "high" (actively dangerous misconfiguration)
+- Keep all other findings at their current levels
 
-- `/graphiql` and `/graphql`: Verify body contains "GraphiQL" or "graphql" schema keywords, not just a CMS page
-- `/debug/`: Verify body contains debug-specific content like "traceback", "stack trace", "debugger"
-- `/actuator`, `/actuator/env`: Verify body contains JSON with actuator-specific keys like `"status"`, `"beans"`, `"env"`
-- `/_profiler/`: Verify body contains Symfony profiler markup
-- `/metrics`: Verify body contains metric-style content (numeric data, prometheus format)
-- `/Dockerfile`, `/docker-compose.yml`: Verify body starts with expected syntax (`FROM`, `version:`)
-- `/package.json`, `/composer.json`: Verify body is valid JSON with expected keys (`dependencies`, `require`)
+#### 2. `src/pages/DastScanner.tsx` -- Fix Module Status and Scoring
 
-Add a **baseline check**: Fetch a random non-existent path first to get the "soft 404" response body. Then compare each subsequent response -- if the body is substantially similar to the baseline (same length within 20%, or same title tag), skip it as a soft 404.
+**Fix `getTestStatus`**: Separate "high" from "critical" in the status display:
+- Critical findings -> red "Critical" badge
+- High findings -> orange "High" badge  
+- Medium findings -> yellow "Issues" badge
+- All pass -> green "Clean" badge
 
-#### 2. `supabase/functions/dast-info-disclosure/index.ts` -- Fix False Positives
+**Fix scoring formula**: Switch to a deduction-based model that starts at 100 and subtracts based on severity:
+- Score = max(0, 100 - (critical x 25 + high x 10 + medium x 3 + low x 1))
+- This produces more reasonable scores: the fisheries.gov.so example (0 critical, 2 high, 7 medium, 5 low) would score 100 - (0 + 20 + 21 + 5) = 54 instead of 48, but more importantly scales better
 
-- Mark `robots.txt` and `sitemap.xml` as `status: "pass"` with `severity: "info"` (these are expected files, not vulnerabilities)
-- Add body content validation for sensitive paths (`.env`, `.git/HEAD`, `phpinfo.php`, etc.):
-  - `/.env`: Check body contains `=` assignments (e.g., `DB_HOST=`, `APP_KEY=`)
-  - `/.git/HEAD`: Check body starts with `ref: refs/`
-  - `/phpinfo.php`: Check body contains `phpinfo()` or PHP configuration tables
-  - `/backup.sql`, `/dump.sql`, `/db.sql`: Check content-type is not HTML, or body contains SQL syntax
-- Add the same soft-404 baseline detection as API Discovery
+Actually, using the memory: `Score = Max(0, 100 - (Critical * 25 + High * 15 + Medium * 5 + Low * 2))` -- this was the original intended formula. Let me restore this deduction model.
 
-#### 3. `supabase/functions/dast-error-handling/index.ts` -- Reduce Admin Panel False Positives
+With the content security downgrade (2 high -> 0 high, 2 more medium): 0 critical, 0 high, 9 medium, 5 low = 100 - (0 + 0 + 45 + 10) = 45. That's still low.
 
-- For admin panel detection (`/admin`, `/wp-admin`, etc.), treat 302 redirects as expected behavior (login redirect), not as "exposed"
-- Only flag admin panels that return 200 AND contain login form elements (not just any 200 page)
+Better approach: use smaller deductions since 14 modules means many findings are expected:
+- Score = max(0, 100 - (critical x 15 + high x 8 + medium x 3 + low x 1))
 
-#### 4. Scoring Weight Adjustment in `src/pages/DastScanner.tsx`
+For the fisheries example after fix (0 critical, 0 high, 9 medium, 5 low): 100 - (0 + 0 + 27 + 5) = 68 = Grade C. More reasonable.
 
-The current formula unfairly penalizes: each critical finding counts 5x against passes that count 1x each. Adjust weights to be more balanced:
-- `weightedFail = critical * 3 + high * 2 + medium * 1.5 + low * 0.5`
-- `weightedPass = passed * 1`
+#### 3. `supabase/functions/scheduled-dast-scan/index.ts` -- Same scoring formula update
 
-This prevents a single false positive critical from wiping out 5 legitimate passes.
-
-Apply the same formula update in `supabase/functions/scheduled-dast-scan/index.ts`.
+Apply the same deduction-based scoring to the scheduled scan function for consistency.
 
 ---
 
-### Technical Summary
+### Summary
 
-| File | Action |
+| File | Change |
 |---|---|
-| `supabase/functions/dast-api-discovery/index.ts` | Add soft-404 baseline detection; validate response body content before flagging |
-| `supabase/functions/dast-info-disclosure/index.ts` | Mark robots.txt/sitemap.xml as pass; add body validation for sensitive paths; add soft-404 baseline |
-| `supabase/functions/dast-error-handling/index.ts` | Only flag admin panels with actual login form content; ignore 302 redirects |
-| `src/pages/DastScanner.tsx` | Reduce severity weights to prevent single false positives from tanking score |
-| `supabase/functions/scheduled-dast-scan/index.ts` | Same scoring weight adjustment |
+| `supabase/functions/dast-content-security/index.ts` | Downgrade CSP missing and clickjacking missing from "high" to "medium" |
+| `src/pages/DastScanner.tsx` | Fix `getTestStatus` to separate high from critical; switch to deduction-based scoring formula |
+| `supabase/functions/scheduled-dast-scan/index.ts` | Same scoring formula update |
 
 No database changes needed.
 
