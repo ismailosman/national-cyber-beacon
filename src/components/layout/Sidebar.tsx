@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio, Map, Activity, ShieldAlert, Radar, Crosshair, Search
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield
 } from 'lucide-react';
 import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
@@ -23,6 +23,7 @@ const navItems = [
   { to: '/dast-scanner', icon: Search, label: 'DAST Scanner' },
   { to: '/reports', icon: FileText, label: 'Reports' },
   { to: '/playbooks', icon: FileText, label: 'Playbooks' },
+  { to: '/admin/security-monitor', icon: Shield, label: 'Security Monitor' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
