@@ -1348,7 +1348,7 @@ const CyberMap: React.FC = () => {
           <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-4 sm:pt-6 pb-3 sm:pb-4 pointer-events-none"
                style={{ background: window.innerWidth < 768 ? 'linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%)' : 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
             <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
-              <img src={logoSrc} alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain opacity-90" />
+              <img src={logoSrc} alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain opacity-90 hidden sm:block" />
               <div className="text-center">
                 <h1 className="text-white font-bold tracking-[0.15em] sm:tracking-[0.25em] uppercase text-xs sm:text-base font-mono"
                     style={{ textShadow: '0 0 20px rgba(34,211,238,0.6)' }}>
@@ -1370,28 +1370,28 @@ const CyberMap: React.FC = () => {
             </div>
           </div>
 
-          {/* ── Nav buttons top-left ──────────────────────────────────────── */}
-          <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
+          {/* ── Nav buttons top-left (desktop only) ──────────────────────── */}
+          <div className="absolute top-4 left-4 z-20 hidden sm:flex flex-col gap-2 pointer-events-auto">
             <Link
               to="/public"
-              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
               style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
             >
               <Globe className="w-3 h-3 flex-shrink-0" />
-              <span className="hidden sm:inline">Public Dashboard</span>
+              <span>Public Dashboard</span>
             </Link>
             <Link
               to="/login"
-              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
               style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
             >
               <Shield className="w-3 h-3 flex-shrink-0" />
-              <span className="hidden sm:inline">Analyst Login</span>
+              <span>Analyst Login</span>
             </Link>
           </div>
 
-          {/* ── Live toggle top-right ─────────────────────────────────────── */}
-          <div className="absolute top-4 right-4 z-20 pointer-events-auto">
+          {/* ── Live toggle top-right (desktop only) ─────────────────────── */}
+          <div className="absolute top-4 right-4 z-20 pointer-events-auto hidden sm:block">
             <button
               onClick={() => setLiveOn(v => !v)}
               aria-pressed={liveOn}
