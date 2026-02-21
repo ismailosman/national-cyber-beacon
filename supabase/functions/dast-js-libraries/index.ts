@@ -80,7 +80,7 @@ serve(async (req) => {
       }
     }
     if (externalScriptsWithoutSRI.length > 0) {
-      findings.push({ id: "JS-SRI", test: "Missing Subresource Integrity (SRI)", severity: "medium", status: "fail", detail: `${externalScriptsWithoutSRI.length} external script(s) without SRI hash.`, recommendation: "Add integrity attributes to all external script tags.", evidence: { scripts: externalScriptsWithoutSRI.slice(0, 5) } });
+      findings.push({ id: "JS-SRI", test: "Subresource Integrity (SRI)", severity: "low", status: "info", detail: `${externalScriptsWithoutSRI.length} external script(s) without SRI hash. SRI is a defense-in-depth best practice but not a direct vulnerability.`, recommendation: "Consider adding integrity attributes to external script tags for additional protection.", evidence: { scripts: externalScriptsWithoutSRI.slice(0, 5) } });
     }
 
     if (detectedLibraries.length === 0) {
