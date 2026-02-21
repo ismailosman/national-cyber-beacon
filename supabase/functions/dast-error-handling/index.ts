@@ -16,6 +16,7 @@ serve(async (req) => {
     const findings: any[] = [];
     const baseUrl = url.replace(/\/$/, "");
 
+    // Error page info leak check
     try {
       const notFoundResponse = await fetch(`${baseUrl}/thispagedoesnotexist_${Date.now()}.html`, { signal: AbortSignal.timeout(10000) });
       const notFoundBody = await notFoundResponse.text();
@@ -59,6 +60,7 @@ serve(async (req) => {
       findings.push({ id: "ERR-CONN", test: "Error Page Check", severity: "info", status: "error", detail: `Could not test error handling: ${e.message}` });
     }
 
+    // Malformed input check
     try {
       const malformedResponse = await fetch(`${baseUrl}/%00%0d%0a`, { method: "GET", signal: AbortSignal.timeout(5000) });
       if (malformedResponse.status === 500) {
@@ -73,14 +75,37 @@ serve(async (req) => {
       }
     } catch {}
 
+    // Admin panel detection with improved logic
     const adminPaths = ["/admin", "/administrator", "/admin/login", "/wp-admin", "/wp-login.php", "/login", "/signin",
       "/cpanel", "/phpmyadmin", "/adminer", "/panel", "/dashboard/login", "/user/login", "/management"];
     const exposedAdminPaths: string[] = [];
     for (const path of adminPaths) {
       try {
-        const adminResponse = await fetch(`${baseUrl}${path}`, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(5000) });
-        if (adminResponse.status === 200 || adminResponse.status === 302) {
-          exposedAdminPaths.push(path);
+        const adminResponse = await fetch(`${baseUrl}${path}`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(5000) });
+        
+        // 302/301 redirects are expected (login redirect), skip them
+        if (adminResponse.status === 301 || adminResponse.status === 302) continue;
+        
+        if (adminResponse.status === 200) {
+          const body = await adminResponse.text();
+          const bodyLower = body.toLowerCase();
+          
+          // Only flag if the page actually contains login form elements
+          const hasLoginForm = (
+            (bodyLower.includes("<form") && (
+              bodyLower.includes('type="password"') ||
+              bodyLower.includes("type='password'") ||
+              bodyLower.includes("password") && bodyLower.includes("username") ||
+              bodyLower.includes("password") && bodyLower.includes("login")
+            )) ||
+            bodyLower.includes("wp-login") ||
+            bodyLower.includes("phpmyadmin") ||
+            bodyLower.includes("adminer")
+          );
+          
+          if (hasLoginForm) {
+            exposedAdminPaths.push(path);
+          }
         }
       } catch {}
       await new Promise(resolve => setTimeout(resolve, 200));
