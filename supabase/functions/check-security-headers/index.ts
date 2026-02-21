@@ -17,6 +17,9 @@ const CLOUDFLARE_MANAGED_HEADERS = new Set([
   'contentSecurityPolicy',
   'xFrameOptions',
   'permissionsPolicy',
+  'xContentTypeOptions',
+  'xXssProtection',
+  'referrerPolicy',
 ]);
 
 function getGrade(score: number): string {
