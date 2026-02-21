@@ -317,7 +317,7 @@ serve(async (req) => {
 
     // White background email HTML
     const scoreColor = dastScore >= 75 ? "#22c55e" : dastScore >= 50 ? "#eab308" : "#dc2626";
-    const logoUrl = "https://national-cyber-beacon.lovable.app/logo.png";
+    const logoUrl = "https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png";
     const html = `
 <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#ffffff;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
   <!-- Header -->

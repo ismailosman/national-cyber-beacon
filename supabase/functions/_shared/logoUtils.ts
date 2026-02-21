@@ -1,7 +1,7 @@
 // Shared logo utility for PDF embedding
 // Fetches the logo PNG and returns raw RGB data for PDF Image XObject
 
-const LOGO_URL = "https://national-cyber-beacon.lovable.app/logo.png";
+const LOGO_URL = "https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png";
 
 interface LogoData {
   width: number;
