@@ -173,9 +173,7 @@ const DastScanner: React.FC = () => {
         passed: allFindings.filter(f => f.status === 'pass').length,
       };
 
-      const weightedFail = summary.critical * 3 + summary.high * 2 + summary.medium * 1.5 + summary.low * 0.5;
-      const weightedPass = summary.passed * 1;
-      const dastScore = (weightedPass + weightedFail) === 0 ? 100 : Math.round(100 * weightedPass / (weightedPass + weightedFail));
+      const dastScore = Math.max(0, 100 - (summary.critical * 15 + summary.high * 8 + summary.medium * 3 + summary.low * 1));
       setCurrentScore(dastScore);
 
       await supabase.from('dast_scan_results').upsert({
@@ -334,7 +332,8 @@ const DastScanner: React.FC = () => {
 
   const getTestStatus = (findings: Finding[]) => {
     const fails = findings.filter(f => f.status === 'fail');
-    if (fails.some(f => f.severity === 'critical' || f.severity === 'high')) return 'critical';
+    if (fails.some(f => f.severity === 'critical')) return 'critical';
+    if (fails.some(f => f.severity === 'high')) return 'high';
     if (fails.some(f => f.severity === 'medium')) return 'warning';
     return 'clean';
   };
@@ -524,6 +523,7 @@ const DastScanner: React.FC = () => {
                         <TableCell className="text-center font-mono text-blue-400">{fails.filter(f => f.severity === 'low').length || '—'}</TableCell>
                         <TableCell className="text-center">
                           {testStatus === 'critical' && <Badge variant="destructive" className="text-xs">🔴 Critical</Badge>}
+                          {testStatus === 'high' && <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-xs">🟠 High</Badge>}
                           {testStatus === 'warning' && <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs">⚠ Issues</Badge>}
                           {testStatus === 'clean' && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">✓ Clean</Badge>}
                           {testStatus === 'pending' && <span className="text-xs text-muted-foreground">—</span>}

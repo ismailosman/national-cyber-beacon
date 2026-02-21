@@ -21,7 +21,7 @@ serve(async (req) => {
     // Content-Security-Policy
     const csp = headers.get("content-security-policy") || "";
     if (!csp) {
-      findings.push({ id: "CS-CSP-MISS", test: "Content-Security-Policy Missing", severity: "high", status: "fail", detail: "No CSP header. XSS attacks can execute arbitrary scripts on your site.", recommendation: "Add a Content-Security-Policy header. Start with: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" });
+      findings.push({ id: "CS-CSP-MISS", test: "Content-Security-Policy Missing", severity: "medium", status: "fail", detail: "No CSP header. XSS attacks can execute arbitrary scripts on your site.", recommendation: "Add a Content-Security-Policy header. Start with: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" });
     } else {
       if (csp.includes("'unsafe-inline'") && csp.includes("script-src")) {
         findings.push({ id: "CS-CSP-INLINE", test: "CSP Allows Inline Scripts", severity: "medium", status: "fail", detail: "CSP allows 'unsafe-inline' for scripts, reducing XSS protection.", recommendation: "Use nonces or hashes instead of 'unsafe-inline' for script-src" });
@@ -41,7 +41,7 @@ serve(async (req) => {
     const xfo = headers.get("x-frame-options") || "";
     const hasFrameAncestors = csp.includes("frame-ancestors");
     if (!xfo && !hasFrameAncestors) {
-      findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection Missing", severity: "high", status: "fail", detail: "No X-Frame-Options or CSP frame-ancestors. Site can be embedded in attacker-controlled iframes for clickjacking.", recommendation: "Add X-Frame-Options: DENY or SAMEORIGIN, or CSP frame-ancestors 'self'" });
+      findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection Missing", severity: "medium", status: "fail", detail: "No X-Frame-Options or CSP frame-ancestors. Site can be embedded in attacker-controlled iframes for clickjacking.", recommendation: "Add X-Frame-Options: DENY or SAMEORIGIN, or CSP frame-ancestors 'self'" });
     } else {
       findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection", severity: "info", status: "pass", detail: `Protected by ${xfo ? `X-Frame-Options: ${xfo}` : "CSP frame-ancestors"}` });
     }
