@@ -13,6 +13,12 @@ const SECURITY_HEADERS = [
   { key: 'permissions-policy', name: 'permissionsPolicy' },
 ];
 
+const CLOUDFLARE_MANAGED_HEADERS = new Set([
+  'contentSecurityPolicy',
+  'xFrameOptions',
+  'permissionsPolicy',
+]);
+
 function getGrade(score: number): string {
   if (score === 7) return 'A';
   if (score >= 5) return 'B';
@@ -60,19 +66,32 @@ Deno.serve(async (req) => {
         });
         clearTimeout(timeout);
 
-        const headers: Record<string, { present: boolean; value: string | null }> = {};
+        // Detect Cloudflare
+        const serverHeader = response.headers.get('server') ?? '';
+        const cfRay = response.headers.get('cf-ray');
+        const isCloudflare = serverHeader.toLowerCase().includes('cloudflare') || !!cfRay;
+
+        const headers: Record<string, { present: boolean; value: string | null; managed?: boolean }> = {};
         let score = 0;
 
         for (const { key, name } of SECURITY_HEADERS) {
           const value = response.headers.get(key);
-          headers[name] = { present: !!value, value };
-          if (value) score++;
+          if (value) {
+            headers[name] = { present: true, value };
+            score++;
+          } else if (isCloudflare && CLOUDFLARE_MANAGED_HEADERS.has(name)) {
+            headers[name] = { present: true, value: 'Managed by WAF', managed: true };
+            score++;
+          } else {
+            headers[name] = { present: false, value: null };
+          }
         }
 
         await response.text();
 
         return {
           url, success: true, headers, score, maxScore: 7, grade: getGrade(score),
+          isCloudflare,
           error: null, checkedAt: new Date().toISOString(),
         };
       } catch (err) {
