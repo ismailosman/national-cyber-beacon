@@ -16,6 +16,7 @@ import OrgCard from '@/components/dashboard/OrgCard';
 import SectorComparison from '@/components/dashboard/SectorComparison';
 import RiskHeatMap from '@/components/dashboard/RiskHeatMap';
 import AlertSidebar from '@/components/dashboard/AlertSidebar';
+import { TopStatsBarSkeleton, BarChartSkeleton, DonutChartSkeleton, TrendChartSkeleton, OrgGridSkeleton, HeatMapSkeleton } from '@/components/dashboard/DashboardSkeletons';
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 min
 
@@ -30,7 +31,7 @@ const Dashboard: React.FC = () => {
 
   // ── Data queries ──────────────────────────────────────────────────────
 
-  const { data: monitoredOrgs = [] } = useQuery({
+  const { data: monitoredOrgs = [], isLoading: loadingOrgs } = useQuery({
     queryKey: ['dashboard-monitored-orgs'],
     queryFn: async () => {
       const { data } = await supabase.from('organizations_monitored').select('*').eq('is_active', true);
@@ -39,7 +40,7 @@ const Dashboard: React.FC = () => {
     refetchInterval: REFETCH_INTERVAL,
   });
 
-  const { data: orgScores = [] } = useQuery({
+  const { data: orgScores = [], isLoading: loadingScores } = useQuery({
     queryKey: ['dashboard-org-scores', monitoredOrgs.length],
     queryFn: async () => {
       if (monitoredOrgs.length === 0) return [];
@@ -84,7 +85,7 @@ const Dashboard: React.FC = () => {
   });
 
   // Alerts
-  const { data: alerts = [] } = useQuery({
+  const { data: alerts = [], isLoading: loadingAlerts } = useQuery({
     queryKey: ['dashboard-alerts'],
     queryFn: async () => {
       const { data } = await supabase.from('alerts').select('*').eq('status', 'open').order('created_at', { ascending: false });
@@ -106,7 +107,7 @@ const Dashboard: React.FC = () => {
   });
 
   // Security score history for trends
-  const { data: scoreHistory = [] } = useQuery({
+  const { data: scoreHistory = [], isLoading: loadingHistory } = useQuery({
     queryKey: ['dashboard-score-history'],
     queryFn: async () => {
       const { data } = await supabase.from('security_score_history').select('*')
@@ -309,6 +310,7 @@ const Dashboard: React.FC = () => {
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [orgCardsData]);
 
+  const isInitialLoad = loadingOrgs || loadingScores;
   const minutesAgo = Math.round((Date.now() - lastUpdated.getTime()) / 60000);
 
   return (
@@ -334,80 +336,98 @@ const Dashboard: React.FC = () => {
       <div className="flex gap-6">
         <div className="flex-1 space-y-6 min-w-0">
           {/* Section 1: Top Stats */}
-          <TopStatsBar
-            orgCount={monitoredOrgs.length}
-            uptimeRate={uptimeRate}
-            sslValid={sslSummary.valid}
-            sslTotal={sslSummary.total}
-            avgScore={avgScore}
-            activeAlerts={alerts.length}
-            criticalAlerts={severityCounts.critical}
-          />
+          {isInitialLoad ? <TopStatsBarSkeleton /> : (
+            <TopStatsBar
+              orgCount={monitoredOrgs.length}
+              uptimeRate={uptimeRate}
+              sslValid={sslSummary.valid}
+              sslTotal={sslSummary.total}
+              avgScore={avgScore}
+              activeAlerts={alerts.length}
+              criticalAlerts={severityCounts.critical}
+            />
+          )}
 
           {/* Section 2: Main Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
-              <OrgScoresBarChart data={barChartData} />
+          {isInitialLoad ? (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-3"><BarChartSkeleton /></div>
+              <div className="lg:col-span-2"><DonutChartSkeleton /></div>
             </div>
-            <div className="lg:col-span-2">
-              <ThreatDonutChart
-                critical={severityCounts.critical}
-                high={severityCounts.high}
-                medium={severityCounts.medium}
-                low={severityCounts.low}
-              />
-            </div>
-          </div>
-
-          {/* Section 3: Trend Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ScoreTrendChart data={trendData} />
-            <ThreatTimelineChart data={threatTimeline} />
-          </div>
-
-          {/* Section 4: Organization Grid */}
-          <div>
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              <h2 className="font-semibold text-sm text-foreground">Organization Security Overview</h2>
-              <div className="flex gap-2 flex-wrap">
-                <div className="flex gap-1">
-                  {['All', 'Government', 'Bank', 'Telecom', 'Education', 'Health'].map(s => (
-                    <button key={s} onClick={() => setSectorFilter(s === 'All' ? null : s)}
-                      className={cn('px-2 py-0.5 rounded text-[10px] font-mono transition-colors border',
-                        (s === 'All' && !sectorFilter) || sectorFilter?.toLowerCase() === s.toLowerCase()
-                          ? 'bg-neon-cyan/20 text-neon-cyan border-neon-cyan/40'
-                          : 'bg-transparent text-muted-foreground border-border hover:border-neon-cyan/20'
-                      )}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-                  className="text-[10px] font-mono bg-accent border border-border rounded px-2 py-0.5 text-muted-foreground">
-                  <option value="score-desc">Score ↓</option>
-                  <option value="score-asc">Score ↑</option>
-                  <option value="name">Name</option>
-                  <option value="threats">Threats</option>
-                </select>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-3">
+                <OrgScoresBarChart data={barChartData} />
+              </div>
+              <div className="lg:col-span-2">
+                <ThreatDonutChart
+                  critical={severityCounts.critical}
+                  high={severityCounts.high}
+                  medium={severityCounts.medium}
+                  low={severityCounts.low}
+                />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredCards.map(card => (
-                <OrgCard key={card.id} {...card} />
-              ))}
-              {filteredCards.length === 0 && (
-                <div className="col-span-full text-center text-muted-foreground text-sm py-8">
-                  No organizations found.
-                </div>
-              )}
+          )}
+
+          {/* Section 3: Trend Charts Row */}
+          {loadingHistory ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <TrendChartSkeleton />
+              <TrendChartSkeleton />
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ScoreTrendChart data={trendData} />
+              <ThreatTimelineChart data={threatTimeline} />
+            </div>
+          )}
+
+          {/* Section 4: Organization Grid */}
+          {isInitialLoad ? <OrgGridSkeleton /> : (
+            <div>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2 className="font-semibold text-sm text-foreground">Organization Security Overview</h2>
+                <div className="flex gap-2 flex-wrap">
+                  <div className="flex gap-1">
+                    {['All', 'Government', 'Bank', 'Telecom', 'Education', 'Health'].map(s => (
+                      <button key={s} onClick={() => setSectorFilter(s === 'All' ? null : s)}
+                        className={cn('px-2 py-0.5 rounded text-[10px] font-mono transition-colors border',
+                          (s === 'All' && !sectorFilter) || sectorFilter?.toLowerCase() === s.toLowerCase()
+                            ? 'bg-neon-cyan/20 text-neon-cyan border-neon-cyan/40'
+                            : 'bg-transparent text-muted-foreground border-border hover:border-neon-cyan/20'
+                        )}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                    className="text-[10px] font-mono bg-accent border border-border rounded px-2 py-0.5 text-muted-foreground">
+                    <option value="score-desc">Score ↓</option>
+                    <option value="score-asc">Score ↑</option>
+                    <option value="name">Name</option>
+                    <option value="threats">Threats</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {filteredCards.map(card => (
+                  <OrgCard key={card.id} {...card} />
+                ))}
+                {filteredCards.length === 0 && (
+                  <div className="col-span-full text-center text-muted-foreground text-sm py-8">
+                    No organizations found.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Sector Comparison */}
-          <SectorComparison data={sectorData} onSectorClick={s => setSectorFilter(s)} />
+          {!isInitialLoad && <SectorComparison data={sectorData} onSectorClick={s => setSectorFilter(s)} />}
 
           {/* Risk Heat Map */}
-          <RiskHeatMap data={heatMapData} />
+          {isInitialLoad ? <HeatMapSkeleton /> : <RiskHeatMap data={heatMapData} />}
         </div>
 
         {/* Alert sidebar */}
