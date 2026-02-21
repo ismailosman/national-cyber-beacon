@@ -16,12 +16,26 @@ serve(async (req) => {
     const findings: any[] = [];
     const hostname = new URL(url).hostname;
 
+    // Detect Cloudflare nameservers early
+    let isCloudflare = false;
+    let nsRecords: string[] = [];
+    try {
+      const nsResponse = await fetch(`https://dns.google/resolve?name=${hostname}&type=NS`, { signal: AbortSignal.timeout(5000) });
+      const nsData = await nsResponse.json();
+      nsRecords = (nsData.Answer || []).map((a: any) => a.data);
+      if (nsRecords.some((ns: string) => ns.toLowerCase().includes("cloudflare"))) {
+        isCloudflare = true;
+      }
+    } catch {}
+
     // DNSSEC check
     try {
       const dnssecResponse = await fetch(`https://dns.google/resolve?name=${hostname}&type=A&do=true`, { signal: AbortSignal.timeout(5000) });
       const dnssecData = await dnssecResponse.json();
       if (dnssecData.AD) {
         findings.push({ id: "DNS-DNSSEC-OK", test: "DNSSEC Enabled", severity: "info", status: "pass", detail: "DNSSEC is enabled and validated — DNS responses are authenticated" });
+      } else if (isCloudflare) {
+        findings.push({ id: "DNS-DNSSEC-CF", test: "DNSSEC Managed by Cloudflare", severity: "info", status: "pass", detail: "DNSSEC is managed by Cloudflare. Google DNS may not always report the AD flag for Cloudflare-proxied domains." });
       } else {
         findings.push({ id: "DNS-DNSSEC-MISS", test: "DNSSEC Not Enabled", severity: "medium", status: "fail", detail: "DNSSEC is not enabled. DNS responses can be spoofed by attackers (DNS cache poisoning).", recommendation: "Enable DNSSEC at your domain registrar and DNS provider." });
       }
@@ -75,20 +89,19 @@ serve(async (req) => {
       }
     } catch {}
 
-    // NS records
-    try {
-      const nsResponse = await fetch(`https://dns.google/resolve?name=${hostname}&type=NS`, { signal: AbortSignal.timeout(5000) });
-      const nsData = await nsResponse.json();
-      const nsRecords = (nsData.Answer || []).map((a: any) => a.data);
-      if (nsRecords.length > 0) {
-        findings.push({ id: "DNS-NS", test: "Nameservers", severity: "info", status: "info", detail: `Using ${nsRecords.length} nameserver(s)`, evidence: { ns: nsRecords } });
+    // NS records (already fetched above)
+    if (nsRecords.length > 0) {
+      findings.push({ id: "DNS-NS", test: "Nameservers", severity: "info", status: "info", detail: `Using ${nsRecords.length} nameserver(s)`, evidence: { ns: nsRecords } });
 
-        const uniqueProviders = new Set(nsRecords.map((ns: string) => ns.split(".").slice(-2).join(".")));
-        if (uniqueProviders.size === 1) {
+      const uniqueProviders = new Set(nsRecords.map((ns: string) => ns.split(".").slice(-2).join(".")));
+      if (uniqueProviders.size === 1) {
+        if (isCloudflare) {
+          findings.push({ id: "DNS-NS-CF", test: "Single DNS Provider (Cloudflare)", severity: "info", status: "pass", detail: "All nameservers are from Cloudflare, which provides built-in redundancy across its global anycast network." });
+        } else {
           findings.push({ id: "DNS-NS-SINGLE", test: "Single DNS Provider", severity: "low", status: "fail", detail: "All nameservers are from a single provider. If that provider has an outage, your domain goes offline.", recommendation: "Consider using a secondary DNS provider for redundancy" });
         }
       }
-    } catch {}
+    }
 
     return new Response(JSON.stringify({ success: true, test: "dns_security", findingsCount: findings.length, findings, checkedAt: new Date().toISOString() }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {

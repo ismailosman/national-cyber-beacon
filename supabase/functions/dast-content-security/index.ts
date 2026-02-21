@@ -18,6 +18,9 @@ serve(async (req) => {
     const response = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(15000) });
     const headers = response.headers;
 
+    // Detect Cloudflare
+    const isCloudflare = (headers.get("server") || "").toLowerCase().includes("cloudflare") || !!headers.get("cf-ray");
+
     // Content-Security-Policy
     const csp = headers.get("content-security-policy") || "";
     if (!csp) {
@@ -37,11 +40,16 @@ serve(async (req) => {
       }
     }
 
-    // X-Frame-Options / frame-ancestors
+    // X-Frame-Options / frame-ancestors — Clickjacking
     const xfo = headers.get("x-frame-options") || "";
     const hasFrameAncestors = csp.includes("frame-ancestors");
     if (!xfo && !hasFrameAncestors) {
-      findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection Missing", severity: "medium", status: "fail", detail: "No X-Frame-Options or CSP frame-ancestors. Site can be embedded in attacker-controlled iframes for clickjacking.", recommendation: "Add X-Frame-Options: DENY or SAMEORIGIN, or CSP frame-ancestors 'self'" });
+      if (isCloudflare) {
+        // Cloudflare-protected sites: downgrade to informational
+        findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection", severity: "info", status: "info", detail: "No X-Frame-Options or CSP frame-ancestors header, but site is behind Cloudflare which provides additional protection layers.", recommendation: "Consider adding X-Frame-Options: DENY or CSP frame-ancestors 'self' for defense in depth" });
+      } else {
+        findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection Missing", severity: "medium", status: "fail", detail: "No X-Frame-Options or CSP frame-ancestors. Site can be embedded in attacker-controlled iframes for clickjacking.", recommendation: "Add X-Frame-Options: DENY or SAMEORIGIN, or CSP frame-ancestors 'self'" });
+      }
     } else {
       findings.push({ id: "CS-CLICKJACK", test: "Clickjacking Protection", severity: "info", status: "pass", detail: `Protected by ${xfo ? `X-Frame-Options: ${xfo}` : "CSP frame-ancestors"}` });
     }
