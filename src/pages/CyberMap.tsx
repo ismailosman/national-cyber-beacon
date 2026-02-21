@@ -956,7 +956,7 @@ const CyberMap: React.FC = () => {
 
         // On mobile, fit the entire world into the viewport
         if (isMobile) {
-          map.fitBounds([[-130, -55], [180, 72]], { padding: { top: 80, bottom: 60, left: 0, right: 0 }, animate: false });
+          map.fitBounds([[-180, -70], [180, 80]], { padding: 0, animate: false });
         }
 
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
