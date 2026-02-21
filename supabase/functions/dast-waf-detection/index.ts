@@ -48,14 +48,27 @@ serve(async (req) => {
       findings.push({ id: "WAF-NONE", test: "No WAF Detected", severity: "medium", status: "fail", detail: "No Web Application Firewall (WAF) detected. The application may be directly exposed to attacks.", recommendation: "Deploy a WAF (Cloudflare, AWS WAF, or ModSecurity) to filter malicious traffic." });
     }
 
+    // WAFs that provide built-in rate limiting at the edge
+    const wafsWithRateLimiting = ["Cloudflare", "AWS WAF / CloudFront", "Akamai", "Imperva / Incapsula", "Sucuri", "DDoS-Guard"];
+    const hasWafRateLimiting = detectedWAFs.some(w => wafsWithRateLimiting.includes(w));
+    const wafServerNames = detectedWAFs.map(w => w.toLowerCase());
+
     // Server header info disclosure
     const server = headers.get("server") || "";
     if (server) {
-      const versionPattern = /[\d.]+/;
-      if (versionPattern.test(server)) {
-        findings.push({ id: "WAF-SERVER-VER", test: "Server Version Disclosed", severity: "medium", status: "fail", detail: `Server header reveals version: "${server}". Attackers use this to find known vulnerabilities.`, recommendation: "Configure your web server to hide the version. Nginx: server_tokens off; Apache: ServerTokens Prod", evidence: { server } });
+      const serverLower = server.toLowerCase();
+      const isWafServerHeader = detectedWAFs.length > 0 && wafServerNames.some(w => serverLower.includes(w.split(" ")[0].toLowerCase()));
+
+      if (isWafServerHeader) {
+        // Server header belongs to the WAF/CDN — expected, not a risk
+        findings.push({ id: "WAF-SERVER", test: "Server Header (WAF/CDN)", severity: "info", status: "pass", detail: `Server header "${server}" identifies the WAF/CDN provider. This is expected behavior.`, evidence: { server } });
       } else {
-        findings.push({ id: "WAF-SERVER", test: "Server Header Present", severity: "low", status: "fail", detail: `Server header present: "${server}" (no version, less risky)`, recommendation: "Consider removing or minimizing the Server header", evidence: { server } });
+        const versionPattern = /[\d.]+/;
+        if (versionPattern.test(server)) {
+          findings.push({ id: "WAF-SERVER-VER", test: "Server Version Disclosed", severity: "medium", status: "fail", detail: `Server header reveals version: "${server}". Attackers use this to find known vulnerabilities.`, recommendation: "Configure your web server to hide the version. Nginx: server_tokens off; Apache: ServerTokens Prod", evidence: { server } });
+        } else {
+          findings.push({ id: "WAF-SERVER", test: "Server Header Present", severity: "low", status: "fail", detail: `Server header present: "${server}" (no version, less risky)`, recommendation: "Consider removing or minimizing the Server header", evidence: { server } });
+        }
       }
     }
 
@@ -65,18 +78,23 @@ serve(async (req) => {
       findings.push({ id: "WAF-POWERED", test: "X-Powered-By Header", severity: "medium", status: "fail", detail: `X-Powered-By: "${poweredBy}" reveals backend technology.`, recommendation: "Remove the X-Powered-By header. Express: app.disable('x-powered-by'); PHP: expose_php = Off", evidence: { poweredBy } });
     }
 
-    // Rate limiting test — send a few quick requests
-    let rateLimited = false;
-    try {
-      const promises = Array.from({ length: 5 }, () => fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) }));
-      const responses = await Promise.all(promises);
-      rateLimited = responses.some(r => r.status === 429 || r.status === 503);
-    } catch {}
-
-    if (rateLimited) {
-      findings.push({ id: "WAF-RATELIMIT", test: "Rate Limiting Active", severity: "info", status: "pass", detail: "Rate limiting is active — rapid requests are being throttled" });
+    // Rate limiting test
+    if (hasWafRateLimiting) {
+      // WAF provides rate limiting at the edge — skip naive burst test
+      findings.push({ id: "WAF-RATELIMIT", test: "Rate Limiting (WAF)", severity: "info", status: "pass", detail: `Rate limiting is provided by the detected WAF (${detectedWAFs.join(", ")}). Edge-level rate limiting cannot be tested with simple burst requests.` });
     } else {
-      findings.push({ id: "WAF-RATELIMIT", test: "No Rate Limiting Detected", severity: "medium", status: "fail", detail: "No rate limiting detected after rapid requests. The application may be vulnerable to brute force and DDoS.", recommendation: "Implement rate limiting at the WAF, reverse proxy, or application level" });
+      let rateLimited = false;
+      try {
+        const promises = Array.from({ length: 5 }, () => fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) }));
+        const responses = await Promise.all(promises);
+        rateLimited = responses.some(r => r.status === 429 || r.status === 503);
+      } catch {}
+
+      if (rateLimited) {
+        findings.push({ id: "WAF-RATELIMIT", test: "Rate Limiting Active", severity: "info", status: "pass", detail: "Rate limiting is active — rapid requests are being throttled" });
+      } else {
+        findings.push({ id: "WAF-RATELIMIT", test: "No Rate Limiting Detected", severity: "medium", status: "fail", detail: "No rate limiting detected after rapid requests. The application may be vulnerable to brute force and DDoS.", recommendation: "Implement rate limiting at the WAF, reverse proxy, or application level" });
+      }
     }
 
     // Check for common security response headers that indicate WAF rules
