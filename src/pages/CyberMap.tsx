@@ -1534,11 +1534,10 @@ const CyberMap: React.FC = () => {
 
       {/* ── Mobile Feed Drawer ─────────────────────────────────────────────── */}
       {mobileFeedOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileFeedOpen(false)} />
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50">
           <div
-            className="relative flex flex-col z-10 rounded-t-2xl overflow-hidden"
-            style={{ height: '60vh', background: 'rgba(5, 7, 15, 0.72)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderBottom: 'none' }}
+            className="relative flex flex-col rounded-t-2xl overflow-hidden"
+            style={{ height: '45vh', background: 'rgba(5, 7, 15, 0.72)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderBottom: 'none' }}
           >
             <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.15)' }}>
               <span className="text-sm font-bold font-mono tracking-widest uppercase text-white">ATTACKS</span>
