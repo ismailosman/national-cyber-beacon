@@ -1370,25 +1370,6 @@ const CyberMap: React.FC = () => {
             </div>
           </div>
 
-          {/* ── Nav buttons top-left (desktop only) ──────────────────────── */}
-          <div className="absolute top-4 left-4 z-20 hidden sm:flex flex-col gap-2 pointer-events-auto">
-            <Link
-              to="/public"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
-              style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
-            >
-              <Globe className="w-3 h-3 flex-shrink-0" />
-              <span>Public Dashboard</span>
-            </Link>
-            <Link
-              to="/login"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-colors"
-              style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}
-            >
-              <Shield className="w-3 h-3 flex-shrink-0" />
-              <span>Analyst Login</span>
-            </Link>
-          </div>
 
           {/* ── Live toggle top-right (desktop only) ─────────────────────── */}
           <div className="absolute top-4 right-4 z-20 pointer-events-auto hidden sm:block">
