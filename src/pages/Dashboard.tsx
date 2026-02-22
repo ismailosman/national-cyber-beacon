@@ -16,6 +16,7 @@ import OrgCard from '@/components/dashboard/OrgCard';
 import SectorComparison from '@/components/dashboard/SectorComparison';
 import RiskHeatMap from '@/components/dashboard/RiskHeatMap';
 import AlertSidebar from '@/components/dashboard/AlertSidebar';
+import DastCoverageSummary from '@/components/dashboard/DastCoverageSummary';
 import { TopStatsBarSkeleton, BarChartSkeleton, DonutChartSkeleton, TrendChartSkeleton, OrgGridSkeleton, HeatMapSkeleton } from '@/components/dashboard/DashboardSkeletons';
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 min
@@ -254,6 +255,52 @@ const Dashboard: React.FC = () => {
     });
   }, [orgScores, scoreHistory, ddosLogs, dastResults]);
 
+  // DAST coverage summary
+  const dastCoverageData = useMemo(() => {
+    const scannedSet = new Set<string>();
+    let totalScore = 0;
+    let totalC = 0, totalH = 0, totalM = 0, totalL = 0;
+    let latestDate: string | null = null;
+    const gradeCount: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+
+    // dastResults is ordered by scanned_at desc, so first per org is latest
+    const seen = new Set<string>();
+    (dastResults as any[]).forEach(d => {
+      if (seen.has(d.organization_id)) return;
+      seen.add(d.organization_id);
+      scannedSet.add(d.organization_id);
+      const s = d.dast_score ?? 0;
+      totalScore += s;
+      const grade = s >= 90 ? 'A' : s >= 75 ? 'B' : s >= 60 ? 'C' : s >= 40 ? 'D' : 'F';
+      gradeCount[grade] = (gradeCount[grade] || 0) + 1;
+      const sum = d.summary as any;
+      if (sum) {
+        totalC += sum.critical ?? 0;
+        totalH += sum.high ?? 0;
+        totalM += sum.medium ?? 0;
+        totalL += sum.low ?? 0;
+      }
+      if (!latestDate || d.scanned_at > latestDate) latestDate = d.scanned_at;
+    });
+
+    const scannedCount = scannedSet.size;
+    const avgScore = scannedCount > 0 ? Math.round(totalScore / scannedCount) : 0;
+    const avgGrade = avgScore >= 90 ? 'A' : avgScore >= 75 ? 'B' : avgScore >= 60 ? 'C' : avgScore >= 40 ? 'D' : scannedCount > 0 ? 'F' : '';
+
+    return {
+      totalOrgs: monitoredOrgs.length,
+      scannedOrgs: scannedCount,
+      avgScore,
+      avgGrade,
+      totalCritical: totalC,
+      totalHigh: totalH,
+      totalMedium: totalM,
+      totalLow: totalL,
+      lastScanDate: latestDate,
+      gradeDistribution: ['A', 'B', 'C', 'D', 'F'].map(g => ({ grade: g, count: gradeCount[g] || 0 })),
+    };
+  }, [dastResults, monitoredOrgs]);
+
   // Apply sort and filter
   const filteredCards = useMemo(() => {
     let cards = sectorFilter ? orgCardsData.filter(c => c.sector.toLowerCase() === sectorFilter.toLowerCase()) : orgCardsData;
@@ -385,6 +432,9 @@ const Dashboard: React.FC = () => {
               <ThreatTimelineChart data={threatTimeline} />
             </div>
           )}
+
+          {/* DAST Coverage Summary */}
+          {!isInitialLoad && <DastCoverageSummary data={dastCoverageData} />}
 
           {/* Section 4: Organization Grid */}
           {isInitialLoad ? <OrgGridSkeleton /> : (
