@@ -69,6 +69,14 @@ const Navbar: React.FC = () => {
               LIVE ATTACK
             </Link>
           </li>
+          <li>
+            <Link
+              to="/contact"
+              className="inline-flex items-center px-5 py-2 rounded-full text-xs font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors"
+            >
+              Secure Your Business
+            </Link>
+          </li>
         </ul>
 
         <button
