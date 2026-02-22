@@ -1,51 +1,76 @@
 
 
-## Add DAST Scanner Results to Dashboard Organization Overview
+## Remove Phishing Lookalike Noise from Live Alerts
 
-### What Changes
+### Problem
 
-The Organization Security Overview cards on the dashboard will display DAST scan data from the scanner, replacing the current "DAST: ---" placeholder with real results including the DAST grade, finding counts, and scan date.
+The "Active Phishing Domain" alerts (e.g., `nca.info`, `nca.com`, `opm.net`) are flooding Live Alerts because:
+1. The `generateAlert` function inserts alerts **without** an `organization_id`
+2. The AlertSidebar query has no filter to exclude unlinked alerts
+3. Many of these "lookalike" domains are legitimate, unrelated websites (e.g., `nca.info` is not actually impersonating anything)
+
+### Solution
+
+Three changes to permanently fix this:
 
 ### Changes
 
-#### 1. Update OrgCard component (`src/components/dashboard/OrgCard.tsx`)
-
-- Replace the simple "DAST: grade" text with a richer display showing:
-  - DAST letter grade (A-F) with color coding (A/B = green, C = amber, D/F = red)
-  - Finding summary counts (critical/high/medium/low) as small colored badges
-  - Last scanned date
-- Add new props: `dastSummary` (critical, high, medium, low, passed counts) and `dastScannedAt` (date string)
-
-#### 2. Pass DAST data through Dashboard (`src/pages/Dashboard.tsx`)
-
-- The dashboard already fetches `dast_scan_results` and computes `dastGrade`. Extend this to also pass:
-  - `dastSummary` object from the `summary` column (critical, high, medium, low, passed counts)
-  - `dastScannedAt` timestamp
-- Update the `orgCardsData` memo to include these new fields from the existing `dastResults` query (which already fetches `dast_score`). Expand the query to also select `summary` and `scanned_at`.
+| File / Action | Change |
+|---|---|
+| `src/components/dashboard/AlertSidebar.tsx` | Add `.not('organization_id', 'is', null)` filter so only alerts tied to registered organizations appear in Live Alerts |
+| `src/pages/ThreatIntelligence.tsx` | Update `generateAlert` to accept an optional `organization_id` parameter and pass it when inserting. Update the phishing check caller to pass `r.organizationId` |
+| Database cleanup | Close all existing phishing alerts that have no `organization_id` |
 
 ### Technical Details
 
-**Dashboard.tsx -- dast query expansion** (around line 106):
+**1. AlertSidebar.tsx** -- add org filter (line 25):
+
 ```typescript
-// Change from:
-select('organization_id, dast_score')
-// To:
-select('organization_id, dast_score, summary, scanned_at')
+const { data } = await supabase
+  .from('alerts')
+  .select('*, organizations(name)')
+  .eq('status', 'open')
+  .not('organization_id', 'is', null)   // only registered org alerts
+  .gte('created_at', oneHourAgo)
+  .order('created_at', { ascending: false })
+  .limit(10);
 ```
 
-**Dashboard.tsx -- orgCardsData memo**: Add `dastSummary` and `dastScannedAt` from the latest DAST result per org.
+**2. ThreatIntelligence.tsx** -- update `generateAlert` signature (line 850):
 
-**OrgCard.tsx -- enhanced DAST display**: Replace the single "DAST: ---" line with:
-- Grade badge (colored A-F)
-- Row of small finding count indicators: e.g., "2C 3H 5M" (critical/high/medium)
-- If no DAST data, show "Not scanned" in muted text
-
-### Visual Result
-
-Each org card will show DAST findings inline, like:
+```typescript
+const generateAlert = async (
+  severity: string, title: string, description: string,
+  organizationId?: string
+) => {
+  // ... dedup check ...
+  await supabase.from('alerts').insert({
+    title, description, severity, source: 'threat-intel',
+    status: 'open', organization_id: organizationId || null,
+  });
+};
 ```
-DAST: A  |  0C  0H  1M  3L
-Scanned: Feb 21
+
+Then update the phishing caller (line 553) to pass the org ID:
+
+```typescript
+await generateAlert('critical',
+  `Active Phishing Domain: ${d.domain}`,
+  `Lookalike domain ${d.domain} targeting ${r.organization}...`,
+  r.organizationId   // <-- link to org
+);
 ```
 
-Cards with poor DAST grades (D/F) will have the grade highlighted in red, making it immediately visible which organizations need attention.
+**3. Database cleanup** -- close all orphan phishing alerts:
+
+```sql
+UPDATE public.alerts
+SET status = 'closed'
+WHERE organization_id IS NULL AND status = 'open';
+```
+
+### Result
+
+- Live Alerts sidebar will only show threats linked to actual monitored organizations
+- Future phishing alerts will be properly linked to their organization
+- Existing orphan alerts (nca.info, opm.com, etc.) will be closed immediately
