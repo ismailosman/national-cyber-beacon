@@ -1,77 +1,100 @@
 import React from 'react';
-import { Shield, Laptop, Wifi, Lock, Eye, Server } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldCheck, Search, FlaskConical, FileBarChart } from 'lucide-react';
+
+const features = [
+  {
+    icon: ShieldCheck,
+    title: 'Reduce Attack Surface',
+    desc: 'Continuously monitor and minimize your exposure to cyber threats across all digital assets.',
+  },
+  {
+    icon: Search,
+    title: 'Uncover Security Gaps',
+    desc: 'Identify vulnerabilities before attackers do with deep scanning and analysis.',
+  },
+  {
+    icon: FlaskConical,
+    title: 'Test Security Controls',
+    desc: 'Validate your defenses with simulated attacks and compliance-driven assessments.',
+  },
+  {
+    icon: FileBarChart,
+    title: 'Clear Reporting Insights',
+    desc: 'Get actionable intelligence with executive-ready reports and real-time dashboards.',
+  },
+];
 
 const HeroSection: React.FC = () => (
-  <section id="hero" className="pt-28 pb-20 px-6 bg-white">
-    <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+  <section
+    id="hero"
+    className="relative pt-28 pb-20 px-6 overflow-hidden"
+    style={{ background: 'linear-gradient(135deg, #0a0a0f 0%, #111118 50%, #0d0d14 100%)' }}
+  >
+    {/* Decorative radial glows */}
+    <div
+      className="absolute top-0 left-1/4 w-[600px] h-[600px] rounded-full opacity-[0.07] pointer-events-none"
+      style={{ background: 'radial-gradient(circle, hsl(0 100% 55%), transparent 70%)' }}
+    />
+    <div
+      className="absolute bottom-0 right-1/4 w-[500px] h-[500px] rounded-full opacity-[0.05] pointer-events-none"
+      style={{ background: 'radial-gradient(circle, hsl(186 100% 50%), transparent 70%)' }}
+    />
+
+    <div className="relative z-10 max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
       {/* Left — Copy */}
-      <div className="max-w-lg">
-        <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold leading-tight text-gray-900 tracking-tight">
-          Advanced Cyber Defense for Modern Businesses
+      <div className="max-w-xl">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-1 h-8 rounded-full bg-[#FF4D2E]" />
+          <span className="text-sm font-semibold tracking-widest uppercase text-gray-400">
+            Cyber Defense Solutions
+          </span>
+        </div>
+
+        <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold leading-[1.1] text-white tracking-tight">
+          Secure Your Business with{' '}
+          <span className="text-[#FF4D2E]">Advanced Cyber Defense</span>
         </h1>
-        <p className="mt-5 text-gray-500 text-base sm:text-lg leading-relaxed">
-          Real-time monitoring, AI-driven threat detection, and enterprise-grade infrastructure protection.
+
+        <p className="mt-6 text-gray-400 text-base sm:text-lg leading-relaxed max-w-md">
+          Real-time monitoring, AI-driven threat detection, and enterprise-grade infrastructure protection — tailored for organizations that can't afford downtime.
         </p>
-        <div className="mt-8 flex flex-wrap gap-4">
-          <a
-            href="/contact"
-            className="inline-flex items-center px-7 py-3 rounded-lg text-sm font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors shadow-sm"
+
+        <div className="mt-10 flex flex-wrap gap-4">
+          <Link
+            to="/contact"
+            className="inline-flex items-center px-8 py-3.5 rounded-full text-sm font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors shadow-lg shadow-[#FF4D2E]/20"
           >
-            Get Started
-          </a>
-          <a
-            href="/contact"
-            className="inline-flex items-center px-7 py-3 rounded-lg text-sm font-bold text-[#FF4D2E] border-2 border-[#FF4D2E] hover:bg-[#FF4D2E]/5 transition-colors"
+            Secure Your Business
+          </Link>
+          <Link
+            to="/cyber-map"
+            className="inline-flex items-center px-8 py-3.5 rounded-full text-sm font-bold text-gray-300 border border-gray-700 hover:border-gray-500 hover:text-white transition-colors"
           >
-            Request Consultation
-          </a>
+            View Live Threats
+          </Link>
         </div>
       </div>
 
-      {/* Right — Illustration */}
-      <div className="relative flex items-center justify-center" aria-hidden="true">
-        {/* Background circle */}
-        <div className="absolute w-72 h-72 sm:w-96 sm:h-96 rounded-full bg-[#FF4D2E]/5" />
-
-        {/* Central shield */}
-        <div className="relative z-10 w-32 h-32 sm:w-40 sm:h-40 rounded-2xl bg-gradient-to-br from-[#FF4D2E] to-[#ff7a5c] flex items-center justify-center shadow-lg animate-float">
-          <Shield className="w-16 h-16 sm:w-20 sm:h-20 text-white" strokeWidth={1.5} />
-        </div>
-
-        {/* Orbiting elements */}
-        <div className="absolute top-4 right-8 sm:top-6 sm:right-12 w-14 h-14 rounded-xl bg-white border border-gray-200 shadow-md flex items-center justify-center animate-float-delayed">
-          <Laptop className="w-7 h-7 text-[#FF4D2E]" />
-        </div>
-
-        <div className="absolute bottom-6 left-4 sm:bottom-8 sm:left-8 w-12 h-12 rounded-xl bg-white border border-gray-200 shadow-md flex items-center justify-center animate-float-slow">
-          <Lock className="w-6 h-6 text-gray-600" />
-        </div>
-
-        <div className="absolute top-8 left-4 sm:top-10 sm:left-10 w-11 h-11 rounded-full bg-white border border-gray-200 shadow flex items-center justify-center animate-float-delayed">
-          <Wifi className="w-5 h-5 text-[#FF4D2E]/80" />
-        </div>
-
-        <div className="absolute bottom-10 right-2 sm:bottom-12 sm:right-6 w-11 h-11 rounded-full bg-white border border-gray-200 shadow flex items-center justify-center animate-float-slow">
-          <Eye className="w-5 h-5 text-gray-500" />
-        </div>
-
-        <div className="absolute top-1/2 -translate-y-1/2 -left-2 sm:left-0 w-10 h-10 rounded-lg bg-white border border-gray-200 shadow flex items-center justify-center animate-float">
-          <Server className="w-5 h-5 text-gray-500" />
-        </div>
-
-        {/* Dots decoration */}
-        {[...Array(6)].map((_, i) => (
+      {/* Right — Feature cards grid */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        {features.map(({ icon: Icon, title, desc }, i) => (
           <div
-            key={i}
-            className="absolute w-2 h-2 rounded-full bg-[#FF4D2E]/20"
-            style={{
-              top: `${15 + Math.sin(i * 1.2) * 35}%`,
-              left: `${10 + Math.cos(i * 1.5) * 40 + 40}%`,
-            }}
-          />
+            key={title}
+            className="group relative rounded-2xl border border-gray-800/60 bg-white/[0.03] backdrop-blur-sm p-6 hover:border-[#FF4D2E]/30 hover:bg-white/[0.06] transition-all duration-300"
+          >
+            <div className="w-11 h-11 rounded-xl bg-[#FF4D2E]/10 flex items-center justify-center mb-4 group-hover:bg-[#FF4D2E]/20 transition-colors">
+              <Icon className="w-5 h-5 text-[#FF4D2E]" strokeWidth={1.8} />
+            </div>
+            <h3 className="font-bold text-white text-[15px] mb-2">{title}</h3>
+            <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
+          </div>
         ))}
       </div>
     </div>
+
+    {/* Bottom decorative line */}
+    <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-gray-800 to-transparent" />
   </section>
 );
 
