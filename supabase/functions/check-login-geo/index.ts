@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,6 +20,16 @@ serve(async (req) => {
     let country = 'Unknown';
     let allowed = false;
 
+    // Fetch allowed countries from DB
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+    const { data: allowedCountries } = await supabase
+      .from('geo_allowed_countries')
+      .select('country_code');
+    const allowedCodes = (allowedCountries || []).map((r: any) => r.country_code);
+
     if (ip !== 'unknown') {
       try {
         const geo = await fetch(`http://ip-api.com/json/${ip}?fields=status,countryCode,country`);
@@ -26,15 +37,13 @@ serve(async (req) => {
         if (data.status === 'success') {
           countryCode = data.countryCode;
           country = data.country;
-          allowed = ['US', 'SO'].includes(countryCode);
+          allowed = allowedCodes.includes(countryCode);
         }
       } catch {
-        // Geo lookup failed — allow by default to avoid locking out users
         allowed = true;
         country = 'Lookup failed';
       }
     } else {
-      // Can't determine IP — allow to avoid locking out
       allowed = true;
     }
 

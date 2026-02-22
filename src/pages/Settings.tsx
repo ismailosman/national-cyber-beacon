@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, Trash2, RefreshCw, Settings as SettingsIcon, Shield, Loader2, MapPin } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Settings as SettingsIcon, Shield, Loader2, MapPin, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
@@ -18,6 +18,8 @@ const Settings: React.FC = () => {
   const [newOrg, setNewOrg] = useState({ name: '', sector: 'government', domain: '', region: 'Banaadir', lat: '', lng: '' });
   const [addingOrg, setAddingOrg] = useState(false);
   const [fullScan, setFullScan] = useState(false);
+  const [newCountry, setNewCountry] = useState({ code: '', name: '' });
+  const [addingCountry, setAddingCountry] = useState(false);
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['organizations'],
@@ -26,6 +28,41 @@ const Settings: React.FC = () => {
       return data || [];
     },
   });
+
+  const { data: allowedCountries = [] } = useQuery({
+    queryKey: ['geo_allowed_countries'],
+    queryFn: async () => {
+      const { data } = await supabase.from('geo_allowed_countries').select('*').order('country_name');
+      return data || [];
+    },
+  });
+
+  const handleAddCountry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCountry.code || !newCountry.name) { toast.error('Country code and name required'); return; }
+    setAddingCountry(true);
+    const { error } = await supabase.from('geo_allowed_countries').insert({
+      country_code: newCountry.code.toUpperCase(),
+      country_name: newCountry.name,
+    });
+    if (error) toast.error(error.message);
+    else {
+      toast.success('Country added');
+      setNewCountry({ code: '', name: '' });
+      queryClient.invalidateQueries({ queryKey: ['geo_allowed_countries'] });
+    }
+    setAddingCountry(false);
+  };
+
+  const handleDeleteCountry = async (id: string, name: string) => {
+    if (!confirm(`Remove "${name}" from allowed countries?`)) return;
+    const { error } = await supabase.from('geo_allowed_countries').delete().eq('id', id);
+    if (error) toast.error(error.message);
+    else {
+      toast.success('Country removed');
+      queryClient.invalidateQueries({ queryKey: ['geo_allowed_countries'] });
+    }
+  };
 
   const handleAddOrg = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,6 +168,39 @@ const Settings: React.FC = () => {
             className="sm:col-span-2 lg:col-span-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-neon-cyan text-background font-bold text-sm rounded-lg hover:brightness-110 transition-all disabled:opacity-50 glow-cyan">
             {addingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Add Organization
+          </button>
+        </form>
+      </div>
+
+      {/* Geo-Restriction */}
+      <div className="glass-card rounded-xl p-6 border border-border">
+        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Globe className="w-4 h-4 text-neon-cyan" /> Geo-Restriction — Allowed Countries
+        </h3>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {(allowedCountries as any[]).map((c) => (
+            <span key={c.id} className="flex items-center gap-1.5 px-3 py-1.5 bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan text-xs font-mono rounded-lg">
+              {c.country_code} — {c.country_name}
+              <button onClick={() => handleDeleteCountry(c.id, c.country_name)}
+                className="ml-1 hover:text-neon-red transition-colors">
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+          {(allowedCountries as any[]).length === 0 && (
+            <p className="text-xs text-muted-foreground">No countries allowed — all logins will be blocked.</p>
+          )}
+        </div>
+        <form onSubmit={handleAddCountry} className="flex gap-2">
+          <input placeholder="Code (e.g. GB)" value={newCountry.code} onChange={e => setNewCountry(p => ({ ...p, code: e.target.value }))}
+            maxLength={2}
+            className="w-24 px-3 py-2 bg-input border border-border rounded-lg text-sm font-mono uppercase focus:outline-none focus:border-neon-cyan transition-all" />
+          <input placeholder="Country name" value={newCountry.name} onChange={e => setNewCountry(p => ({ ...p, name: e.target.value }))}
+            className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-sm focus:outline-none focus:border-neon-cyan transition-all" />
+          <button type="submit" disabled={addingCountry}
+            className="flex items-center gap-1.5 px-4 py-2 bg-neon-cyan text-background font-bold text-sm rounded-lg hover:brightness-110 transition-all disabled:opacity-50 glow-cyan">
+            {addingCountry ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+            Add
           </button>
         </form>
       </div>
