@@ -20,14 +20,29 @@ async function pingUrl(url: string): Promise<PingResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: "HEAD",
       signal: controller.signal,
       redirect: "follow",
     });
-    clearTimeout(timeout);
+
+    // If HEAD returns 403 or 405, retry with GET (many WAFs/Cloudflare block HEAD)
+    if (res.status === 403 || res.status === 405) {
+      const controller2 = new AbortController();
+      const timeout2 = setTimeout(() => controller2.abort(), 10000);
+      res = await fetch(url, {
+        method: "GET",
+        signal: controller2.signal,
+        redirect: "follow",
+      });
+      clearTimeout(timeout2);
+    } else {
+      clearTimeout(timeout);
+    }
+
     const responseTime = Date.now() - start;
-    const isUp = res.status >= 200 && res.status < 400;
+    // Server is "up" if it responds with anything other than 5xx
+    const isUp = res.status < 500;
     return { url, status: isUp ? "up" : "down", responseTime, statusCode: res.status, checkedAt };
   } catch {
     return { url, status: "down", responseTime: null, statusCode: null, checkedAt };
