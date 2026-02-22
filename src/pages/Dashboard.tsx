@@ -26,6 +26,7 @@ const Dashboard: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<string>('score-desc');
+  const [dastGradeFilter, setDastGradeFilter] = useState<string | null>(null);
 
   // Snapshot daily scores on mount
   useEffect(() => { snapshotDailyScores().catch(console.error); }, []);
@@ -304,13 +305,18 @@ const Dashboard: React.FC = () => {
   // Apply sort and filter
   const filteredCards = useMemo(() => {
     let cards = sectorFilter ? orgCardsData.filter(c => c.sector.toLowerCase() === sectorFilter.toLowerCase()) : orgCardsData;
+    if (dastGradeFilter === 'not-scanned') {
+      cards = cards.filter(c => !c.dastGrade);
+    } else if (dastGradeFilter) {
+      cards = cards.filter(c => c.dastGrade === dastGradeFilter);
+    }
     switch (sortBy) {
       case 'score-asc': return [...cards].sort((a, b) => a.score - b.score);
       case 'name': return [...cards].sort((a, b) => a.name.localeCompare(b.name));
       case 'threats': return [...cards].sort((a, b) => b.threatsCount - a.threatsCount);
       default: return [...cards].sort((a, b) => b.score - a.score);
     }
-  }, [orgCardsData, sectorFilter, sortBy]);
+  }, [orgCardsData, sectorFilter, sortBy, dastGradeFilter]);
 
   // Sector comparison data
   const sectorData = useMemo(() => {
@@ -434,7 +440,7 @@ const Dashboard: React.FC = () => {
           )}
 
           {/* DAST Coverage Summary */}
-          {!isInitialLoad && <DastCoverageSummary data={dastCoverageData} />}
+          {!isInitialLoad && <DastCoverageSummary data={dastCoverageData} activeDastGrade={dastGradeFilter} onGradeClick={(g) => setDastGradeFilter(prev => prev === g ? null : g)} />}
 
           {/* Section 4: Organization Grid */}
           {isInitialLoad ? <OrgGridSkeleton /> : (
