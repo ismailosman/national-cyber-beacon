@@ -1,75 +1,61 @@
 
 
-## Show IP Address and Geo-Restrict Login to USA and Somalia
+## Fix Login Page: Logo, IP Display, and Configurable Geo-Restriction
 
-### Overview
-Display the visitor's IP address on the login page and block login attempts from countries other than the United States and Somalia. We'll use a free IP geolocation API to fetch the visitor's IP and country on page load.
+### Problem Summary
+1. **IP address not showing** -- The `check-login-geo` edge function is missing from `supabase/config.toml`, so JWT verification blocks unauthenticated requests on the login page.
+2. **Wrong logo** -- Login page imports `login-logo.png` instead of `logo.png`.
+3. **No way to manage allowed countries** -- The allowed country list (`US`, `SO`) is hardcoded in the edge function.
 
 ### Changes
 
-#### 1. New Edge Function: `supabase/functions/check-login-geo/index.ts`
-- Receives the request, extracts the caller's IP from headers (x-forwarded-for, x-real-ip, or connection info)
-- Calls a free geolocation API (ip-api.com) to get country code
-- Returns `{ ip, country_code, country_name, allowed }` where `allowed` is true only for `US` or `SO`
-- Includes CORS headers
-
-#### 2. Update `supabase/config.toml`
-- Add `[functions.check-login-geo]` with `verify_jwt = false` (unauthenticated users need this)
-
-#### 3. Update `src/pages/Login.tsx`
-- On mount, call the `check-login-geo` edge function
-- Display the user's IP address below the "Operator Sign In" heading (styled subtly with a globe/wifi icon)
-- Display the detected country name
-- If the country is not US or Somalia:
-  - Show a red "Access Denied" banner explaining geographic restriction
-  - Disable the login form (grey out inputs and submit button)
-- If geo lookup is still loading, show a small spinner where the IP will appear
-
-### UI Preview
-
-```
-  OPERATOR SIGN IN
-  IP: 203.0.113.42 | Location: Somalia
-  
-  [email input]
-  [password input]
-  [Access System button]
-```
-
-If blocked:
-```
-  OPERATOR SIGN IN
-  IP: 203.0.113.42 | Location: Germany
-  
-  ⚠ ACCESS RESTRICTED
-  Login is only permitted from USA or Somalia.
-  
-  [email input - disabled]
-  [password input - disabled]  
-  [Access System button - disabled]
-```
+| # | File | What |
+|---|---|---|
+| 1 | `supabase/config.toml` | Add `[functions.check-login-geo]` with `verify_jwt = false` |
+| 2 | `src/pages/Login.tsx` | Change logo import from `login-logo.png` to `logo.png` |
+| 3 | Database migration | Create `geo_allowed_countries` table with columns: `id`, `country_code` (2-letter ISO), `country_name`, `created_at`. Seed with `US` and `SO`. Add RLS: SuperAdmins can manage, authenticated users can read. |
+| 4 | `supabase/functions/check-login-geo/index.ts` | Fetch allowed country codes from the `geo_allowed_countries` table instead of using a hardcoded list |
+| 5 | `src/pages/Settings.tsx` | Add a "Geo-Restriction" section where SuperAdmins can add/remove allowed countries |
 
 ### Technical Details
 
-**Edge function** (`check-login-geo/index.ts`):
+**1. Config fix (root cause of IP not showing)**
+
+The login page calls `check-login-geo` before the user is authenticated. Without `verify_jwt = false`, the function rejects the request, the catch block silently swallows the error, and `geoInfo` stays `null` so nothing renders.
+
+**2. Logo swap**
+
 ```typescript
-// Extract IP from request headers
-const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  || req.headers.get('x-real-ip')
-  || 'unknown';
+// Before
+import loginLogo from '@/assets/login-logo.png';
 
-// Lookup via ip-api.com (free, no key needed, 45 req/min)
-const geo = await fetch(`http://ip-api.com/json/${ip}?fields=countryCode,country`);
-const { countryCode, country } = await geo.json();
-const allowed = ['US', 'SO'].includes(countryCode);
-
-return new Response(JSON.stringify({ ip, country_code: countryCode, country_name: country, allowed }));
+// After
+import loginLogo from '@/assets/logo.png';
 ```
 
-**Login page** additions:
-- New state: `ipInfo` (ip, country, allowed), `geoLoading`
-- `useEffect` on mount calls `supabase.functions.invoke('check-login-geo')`
-- IP/country displayed in a small info bar
-- Form disabled when `ipInfo?.allowed === false`
-- Error banner shown for blocked countries
+**3. New table: `geo_allowed_countries`**
+
+```text
+id          uuid (PK, default gen_random_uuid())
+country_code text NOT NULL UNIQUE  -- e.g. "US", "SO"
+country_name text NOT NULL         -- e.g. "United States", "Somalia"
+created_at   timestamptz DEFAULT now()
+```
+
+Seeded with two rows: `US`/`United States` and `SO`/`Somalia`.
+
+RLS policies:
+- Authenticated users can SELECT (needed for Settings page display)
+- SuperAdmins can INSERT and DELETE
+
+**4. Edge function update**
+
+Instead of `['US', 'SO'].includes(countryCode)`, the function will query the `geo_allowed_countries` table using the service role key to check if the detected country code exists.
+
+**5. Settings page addition**
+
+A new "Allowed Countries" card in Settings (visible to SuperAdmins) with:
+- A list of currently allowed country codes with delete buttons
+- An input to add a new country code and name
+- Changes take effect immediately for future login attempts
 
