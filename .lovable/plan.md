@@ -1,19 +1,54 @@
 
 
-## Two Fixes
+## Create Privacy/Terms Pages and Improve Site Visibility
 
-### 1. Remove "Public Dashboard" and "Analyst Login" from Cyber Map
+### 1. New Pages
 
-**File:** `src/pages/CyberMap.tsx` (lines 1373-1391)
+#### Privacy Policy (`src/pages/Privacy.tsx`)
+- Dark-themed page matching site design (`bg-[#0a0a0f]`)
+- Uses Navbar + Footer + CookieConsent layout
+- Covers: data collection, usage, cookies, third parties, security, user rights, contact info
+- Professional legal-style content tailored to CyberDefense
 
-Remove the entire nav buttons block (the `div` containing the "Public Dashboard" and "Analyst Login" links) from the top-left corner of the cyber map page.
+#### Terms of Service (`src/pages/Terms.tsx`)
+- Same layout and dark theme
+- Covers: acceptance, services description, user obligations, intellectual property, limitation of liability, termination, governing law, contact
 
-### 2. Fix Contact Page White Background and Form Visibility
+### 2. Routing (`src/App.tsx`)
+- Add `/privacy` and `/terms` routes as public pages (alongside `/contact` and `/portfolio`)
 
-**File:** `src/pages/Contact.tsx`
+### 3. Footer Links (`src/components/landing/Footer.tsx`)
+- Convert the static "Privacy Policy" and "Terms of Service" text spans to `<Link>` components pointing to `/privacy` and `/terms`
 
-- Change the outer wrapper background from `bg-white text-gray-900` to `bg-[#0a0a0f] text-white` (dark theme, matching the landing page)
-- Change the section background from `bg-gray-50` to `bg-[#0a0a0f]`
-- Update the form input styling from semi-transparent (`bg-white/10 border-white/30 text-white placeholder:text-white/50`) to solid white inputs with dark text (`bg-white text-gray-900 border-white/50 placeholder:text-gray-500`) so the fields are clearly readable against the red background
-- Remove the `max-w-7xl mx-auto` wrapper so the two-column layout goes edge-to-edge
+### 4. Improve Site Visibility (Too Dark)
+
+The current site uses very dark grays (`gray-400`, `gray-500`) for body text, making it hard to read especially on mobile. Changes across multiple files:
+
+**`src/components/landing/HeroSection.tsx`**
+- Subtitle text: `text-gray-400` to `text-gray-300`
+- Body paragraph: `text-gray-400` to `text-gray-300`
+- Card descriptions: `text-gray-500` to `text-gray-400`
+
+**`src/components/landing/AboutSection.tsx`**
+- About body text: `text-gray-500` to `text-gray-300`
+- Card descriptions: `text-gray-500` to `text-gray-400`
+
+**`src/components/landing/Footer.tsx`**
+- Brand description: `text-gray-500` to `text-gray-400`
+- Copyright and bottom bar: `text-gray-600` to `text-gray-500`
+
+**`src/pages/Landing.tsx`**
+- Stats sub-text: `text-gray-500` to `text-gray-400`
+
+### Files Summary
+
+| File | Action |
+|---|---|
+| `src/pages/Privacy.tsx` | **Create** -- Privacy Policy page |
+| `src/pages/Terms.tsx` | **Create** -- Terms of Service page |
+| `src/App.tsx` | **Edit** -- Add routes for `/privacy` and `/terms` |
+| `src/components/landing/Footer.tsx` | **Edit** -- Link Privacy/Terms text to new pages |
+| `src/components/landing/HeroSection.tsx` | **Edit** -- Brighten muted text colors |
+| `src/components/landing/AboutSection.tsx` | **Edit** -- Brighten muted text colors |
+| `src/pages/Landing.tsx` | **Edit** -- Brighten stats sub-text |
 
