@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import CyberMap from "./CyberMap";
-import logoEmblem from "@/assets/logo-emblem.png";
+import logo from "@/assets/logo.png";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACfqOh5kqOZCLMB6";
 
@@ -99,7 +99,7 @@ const TurnstileGate = () => {
 
       <div className="relative z-10 flex flex-col items-center gap-6 max-w-md w-full px-6">
         {/* Logo */}
-        <img src={logoEmblem} alt="Somalia Cyber Defence" className="w-16 h-16 mb-2" />
+        <img src={logo} alt="Somalia Cyber Defence" className="w-20 h-20 mb-2" />
 
         {/* Heading */}
         <div className="text-center space-y-2">
