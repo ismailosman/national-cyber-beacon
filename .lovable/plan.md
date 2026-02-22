@@ -1,29 +1,51 @@
 
 
-## Fix False "Website Offline" Alerts for Sites Returning 403
+## Add DAST Scanner Results to Dashboard Organization Overview
 
-### Problem
+### What Changes
 
-The `ping-website` function uses HTTP HEAD requests to check if websites are online. Some sites (like `etas.gov.so`) return a **403 Forbidden** status to HEAD requests due to bot protection or Cloudflare rules. The current logic treats any status outside 200-399 as "down", causing false offline alerts even though the site is perfectly reachable.
-
-### Solution
-
-Update the `pingUrl` function to **fall back to a GET request** when HEAD returns 403 or 405. Many sites block HEAD but respond normally to GET. Also treat 403 specifically as "up" if the response itself was received (a 403 from a WAF/Cloudflare means the server is online and responding).
+The Organization Security Overview cards on the dashboard will display DAST scan data from the scanner, replacing the current "DAST: ---" placeholder with real results including the DAST grade, finding counts, and scan date.
 
 ### Changes
 
-| File | Change |
-|---|---|
-| `supabase/functions/ping-website/index.ts` | Modify `pingUrl`: if HEAD returns 403 or 405, retry with GET. Also expand "up" definition to include 403 (server is responding, just blocking the request type). |
+#### 1. Update OrgCard component (`src/components/dashboard/OrgCard.tsx`)
+
+- Replace the simple "DAST: grade" text with a richer display showing:
+  - DAST letter grade (A-F) with color coding (A/B = green, C = amber, D/F = red)
+  - Finding summary counts (critical/high/medium/low) as small colored badges
+  - Last scanned date
+- Add new props: `dastSummary` (critical, high, medium, low, passed counts) and `dastScannedAt` (date string)
+
+#### 2. Pass DAST data through Dashboard (`src/pages/Dashboard.tsx`)
+
+- The dashboard already fetches `dast_scan_results` and computes `dastGrade`. Extend this to also pass:
+  - `dastSummary` object from the `summary` column (critical, high, medium, low, passed counts)
+  - `dastScannedAt` timestamp
+- Update the `orgCardsData` memo to include these new fields from the existing `dastResults` query (which already fetches `dast_score`). Expand the query to also select `summary` and `scanned_at`.
 
 ### Technical Details
 
-The updated `pingUrl` logic:
+**Dashboard.tsx -- dast query expansion** (around line 106):
+```typescript
+// Change from:
+select('organization_id, dast_score')
+// To:
+select('organization_id, dast_score, summary, scanned_at')
+```
 
-1. Try HEAD request (fast, current behavior)
-2. If HEAD returns 403 or 405, retry with GET request
-3. Consider the site "up" if any response is received with status 200-499 (excluding 5xx server errors). A 403 from a WAF means the server is online.
-4. Only mark as "down" if: connection times out, DNS fails, or server returns 5xx
+**Dashboard.tsx -- orgCardsData memo**: Add `dastSummary` and `dastScannedAt` from the latest DAST result per org.
 
-This fixes `etas.gov.so` and similar government/institutional sites behind Cloudflare that block automated HEAD requests.
+**OrgCard.tsx -- enhanced DAST display**: Replace the single "DAST: ---" line with:
+- Grade badge (colored A-F)
+- Row of small finding count indicators: e.g., "2C 3H 5M" (critical/high/medium)
+- If no DAST data, show "Not scanned" in muted text
 
+### Visual Result
+
+Each org card will show DAST findings inline, like:
+```
+DAST: A  |  0C  0H  1M  3L
+Scanned: Feb 21
+```
+
+Cards with poor DAST grades (D/F) will have the grade highlighted in red, making it immediately visible which organizations need attention.
