@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Lock, Mail, AlertTriangle } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, AlertTriangle, Globe, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import loginLogo from '@/assets/login-logo.png';
+
+interface GeoInfo {
+  ip: string;
+  country_code: string;
+  country_name: string;
+  allowed: boolean;
+}
 
 const Login: React.FC = () => {
   const { signIn } = useAuth();
@@ -12,9 +20,30 @@ const Login: React.FC = () => {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [geoInfo, setGeoInfo] = useState<GeoInfo | null>(null);
+  const [geoLoading, setGeoLoading] = useState(true);
+
+  useEffect(() => {
+    const checkGeo = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('check-login-geo');
+        if (!error && data) {
+          setGeoInfo(data as GeoInfo);
+        }
+      } catch {
+        // If geo check fails, allow login
+      } finally {
+        setGeoLoading(false);
+      }
+    };
+    checkGeo();
+  }, []);
+
+  const isBlocked = geoInfo?.allowed === false;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isBlocked) return;
     setError('');
     setLoading(true);
     const { error } = await signIn(email, password);
@@ -59,9 +88,34 @@ const Login: React.FC = () => {
 
         {/* Card */}
         <div className="glass-card rounded-xl p-8 border border-neon-cyan/20">
-          <h2 className="text-center text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-6">
+          <h2 className="text-center text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
             Operator Sign In
           </h2>
+
+          {/* IP & Location info */}
+          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-6">
+            {geoLoading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : geoInfo ? (
+              <>
+                <Globe className="w-3 h-3" />
+                <span>IP: {geoInfo.ip}</span>
+                <span className="text-border">|</span>
+                <span>Location: {geoInfo.country_name}</span>
+              </>
+            ) : null}
+          </div>
+
+          {/* Geo-block banner */}
+          {isBlocked && (
+            <div className="flex items-start gap-2 text-sm bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 mb-4">
+              <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-destructive uppercase tracking-wider text-xs">Access Restricted</p>
+                <p className="text-muted-foreground mt-1">Login is only permitted from USA or Somalia.</p>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="relative">
@@ -72,7 +126,8 @@ const Login: React.FC = () => {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
-                className="w-full pl-10 pr-4 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/50 transition-all"
+                disabled={isBlocked}
+                className="w-full pl-10 pr-4 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -84,10 +139,12 @@ const Login: React.FC = () => {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
-                className="w-full pl-10 pr-10 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/50 transition-all"
+                disabled={isBlocked}
+                className="w-full pl-10 pr-10 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button type="button" onClick={() => setShowPw(!showPw)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                disabled={isBlocked}>
                 {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
@@ -101,7 +158,7 @@ const Login: React.FC = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isBlocked}
               className="w-full py-3 bg-neon-cyan text-background font-bold rounded-lg hover:brightness-110 transition-all glow-cyan disabled:opacity-50 disabled:cursor-not-allowed tracking-wider uppercase text-sm"
             >
               {loading ? 'Authenticating...' : 'Access System'}
