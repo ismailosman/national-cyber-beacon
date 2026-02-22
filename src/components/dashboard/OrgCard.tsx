@@ -4,6 +4,15 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { ShieldCheck, ShieldX, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
+import { format } from 'date-fns';
+
+interface DastSummary {
+  critical?: number;
+  high?: number;
+  medium?: number;
+  low?: number;
+  passed?: number;
+}
 
 interface OrgCardProps {
   id: string;
@@ -16,6 +25,8 @@ interface OrgCardProps {
   uptimePercent: number;
   threatsCount: number;
   dastGrade?: string;
+  dastSummary?: DastSummary;
+  dastScannedAt?: string;
   sparkline: { score: number }[];
   checks: { headers: boolean; ports: boolean; email: boolean; dns: boolean; waf: boolean };
 }
@@ -34,6 +45,12 @@ const getBarColor = (score: number) => {
   return 'bg-neon-red';
 };
 
+const getGradeColor = (grade: string) => {
+  if (grade === 'A' || grade === 'B') return 'text-neon-green bg-neon-green/10 border-neon-green/30';
+  if (grade === 'C') return 'text-neon-amber bg-neon-amber/10 border-neon-amber/30';
+  return 'text-neon-red bg-neon-red/10 border-neon-red/30';
+};
+
 const StatusDot = ({ good }: { good: boolean }) => (
   good
     ? <Check className="w-3 h-3 text-neon-green" />
@@ -42,7 +59,7 @@ const StatusDot = ({ good }: { good: boolean }) => (
 
 const OrgCard: React.FC<OrgCardProps> = ({
   id, name, domain, sector, score, sslValid, sslDaysLeft, uptimePercent,
-  threatsCount, dastGrade, sparkline, checks,
+  threatsCount, dastGrade, dastSummary, dastScannedAt, sparkline, checks,
 }) => {
   const navigate = useNavigate();
 
@@ -90,8 +107,53 @@ const OrgCard: React.FC<OrgCardProps> = ({
           <span className={cn('text-muted-foreground', threatsCount > 0 && 'text-neon-red')}>
             Threats: {threatsCount}
           </span>
-          <span className="text-muted-foreground">DAST: {dastGrade || '—'}</span>
         </div>
+      </div>
+
+      {/* DAST Summary */}
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] text-muted-foreground font-mono">DAST:</span>
+        {dastGrade ? (
+          <>
+            <span className={cn('text-[10px] font-bold font-mono px-1.5 py-0.5 rounded border', getGradeColor(dastGrade))}>
+              {dastGrade}
+            </span>
+            {dastSummary && (
+              <div className="flex items-center gap-1">
+                {(dastSummary.critical ?? 0) > 0 && (
+                  <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-neon-red/10 text-neon-red border border-neon-red/20">
+                    {dastSummary.critical}C
+                  </span>
+                )}
+                {(dastSummary.high ?? 0) > 0 && (
+                  <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-neon-red/10 text-neon-red/80 border border-neon-red/20">
+                    {dastSummary.high}H
+                  </span>
+                )}
+                {(dastSummary.medium ?? 0) > 0 && (
+                  <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-neon-amber/10 text-neon-amber border border-neon-amber/20">
+                    {dastSummary.medium}M
+                  </span>
+                )}
+                {(dastSummary.low ?? 0) > 0 && (
+                  <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">
+                    {dastSummary.low}L
+                  </span>
+                )}
+                {(dastSummary.critical ?? 0) === 0 && (dastSummary.high ?? 0) === 0 && (dastSummary.medium ?? 0) === 0 && (dastSummary.low ?? 0) === 0 && (
+                  <span className="text-[9px] font-mono text-neon-green">Clean</span>
+                )}
+              </div>
+            )}
+            {dastScannedAt && (
+              <span className="text-[9px] text-muted-foreground font-mono ml-auto">
+                {format(new Date(dastScannedAt), 'MMM dd')}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/60 font-mono">Not scanned</span>
+        )}
       </div>
 
       {/* Progress bar */}

@@ -132,7 +132,7 @@ const Dashboard: React.FC = () => {
   const { data: dastResults = [] } = useQuery({
     queryKey: ['dashboard-dast-results'],
     queryFn: async () => {
-      const { data } = await supabase.from('dast_scan_results').select('organization_id, dast_score')
+      const { data } = await supabase.from('dast_scan_results').select('organization_id, dast_score, summary, scanned_at')
         .order('scanned_at', { ascending: false });
       return data || [];
     },
@@ -221,8 +221,8 @@ const Dashboard: React.FC = () => {
   const orgCardsData = useMemo(() => {
     const latestDdos = new Map<string, any>();
     ddosLogs.forEach((d: any) => { if (!latestDdos.has(d.organization_id)) latestDdos.set(d.organization_id, d); });
-    const latestDast = new Map<string, number>();
-    dastResults.forEach((d: any) => { if (!latestDast.has(d.organization_id)) latestDast.set(d.organization_id, d.dast_score); });
+    const latestDast = new Map<string, any>();
+    dastResults.forEach((d: any) => { if (!latestDast.has(d.organization_id)) latestDast.set(d.organization_id, d); });
 
     return orgScores.map(org => {
       const sparkData = (scoreHistory as any[])
@@ -230,16 +230,19 @@ const Dashboard: React.FC = () => {
         .slice(-14)
         .map(h => ({ score: h.security_score }));
       const ddos = latestDdos.get(org.id);
-      const dastScore = latestDast.get(org.id);
+      const dastEntry = latestDast.get(org.id);
+      const dastScore = dastEntry?.dast_score;
       const grade = dastScore !== undefined
         ? dastScore >= 90 ? 'A' : dastScore >= 75 ? 'B' : dastScore >= 60 ? 'C' : dastScore >= 40 ? 'D' : 'F'
         : undefined;
+      const dastSummary = dastEntry?.summary as { critical?: number; high?: number; medium?: number; low?: number; passed?: number } | undefined;
+      const dastScannedAt = dastEntry?.scanned_at as string | undefined;
 
       return {
         id: org.id, name: org.name, domain: org.url || '', sector: org.sector,
         score: org.total || 0, sslValid: org.sslValid || false, sslDaysLeft: null,
         uptimePercent: org.uptimePercent || 0, threatsCount: org.threatsCount || 0,
-        dastGrade: grade, sparkline: sparkData,
+        dastGrade: grade, dastSummary, dastScannedAt, sparkline: sparkData,
         checks: {
           headers: (org.headersCount || 0) >= 3,
           ports: !org.portsExposed,
