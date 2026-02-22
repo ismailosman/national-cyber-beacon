@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Zap } from 'lucide-react';
 import logoSrc from '@/assets/logo.png';
 
 const NAV_ITEMS = [
-  { label: 'Home', href: '#hero' },
-  { label: 'About', href: '#about' },
-  { label: 'Portfolio', href: '#portfolio' },
-  { label: 'Contact', href: '#contact' },
+  { label: 'Home', href: '/', type: 'scroll', anchor: '#hero' },
+  { label: 'About', href: '/', type: 'scroll', anchor: '#about' },
+  { label: 'Portfolio', href: '/portfolio', type: 'link' },
+  { label: 'Contact', href: '/contact', type: 'link' },
 ];
 
 const Navbar: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isLanding = location.pathname === '/';
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
@@ -20,10 +23,19 @@ const Navbar: React.FC = () => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const scrollTo = (href: string) => {
+  const handleNav = (item: typeof NAV_ITEMS[0]) => {
     setMobileOpen(false);
-    const el = document.querySelector(href);
-    el?.scrollIntoView({ behavior: 'smooth' });
+    if (item.type === 'link') {
+      navigate(item.href);
+      return;
+    }
+    // Scroll items
+    if (isLanding) {
+      const el = document.querySelector(item.anchor!);
+      el?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      navigate(item.href + (item.anchor || ''));
+    }
   };
 
   return (
@@ -33,20 +45,18 @@ const Navbar: React.FC = () => {
       }`}
     >
       <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
-        {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <img src={logoSrc} alt="CyberDefense" className="h-12 w-auto" />
         </Link>
 
-        {/* Desktop nav */}
         <ul className="hidden md:flex items-center gap-8">
-          {NAV_ITEMS.map(({ label, href }) => (
-            <li key={label}>
+          {NAV_ITEMS.map((item) => (
+            <li key={item.label}>
               <button
-                onClick={() => scrollTo(href)}
+                onClick={() => handleNav(item)}
                 className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
               >
-                {label}
+                {item.label}
               </button>
             </li>
           ))}
@@ -61,7 +71,6 @@ const Navbar: React.FC = () => {
           </li>
         </ul>
 
-        {/* Mobile toggle */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           className="md:hidden p-2 text-gray-300"
@@ -71,17 +80,16 @@ const Navbar: React.FC = () => {
         </button>
       </nav>
 
-      {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden bg-gray-950 border-t border-gray-800 px-6 pb-4">
           <ul className="flex flex-col gap-4 pt-2">
-            {NAV_ITEMS.map(({ label, href }) => (
-              <li key={label}>
+            {NAV_ITEMS.map((item) => (
+              <li key={item.label}>
                 <button
-                  onClick={() => scrollTo(href)}
+                  onClick={() => handleNav(item)}
                   className="text-sm font-medium text-gray-300 hover:text-white transition-colors w-full text-left"
                 >
-                  {label}
+                  {item.label}
                 </button>
               </li>
             ))}
