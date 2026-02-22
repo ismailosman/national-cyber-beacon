@@ -1,61 +1,81 @@
 
 
-## Fix Login Page: Logo, IP Display, and Configurable Geo-Restriction
+## Replace Landing Page with New Cybersecurity Company Website at /
 
-### Problem Summary
-1. **IP address not showing** -- The `check-login-geo` edge function is missing from `supabase/config.toml`, so JWT verification blocks unauthenticated requests on the login page.
-2. **Wrong logo** -- Login page imports `login-logo.png` instead of `logo.png`.
-3. **No way to manage allowed countries** -- The allowed country list (`US`, `SO`) is hardcoded in the edge function.
+### Overview
+Complete replacement of the old dark-themed `/public` landing page with a clean, modern, light-themed cybersecurity company website. The new page becomes the root `/` route for cyberdefense.so, while preserving all existing backend functionality.
 
-### Changes
+### Routing Changes (`src/App.tsx`)
 
-| # | File | What |
-|---|---|---|
-| 1 | `supabase/config.toml` | Add `[functions.check-login-geo]` with `verify_jwt = false` |
-| 2 | `src/pages/Login.tsx` | Change logo import from `login-logo.png` to `logo.png` |
-| 3 | Database migration | Create `geo_allowed_countries` table with columns: `id`, `country_code` (2-letter ISO), `country_name`, `created_at`. Seed with `US` and `SO`. Add RLS: SuperAdmins can manage, authenticated users can read. |
-| 4 | `supabase/functions/check-login-geo/index.ts` | Fetch allowed country codes from the `geo_allowed_countries` table instead of using a hardcoded list |
-| 5 | `src/pages/Settings.tsx` | Add a "Geo-Restriction" section where SuperAdmins can add/remove allowed countries |
+| Current | New |
+|---|---|
+| `/` renders CyberMap (lovable.app) or TurnstileGate (cyberdefense.so) | `/` renders the new Landing page on all hosts |
+| `/public` renders old Landing | `/public` route removed entirely |
+| `/cyber-map` renders CyberMap | Unchanged |
 
-### Technical Details
+- The TurnstileGate CAPTCHA flow is removed from the root route since the new landing page is a public marketing site
+- `/cyber-map` remains fully functional and is linked from the "LIVE ATTACK" nav item
+- All protected routes (`/dashboard`, `/organizations`, etc.) remain unchanged
+- The old `Landing.tsx` file content is completely replaced
 
-**1. Config fix (root cause of IP not showing)**
+### New Landing Page Design (`src/pages/Landing.tsx`)
 
-The login page calls `check-login-geo` before the user is authenticated. Without `verify_jwt = false`, the function rejects the request, the catch block silently swallows the error, and `geoInfo` stays `null` so nothing renders.
+**Theme**: Light background (#f8f9fa / white), primary accent `#FF4D2E` (orange-red), clean sans-serif (Inter), minimal and premium enterprise aesthetic.
 
-**2. Logo swap**
+**Sections**:
 
-```typescript
-// Before
-import loginLogo from '@/assets/login-logo.png';
+1. **Sticky Navbar**
+   - Left: Company logo (from `src/assets/logo.png`) linked to `/`
+   - Right: Home, About, Services, LIVE ATTACK (links to `/cyber-map`, styled with accent), Contact
+   - Mobile: hamburger menu
+   - Subtle shadow appears on scroll
 
-// After
-import loginLogo from '@/assets/logo.png';
-```
+2. **Hero Section** (two-column)
+   - Left column:
+     - H1: "Advanced Cyber Defense for Modern Businesses"
+     - Subtitle: "Real-time monitoring, AI-driven threat detection, and enterprise-grade infrastructure protection."
+     - Primary CTA: "Get Started" button (`#FF4D2E`)
+     - Secondary CTA: "Request Consultation" (outlined)
+   - Right column:
+     - SVG/CSS illustration featuring an orange shield, laptop, network nodes, and security elements (inspired by the reference image)
+     - Subtle floating animations on elements
 
-**3. New table: `geo_allowed_countries`**
+3. **About Section** (id="about")
+   - Company overview, mission, and values
+   - Two-column layout with text and feature highlights
 
-```text
-id          uuid (PK, default gen_random_uuid())
-country_code text NOT NULL UNIQUE  -- e.g. "US", "SO"
-country_name text NOT NULL         -- e.g. "United States", "Somalia"
-created_at   timestamptz DEFAULT now()
-```
+4. **Services Section** (id="services")
+   - Card grid showcasing: Threat Detection, Real-time Monitoring, Infrastructure Protection, Incident Response
+   - Each card with icon, title, description
 
-Seeded with two rows: `US`/`United States` and `SO`/`Somalia`.
+5. **Contact Section** (id="contact")
+   - Simple contact form (name, email, message) -- frontend-only for now
+   - Company contact information
 
-RLS policies:
-- Authenticated users can SELECT (needed for Settings page display)
-- SuperAdmins can INSERT and DELETE
+6. **Footer**
+   - Logo, copyright, quick links
 
-**4. Edge function update**
+### SEO Updates (`index.html`)
 
-Instead of `['US', 'SO'].includes(countryCode)`, the function will query the `geo_allowed_countries` table using the service role key to check if the detected country code exists.
+- Title: "CyberDefense | Advanced Cybersecurity Solutions"
+- Meta description: "Enterprise cyber defense, real-time threat monitoring, and AI-powered security solutions."
+- OG tags updated to match
 
-**5. Settings page addition**
+### Files Changed
 
-A new "Allowed Countries" card in Settings (visible to SuperAdmins) with:
-- A list of currently allowed country codes with delete buttons
-- An input to add a new country code and name
-- Changes take effect immediately for future login attempts
+| File | Action |
+|---|---|
+| `src/pages/Landing.tsx` | Complete rewrite -- new light-themed marketing page |
+| `src/App.tsx` | Update `/` route to render Landing on all hosts; remove `/public` route |
+| `index.html` | Update meta title, description, OG tags |
+
+### Technical Notes
+
+- The new landing page is entirely static (no backend calls needed for the marketing content)
+- Smooth scroll behavior for in-page navigation (Home, About, Services, Contact)
+- "LIVE ATTACK" nav item links to `/cyber-map` via React Router
+- The hero illustration will be built with SVG/CSS elements (shield, laptop, network dots) -- no external image dependencies
+- Mobile-first responsive design using Tailwind breakpoints
+- All existing providers (AuthProvider, QueryClientProvider, etc.) remain wrapped around routes
+- The TurnstileGate page file is kept but no longer used at `/` -- can be cleaned up later if desired
 
