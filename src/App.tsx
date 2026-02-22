@@ -9,6 +9,8 @@ import Login from "@/pages/Login";
 import Landing from "@/pages/Landing";
 import Contact from "@/pages/Contact";
 import Portfolio from "@/pages/Portfolio";
+import Privacy from "@/pages/Privacy";
+import Terms from "@/pages/Terms";
 
 import CyberMap from "@/pages/CyberMap";
 import Dashboard from "@/pages/Dashboard";
@@ -88,6 +90,8 @@ const App = () => (
             <Route path="/" element={<Landing />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
             <Route path="/cyber-map" element={<CyberMap />} />
             <Route path="/threat-map" element={<ThreatMap />} />
             <Route path="/dashboard" element={<ProtectedRoutes />} />

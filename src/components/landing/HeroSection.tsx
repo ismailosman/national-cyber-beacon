@@ -46,7 +46,7 @@ const HeroSection: React.FC = () => (
       <div className="max-w-xl">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-1 h-8 rounded-full bg-[#FF4D2E]" />
-          <span className="text-sm font-semibold tracking-widest uppercase text-gray-400">
+          <span className="text-sm font-semibold tracking-widest uppercase text-gray-300">
             Cyber Defense Solutions
           </span>
         </div>
@@ -55,7 +55,7 @@ const HeroSection: React.FC = () => (
           Secure Your Business with Advanced Cyber Defense
         </h1>
 
-        <p className="mt-6 text-gray-400 text-base sm:text-lg leading-relaxed max-w-md">
+        <p className="mt-6 text-gray-300 text-base sm:text-lg leading-relaxed max-w-md">
           Real-time monitoring, AI-driven threat detection, and enterprise-grade infrastructure protection — tailored for organizations that can't afford downtime.
         </p>
 
@@ -86,7 +86,7 @@ const HeroSection: React.FC = () => (
               <Icon className="w-5 h-5 text-[#FF4D2E]" strokeWidth={1.8} />
             </div>
             <h3 className="font-bold text-white text-[15px] mb-2">{title}</h3>
-            <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
+            <p className="text-sm text-gray-400 leading-relaxed">{desc}</p>
           </div>
         ))}
       </div>

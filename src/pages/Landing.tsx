@@ -26,7 +26,7 @@ const Landing: React.FC = () => (
             <div key={sub} className="text-center">
               <Icon className="w-5 h-5 text-[#FF4D2E] mx-auto mb-2" strokeWidth={1.8} />
               <div className="text-2xl sm:text-3xl font-extrabold text-white">{label}</div>
-              <div className="text-xs sm:text-sm text-gray-500 mt-1">{sub}</div>
+              <div className="text-xs sm:text-sm text-gray-400 mt-1">{sub}</div>
             </div>
           ))}
         </div>

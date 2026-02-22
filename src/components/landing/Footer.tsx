@@ -24,7 +24,7 @@ const Footer: React.FC = () => (
         {/* Brand */}
         <div className="sm:col-span-2 lg:col-span-1">
           <img src={logoSrc} alt="CyberDefense" className="h-10 w-auto mb-4" />
-          <p className="text-sm leading-relaxed text-gray-500 max-w-xs">
+          <p className="text-sm leading-relaxed text-gray-400 max-w-xs">
             Enterprise-grade cybersecurity solutions protecting businesses and critical infrastructure from evolving digital threats.
           </p>
         </div>
@@ -68,10 +68,10 @@ const Footer: React.FC = () => (
     {/* Bottom bar */}
     <div className="border-t border-gray-800/50">
       <div className="max-w-7xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <span className="text-xs text-gray-600">© {new Date().getFullYear()} CyberDefense. All rights reserved.</span>
-        <div className="flex items-center gap-5 text-xs text-gray-600">
-          <span>Privacy Policy</span>
-          <span>Terms of Service</span>
+        <span className="text-xs text-gray-500">© {new Date().getFullYear()} CyberDefense. All rights reserved.</span>
+        <div className="flex items-center gap-5 text-xs text-gray-500">
+          <Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+          <Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
         </div>
       </div>
     </div>

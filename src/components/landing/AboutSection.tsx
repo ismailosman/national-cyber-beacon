@@ -16,7 +16,7 @@ const AboutSection: React.FC = () => (
           Who We Are
         </span>
         <h2 className="text-3xl sm:text-4xl font-extrabold text-white">About Us</h2>
-        <p className="mt-4 text-gray-500 leading-relaxed">
+        <p className="mt-4 text-gray-300 leading-relaxed">
           CyberDefense is a cybersecurity company dedicated to protecting businesses and critical infrastructure from evolving digital threats. Our mission is to make enterprise-grade security accessible, intelligent, and relentless.
         </p>
       </div>
@@ -35,7 +35,7 @@ const AboutSection: React.FC = () => (
               <Icon className="w-6 h-6" style={{ color: accent }} />
             </div>
             <h3 className="font-bold text-white text-lg">{title}</h3>
-            <p className="mt-2 text-sm text-gray-500 leading-relaxed">{desc}</p>
+            <p className="mt-2 text-sm text-gray-400 leading-relaxed">{desc}</p>
           </div>
         ))}
       </div>
