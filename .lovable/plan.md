@@ -1,76 +1,23 @@
 
 
-## Remove Phishing Lookalike Noise from Live Alerts
+## Change OrgCard Click-Through to Uptime Monitor
 
-### Problem
+### What Changes
 
-The "Active Phishing Domain" alerts (e.g., `nca.info`, `nca.com`, `opm.net`) are flooding Live Alerts because:
-1. The `generateAlert` function inserts alerts **without** an `organization_id`
-2. The AlertSidebar query has no filter to exclude unlinked alerts
-3. Many of these "lookalike" domains are legitimate, unrelated websites (e.g., `nca.info` is not actually impersonating anything)
-
-### Solution
-
-Three changes to permanently fix this:
+When clicking an organization card in the "Organization Security Overview" section on the dashboard, users will be navigated to the **Uptime Monitor** page (`/uptime`) instead of the organization detail page (`/organizations/:id`).
 
 ### Changes
 
-| File / Action | Change |
-|---|---|
-| `src/components/dashboard/AlertSidebar.tsx` | Add `.not('organization_id', 'is', null)` filter so only alerts tied to registered organizations appear in Live Alerts |
-| `src/pages/ThreatIntelligence.tsx` | Update `generateAlert` to accept an optional `organization_id` parameter and pass it when inserting. Update the phishing check caller to pass `r.organizationId` |
-| Database cleanup | Close all existing phishing alerts that have no `organization_id` |
+**File: `src/components/dashboard/OrgCard.tsx` (line 68)**
 
-### Technical Details
-
-**1. AlertSidebar.tsx** -- add org filter (line 25):
-
+Update the `onClick` navigation from:
 ```typescript
-const { data } = await supabase
-  .from('alerts')
-  .select('*, organizations(name)')
-  .eq('status', 'open')
-  .not('organization_id', 'is', null)   // only registered org alerts
-  .gte('created_at', oneHourAgo)
-  .order('created_at', { ascending: false })
-  .limit(10);
+onClick={() => navigate(`/organizations/${id}`)}
 ```
-
-**2. ThreatIntelligence.tsx** -- update `generateAlert` signature (line 850):
-
+To:
 ```typescript
-const generateAlert = async (
-  severity: string, title: string, description: string,
-  organizationId?: string
-) => {
-  // ... dedup check ...
-  await supabase.from('alerts').insert({
-    title, description, severity, source: 'threat-intel',
-    status: 'open', organization_id: organizationId || null,
-  });
-};
+onClick={() => navigate('/uptime')}
 ```
 
-Then update the phishing caller (line 553) to pass the org ID:
+This is a single-line change that redirects all org card clicks to the Uptime Monitor page, where users can see live ping status, response times, SSL details, and uptime history for all monitored organizations.
 
-```typescript
-await generateAlert('critical',
-  `Active Phishing Domain: ${d.domain}`,
-  `Lookalike domain ${d.domain} targeting ${r.organization}...`,
-  r.organizationId   // <-- link to org
-);
-```
-
-**3. Database cleanup** -- close all orphan phishing alerts:
-
-```sql
-UPDATE public.alerts
-SET status = 'closed'
-WHERE organization_id IS NULL AND status = 'open';
-```
-
-### Result
-
-- Live Alerts sidebar will only show threats linked to actual monitored organizations
-- Future phishing alerts will be properly linked to their organization
-- Existing orphan alerts (nca.info, opm.com, etc.) will be closed immediately
