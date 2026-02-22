@@ -23,6 +23,7 @@ const AlertSidebar: React.FC = () => {
         .from('alerts')
         .select('*, organizations(name)')
         .eq('status', 'open')
+        .not('organization_id', 'is', null)
         .gte('created_at', oneHourAgo)
         .order('created_at', { ascending: false })
         .limit(10);

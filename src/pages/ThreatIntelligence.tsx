@@ -550,7 +550,7 @@ const ThreatIntelligence: React.FC = () => {
             }, { onConflict: 'lookalike_domain' }).select();
 
             if (d.hasWebsite) {
-              await generateAlert('critical', `Active Phishing Domain: ${d.domain}`, `Lookalike domain ${d.domain} targeting ${r.organization} has an active website at IP ${d.ip}`);
+              await generateAlert('critical', `Active Phishing Domain: ${d.domain}`, `Lookalike domain ${d.domain} targeting ${r.organization} has an active website at IP ${d.ip}`, r.organizationId);
             }
           }
         }
@@ -847,12 +847,12 @@ const ThreatIntelligence: React.FC = () => {
   }, []);
 
 
-  const generateAlert = async (severity: string, title: string, description: string) => {
+  const generateAlert = async (severity: string, title: string, description: string, organizationId?: string) => {
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: existing } = await supabase.from('alerts').select('id').eq('title', title).gte('created_at', since).limit(1);
       if (existing && existing.length > 0) return;
-      await supabase.from('alerts').insert({ title, description, severity: severity as any, source: 'threat-intel', status: 'open' });
+      await supabase.from('alerts').insert({ title, description, severity: severity as any, source: 'threat-intel', status: 'open', organization_id: organizationId || null });
     } catch (err) { console.error('Alert gen error:', err); }
   };
 
