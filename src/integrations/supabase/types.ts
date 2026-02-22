@@ -571,6 +571,27 @@ export type Database = {
         }
         Relationships: []
       }
+      geo_allowed_countries: {
+        Row: {
+          country_code: string
+          country_name: string
+          created_at: string | null
+          id: string
+        }
+        Insert: {
+          country_code: string
+          country_name: string
+          created_at?: string | null
+          id?: string
+        }
+        Update: {
+          country_code?: string
+          country_name?: string
+          created_at?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
       incident_reports: {
         Row: {
           affected_assets: string | null

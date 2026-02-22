@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, Lock, Mail, AlertTriangle, Globe, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import loginLogo from '@/assets/login-logo.png';
+import loginLogo from '@/assets/logo.png';
 
 interface GeoInfo {
   ip: string;
