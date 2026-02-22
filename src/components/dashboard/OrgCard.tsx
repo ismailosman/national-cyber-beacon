@@ -65,7 +65,7 @@ const OrgCard: React.FC<OrgCardProps> = ({
 
   return (
     <div
-      onClick={() => navigate(`/organizations/${id}`)}
+      onClick={() => navigate('/uptime')}
       className="glass-card rounded-xl p-4 border border-border cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:border-neon-cyan/40 group"
     >
       {/* Header */}
