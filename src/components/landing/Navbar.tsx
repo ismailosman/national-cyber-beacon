@@ -35,7 +35,7 @@ const Navbar: React.FC = () => {
       <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <img src={logoSrc} alt="CyberDefense" className="h-8 w-auto" />
+          <img src={logoSrc} alt="CyberDefense" className="h-12 w-auto" />
         </Link>
 
         {/* Desktop nav */}
