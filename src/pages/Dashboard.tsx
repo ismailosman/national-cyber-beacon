@@ -34,10 +34,14 @@ const Dashboard: React.FC = () => {
   // ── Data queries ──────────────────────────────────────────────────────
 
   const { data: monitoredOrgs = [], isLoading: loadingOrgs } = useQuery({
-    queryKey: ['dashboard-monitored-orgs'],
+    queryKey: ['dashboard-organizations'],
     queryFn: async () => {
-      const { data } = await supabase.from('organizations_monitored').select('*').eq('is_active', true);
-      return data || [];
+      const { data } = await supabase.from('organizations').select('*');
+      return (data || []).map(org => ({
+        ...org,
+        url: org.domain.startsWith('http') ? org.domain : `https://${org.domain}`,
+        is_active: true,
+      }));
     },
     refetchInterval: REFETCH_INTERVAL,
   });
@@ -144,8 +148,8 @@ const Dashboard: React.FC = () => {
   // Realtime subscriptions
   useEffect(() => {
     const channels = [
-      supabase.channel('dash-orgs').on('postgres_changes', { event: '*', schema: 'public', table: 'organizations_monitored' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['dashboard-monitored-orgs'] });
+      supabase.channel('dash-orgs').on('postgres_changes', { event: '*', schema: 'public', table: 'organizations' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard-organizations'] });
       }).subscribe(),
       supabase.channel('dash-alerts').on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
         queryClient.invalidateQueries({ queryKey: ['dashboard-alerts'] });
@@ -470,7 +474,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {filteredCards.map(card => (
+                {filteredCards.slice(0, 6).map(card => (
                   <OrgCard key={card.id} {...card} />
                 ))}
                 {filteredCards.length === 0 && (
