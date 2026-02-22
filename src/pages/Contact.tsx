@@ -121,14 +121,13 @@ const Contact: React.FC = () => {
   };
 
   const inputCls =
-    'w-full rounded-lg border border-white/30 bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/50';
+    'w-full rounded-lg border border-white/50 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-white/50';
 
   return (
-    <div className="min-h-screen bg-white text-gray-900" style={{ colorScheme: 'light' }}>
+    <div className="min-h-screen bg-[#0a0a0f] text-white">
       <Navbar />
       <main className="pt-20">
-        <section className="bg-gray-50">
-          <div className="max-w-7xl mx-auto">
+        <section className="bg-[#0a0a0f]">
             <div className="grid lg:grid-cols-2 min-h-[700px]">
               {/* Left — Info */}
               <div className="bg-[#1a1a2e] text-white p-10 lg:p-16 flex flex-col justify-center">
@@ -213,7 +212,6 @@ const Contact: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
         </section>
       </main>
       <Footer />
