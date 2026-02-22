@@ -14,13 +14,13 @@ const HeroSection: React.FC = () => (
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
           <a
-            href="#contact"
+            href="/contact"
             className="inline-flex items-center px-7 py-3 rounded-lg text-sm font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors shadow-sm"
           >
             Get Started
           </a>
           <a
-            href="#contact"
+            href="/contact"
             className="inline-flex items-center px-7 py-3 rounded-lg text-sm font-bold text-[#FF4D2E] border-2 border-[#FF4D2E] hover:bg-[#FF4D2E]/5 transition-colors"
           >
             Request Consultation

@@ -1,20 +1,18 @@
 import React from 'react';
 import Navbar from '@/components/landing/Navbar';
-import HeroSection from '@/components/landing/HeroSection';
-import AboutSection from '@/components/landing/AboutSection';
+import PortfolioSection from '@/components/landing/PortfolioSection';
 import Footer from '@/components/landing/Footer';
 import CookieConsent from '@/components/landing/CookieConsent';
 
-const Landing: React.FC = () => (
+const Portfolio: React.FC = () => (
   <div className="min-h-screen bg-white text-gray-900" style={{ colorScheme: 'light' }}>
     <Navbar />
-    <main>
-      <HeroSection />
-      <AboutSection />
+    <main className="pt-20">
+      <PortfolioSection />
     </main>
     <Footer />
     <CookieConsent />
   </div>
 );
 
-export default Landing;
+export default Portfolio;
