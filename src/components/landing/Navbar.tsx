@@ -28,7 +28,7 @@ const Navbar: React.FC = () => {
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-shadow duration-300 bg-white ${
+      className={`fixed top-0 inset-x-0 z-50 transition-shadow duration-300 bg-gray-950 ${
         scrolled ? 'shadow-md' : ''
       }`}
     >
@@ -44,7 +44,7 @@ const Navbar: React.FC = () => {
             <li key={label}>
               <button
                 onClick={() => scrollTo(href)}
-                className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
               >
                 {label}
               </button>
@@ -64,7 +64,7 @@ const Navbar: React.FC = () => {
         {/* Mobile toggle */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="md:hidden p-2 text-gray-700"
+          className="md:hidden p-2 text-gray-300"
           aria-label="Toggle menu"
         >
           {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -73,13 +73,13 @@ const Navbar: React.FC = () => {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden bg-white border-t border-gray-100 px-6 pb-4">
+        <div className="md:hidden bg-gray-950 border-t border-gray-800 px-6 pb-4">
           <ul className="flex flex-col gap-4 pt-2">
             {NAV_ITEMS.map(({ label, href }) => (
               <li key={label}>
                 <button
                   onClick={() => scrollTo(href)}
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors w-full text-left"
+                  className="text-sm font-medium text-gray-300 hover:text-white transition-colors w-full text-left"
                 >
                   {label}
                 </button>
