@@ -1,81 +1,95 @@
 
 
-## Replace Landing Page with New Cybersecurity Company Website at /
+## Landing Page Updates: Bigger Logo, Replace Contact Section, AI-Generated Image, Email Integration
 
 ### Overview
-Complete replacement of the old dark-themed `/public` landing page with a clean, modern, light-themed cybersecurity company website. The new page becomes the root `/` route for cyberdefense.so, while preserving all existing backend functionality.
+Four changes to the landing page: enlarge the navbar logo, replace the "Contact Us" section with a two-column evaluation/consultation request page (inspired by the reference image), generate an AI image of a Somali cybersecurity professional, and create a backend function to send form submissions to osmando@gmail.com via the existing Resend integration.
 
-### Routing Changes (`src/App.tsx`)
+### Changes
 
-| Current | New |
-|---|---|
-| `/` renders CyberMap (lovable.app) or TurnstileGate (cyberdefense.so) | `/` renders the new Landing page on all hosts |
-| `/public` renders old Landing | `/public` route removed entirely |
-| `/cyber-map` renders CyberMap | Unchanged |
+#### 1. Navbar Logo -- Make Bigger
+**File:** `src/components/landing/Navbar.tsx`
+- Change logo height from `h-8` to `h-12` for better visibility
 
-- The TurnstileGate CAPTCHA flow is removed from the root route since the new landing page is a public marketing site
-- `/cyber-map` remains fully functional and is linked from the "LIVE ATTACK" nav item
-- All protected routes (`/dashboard`, `/organizations`, etc.) remain unchanged
-- The old `Landing.tsx` file content is completely replaced
+#### 2. Remove "Contact Us" Section, Replace with Consultation Request Page
+**File:** `src/components/landing/ContactSection.tsx` -- Complete rewrite
 
-### New Landing Page Design (`src/pages/Landing.tsx`)
+Inspired by the reference image (Dell-style two-column layout):
 
-**Theme**: Light background (#f8f9fa / white), primary accent `#FF4D2E` (orange-red), clean sans-serif (Inter), minimal and premium enterprise aesthetic.
+**Left column (info side, blue/dark background `#1a1a2e` or brand-tinted):**
+- Heading: "CyberDefense Security Solutions Evaluation"
+- AI-generated image of a Somali cybersecurity professional (see item 3)
+- Description text about CyberDefense services
+- Brief pitch about real-time monitoring, threat detection, infrastructure protection
 
-**Sections**:
+**Right column (form side, accent background `#FF4D2E` or similar):**
+- Heading: "Submit your consultation request today."
+- Subtext: "Our team will respond within 24 hours."
+- Form fields (two-column grid where appropriate):
+  - First Name, Last Name
+  - Company, Title (dropdown: CTO, CISO, IT Manager, Other)
+  - Phone, Business Email
+  - Choose Service Interest (checkboxes): Threat Detection, Real-Time Monitoring, Infrastructure Protection, Incident Response, DAST Scanning, Compliance Assessment
+  - Country, Organization Size
+  - Comments (textarea)
+  - Submit button
 
-1. **Sticky Navbar**
-   - Left: Company logo (from `src/assets/logo.png`) linked to `/`
-   - Right: Home, About, Services, LIVE ATTACK (links to `/cyber-map`, styled with accent), Contact
-   - Mobile: hamburger menu
-   - Subtle shadow appears on scroll
+On submit, the form calls a new edge function that sends the data to osmando@gmail.com.
 
-2. **Hero Section** (two-column)
-   - Left column:
-     - H1: "Advanced Cyber Defense for Modern Businesses"
-     - Subtitle: "Real-time monitoring, AI-driven threat detection, and enterprise-grade infrastructure protection."
-     - Primary CTA: "Get Started" button (`#FF4D2E`)
-     - Secondary CTA: "Request Consultation" (outlined)
-   - Right column:
-     - SVG/CSS illustration featuring an orange shield, laptop, network nodes, and security elements (inspired by the reference image)
-     - Subtle floating animations on elements
+#### 3. AI-Generated Image of Somali Cybersecurity Professional
+- Use the Lovable AI image generation (google/gemini-2.5-flash-image) to generate a professional image
+- The image will be generated at build time via an edge function, or we can generate it once and save to storage
+- Approach: Generate the image using the AI model in a new edge function, save to storage bucket, and reference it from the contact section
+- Simpler approach: Use the AI gateway from an edge function called once, store the result, and display it
 
-3. **About Section** (id="about")
-   - Company overview, mission, and values
-   - Two-column layout with text and feature highlights
+**Recommended approach:** Create the image via an edge function `generate-professional-image` that generates and caches it in Supabase Storage. The ContactSection fetches it from storage. Alternatively, generate it locally during development and commit a static asset.
 
-4. **Services Section** (id="services")
-   - Card grid showcasing: Threat Detection, Real-time Monitoring, Infrastructure Protection, Incident Response
-   - Each card with icon, title, description
+Given complexity, the simplest reliable approach: generate the image via the edge function on first request, cache in a storage bucket, and serve from there.
 
-5. **Contact Section** (id="contact")
-   - Simple contact form (name, email, message) -- frontend-only for now
-   - Company contact information
+#### 4. Email Sending Edge Function
+**File:** `supabase/functions/send-contact-form/index.ts` (new)
 
-6. **Footer**
-   - Logo, copyright, quick links
+- Receives form data (all fields from the consultation form)
+- Uses the existing `RESEND_API_KEY` secret
+- Sends a formatted HTML email to osmando@gmail.com
+- From address: noreply@cyberdefense.so (consistent with existing edge functions)
+- Returns success/error response
+- CORS headers included
 
-### SEO Updates (`index.html`)
+#### 5. Update Landing.tsx
+**File:** `src/pages/Landing.tsx`
+- Remove `ContactSection` import and usage (replaced inline or kept as component with new content)
+- The "Contact" nav item in the navbar still scrolls to this section, so keep `id="contact"` on the new section
 
-- Title: "CyberDefense | Advanced Cybersecurity Solutions"
-- Meta description: "Enterprise cyber defense, real-time threat monitoring, and AI-powered security solutions."
-- OG tags updated to match
+#### 6. Navbar "Contact" Nav Item
+Keep the "Contact" nav item -- it will scroll to the new consultation request section (same `id="contact"`).
 
-### Files Changed
+### File Summary
 
 | File | Action |
 |---|---|
-| `src/pages/Landing.tsx` | Complete rewrite -- new light-themed marketing page |
-| `src/App.tsx` | Update `/` route to render Landing on all hosts; remove `/public` route |
-| `index.html` | Update meta title, description, OG tags |
+| `src/components/landing/Navbar.tsx` | Increase logo size from h-8 to h-12 |
+| `src/components/landing/ContactSection.tsx` | Complete rewrite -- two-column consultation request form |
+| `supabase/functions/send-contact-form/index.ts` | New -- sends form data email to osmando@gmail.com via Resend |
+| `supabase/config.toml` | Add `[functions.send-contact-form]` with `verify_jwt = false` |
+| `src/pages/Landing.tsx` | No structural change (still imports ContactSection) |
 
-### Technical Notes
+### Technical Details
 
-- The new landing page is entirely static (no backend calls needed for the marketing content)
-- Smooth scroll behavior for in-page navigation (Home, About, Services, Contact)
-- "LIVE ATTACK" nav item links to `/cyber-map` via React Router
-- The hero illustration will be built with SVG/CSS elements (shield, laptop, network dots) -- no external image dependencies
-- Mobile-first responsive design using Tailwind breakpoints
-- All existing providers (AuthProvider, QueryClientProvider, etc.) remain wrapped around routes
-- The TurnstileGate page file is kept but no longer used at `/` -- can be cleaned up later if desired
+**Edge function (`send-contact-form/index.ts`):**
+- Uses `RESEND_API_KEY` (already configured)
+- Sends to: osmando@gmail.com
+- From: noreply@cyberdefense.so
+- HTML email with all form fields formatted in a table
+- Input validation for required fields (first name, last name, email)
+
+**AI Image generation:**
+- Will use a new edge function `generate-professional-image` that calls the Lovable AI gateway with google/gemini-2.5-flash-image model
+- Prompt: "Professional portrait photo of a Somali man in business attire working as a cybersecurity professional, standing in a modern office environment, holding a laptop, professional lighting, corporate style"
+- The generated image is stored in a Supabase Storage bucket (`public-assets`) and cached
+- The ContactSection fetches the image URL from storage
+- A storage bucket and policy will be created via migration
+
+**Database migration needed:**
+- Create a `public-assets` storage bucket (public, for the generated image)
 
