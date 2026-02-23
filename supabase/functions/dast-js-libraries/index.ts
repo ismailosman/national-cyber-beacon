@@ -69,14 +69,21 @@ serve(async (req) => {
       }
     }
 
-    // SRI check
+    // SRI check — only flag truly third-party scripts (different domain)
     const externalScriptsWithoutSRI: string[] = [];
-    const sriPattern = /<script[^>]*src=["']https?:\/\/[^"']+["'][^>]*>/gi;
+    let parsedOrigin = "";
+    try { parsedOrigin = new URL(url).hostname; } catch {}
+    const sriPattern = /<script[^>]*src=["'](https?:\/\/[^"']+)["'][^>]*>/gi;
     let sriMatch;
     while ((sriMatch = sriPattern.exec(html)) !== null) {
+      const scriptSrc = sriMatch[1];
+      // Skip same-origin scripts — SRI is only meaningful for third-party CDN scripts
+      try {
+        const scriptHost = new URL(scriptSrc).hostname;
+        if (scriptHost === parsedOrigin || scriptHost.endsWith("." + parsedOrigin)) continue;
+      } catch { continue; }
       if (!sriMatch[0].includes("integrity=")) {
-        const srcMatch = sriMatch[0].match(/src=["']([^"']+)["']/);
-        if (srcMatch) externalScriptsWithoutSRI.push(srcMatch[1]);
+        externalScriptsWithoutSRI.push(scriptSrc);
       }
     }
     if (externalScriptsWithoutSRI.length > 0) {
