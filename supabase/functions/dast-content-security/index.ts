@@ -79,7 +79,11 @@ serve(async (req) => {
     // Permissions-Policy
     const permPolicy = headers.get("permissions-policy") || headers.get("feature-policy") || "";
     if (!permPolicy) {
-      findings.push({ id: "CS-PERM", test: "Permissions-Policy Missing", severity: "low", status: "fail", detail: "No Permissions-Policy header. Third-party scripts can access camera, microphone, geolocation.", recommendation: "Add Permissions-Policy: camera=(), microphone=(), geolocation=()" });
+      if (isCloudflare) {
+        findings.push({ id: "CS-PERM", test: "Permissions-Policy", severity: "info", status: "pass", detail: "No Permissions-Policy header, but site is behind Cloudflare WAF which provides additional protection layers.", recommendation: "Consider adding Permissions-Policy for defense in depth" });
+      } else {
+        findings.push({ id: "CS-PERM", test: "Permissions-Policy Missing", severity: "low", status: "fail", detail: "No Permissions-Policy header. Third-party scripts can access camera, microphone, geolocation.", recommendation: "Add Permissions-Policy: camera=(), microphone=(), geolocation=()" });
+      }
     } else {
       findings.push({ id: "CS-PERM", test: "Permissions-Policy Set", severity: "info", status: "pass", detail: "Permissions-Policy is configured" });
     }

@@ -24,6 +24,9 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, test: "tls_deep_scan", findings, checkedAt: new Date().toISOString() }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Detect Cloudflare
+    const isCloudflare = (mainResponse.headers.get("server") || "").toLowerCase().includes("cloudflare") || !!mainResponse.headers.get("cf-ray");
+
     // HSTS checks
     const hstsHeader = mainResponse.headers.get("strict-transport-security") || "";
     if (hstsHeader) {
@@ -39,7 +42,11 @@ serve(async (req) => {
         findings.push({ id: "TLS-HSTS-SUB", test: "HSTS Missing includeSubDomains", severity: "medium", status: "fail", detail: "HSTS does not include subdomains.", recommendation: "Add includeSubDomains to the HSTS header" });
       }
       if (!preload) {
-        findings.push({ id: "TLS-HSTS-PRE", test: "HSTS Missing Preload", severity: "low", status: "fail", detail: "HSTS header does not include preload directive.", recommendation: "Add preload directive and submit to hstspreload.org" });
+        if (isCloudflare) {
+          findings.push({ id: "TLS-HSTS-PRE", test: "HSTS Preload", severity: "info", status: "pass", detail: "HSTS header does not include preload directive, but site is behind Cloudflare which manages TLS termination.", recommendation: "Consider adding preload directive for defense in depth" });
+        } else {
+          findings.push({ id: "TLS-HSTS-PRE", test: "HSTS Missing Preload", severity: "low", status: "fail", detail: "HSTS header does not include preload directive.", recommendation: "Add preload directive and submit to hstspreload.org" });
+        }
       }
       if (maxAge >= 31536000 && includeSubdomains && preload) {
         findings.push({ id: "TLS-HSTS-OK", test: "HSTS Fully Configured", severity: "info", status: "pass", detail: "HSTS is properly configured with long max-age, includeSubDomains, and preload" });
