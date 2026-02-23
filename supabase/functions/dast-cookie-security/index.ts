@@ -19,7 +19,14 @@ serve(async (req) => {
 
     const setCookieHeaders = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
     const setCookie = response.headers.get("set-cookie") || "";
-    const cookies = setCookieHeaders.length > 0 ? setCookieHeaders : (setCookie ? [setCookie] : []);
+    const allCookies = setCookieHeaders.length > 0 ? setCookieHeaders : (setCookie ? [setCookie] : []);
+
+    // Filter out Cloudflare infrastructure cookies — sites have no control over these
+    const cfCookiePatterns = ["__cf_bm", "__cfduid", "cf_clearance", "__cf_ob", "__cf_use_ob", "_cfuvid"];
+    const cookies = allCookies.filter(c => {
+      const name = c.split("=")[0].trim().toLowerCase();
+      return !cfCookiePatterns.some(p => name === p);
+    });
 
     if (cookies.length === 0) {
       findings.push({ id: "COOKIE-000", test: "Cookie Presence", severity: "info", status: "info", detail: "No cookies set by the server" });
