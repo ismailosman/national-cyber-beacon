@@ -932,24 +932,30 @@ const CyberMap: React.FC = () => {
       mapboxgl.accessToken = mapToken;
 
       const isMobile = window.innerWidth < 768;
-      const map = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/dark-v11',
-        center: isMobile ? [45, 5] as [number, number] : [20, 10] as [number, number],
-        zoom: isMobile ? 0.1 : 2,
-        minZoom: isMobile ? 0.1 : 1,
-        projection: 'mercator',
-        pitchWithRotate: false,
-        attributionControl: false,
-        interactive: true,
-        scrollZoom: false,
-        boxZoom: false,
-        dragPan: isMobile,
-        dragRotate: false,
-        doubleClickZoom: false,
-        touchZoomRotate: isMobile,
-        touchPitch: false,
-      });
+      let map: any;
+      try {
+        map = new mapboxgl.Map({
+          container: mapContainer.current,
+          style: 'mapbox://styles/mapbox/dark-v11',
+          center: isMobile ? [45, 5] as [number, number] : [20, 10] as [number, number],
+          zoom: isMobile ? 0.1 : 2,
+          minZoom: isMobile ? 0.1 : 1,
+          projection: 'mercator',
+          pitchWithRotate: false,
+          attributionControl: false,
+          interactive: true,
+          scrollZoom: false,
+          boxZoom: false,
+          dragPan: isMobile,
+          dragRotate: false,
+          doubleClickZoom: false,
+          touchZoomRotate: isMobile,
+          touchPitch: false,
+        });
+      } catch (e: any) {
+        if (!cancelled) setMapError(e?.message?.includes('WebGL') ? 'Map requires WebGL. Please use a supported browser.' : `Map init error: ${e?.message || 'Unknown'}`);
+        return;
+      }
 
       map.on('load', () => {
         if (cancelled) return;
@@ -958,6 +964,17 @@ const CyberMap: React.FC = () => {
         if (isMobile) {
           map.fitBounds([[-180, -70], [180, 80]], { padding: 0, animate: false });
         }
+
+        // ── Brighten map base layers for visibility ───────────────────
+        try {
+          if (map.getLayer('background')) map.setPaintProperty('background', 'background-color', '#141824');
+          if (map.getLayer('water')) map.setPaintProperty('water', 'fill-color', '#1a2540');
+          if (map.getLayer('land')) map.setPaintProperty('land', 'background-color', '#1c2030');
+          // Try alternate land layer names
+          for (const layerId of ['landcover', 'land-structure-polygon', 'landuse']) {
+            if (map.getLayer(layerId)) map.setPaintProperty(layerId, 'fill-color', '#1c2030');
+          }
+        } catch (_e) { /* some layers may not exist */ }
 
         // ── Somalia highlight + country boundaries ─────────────────────
         map.addSource('country-boundaries', {
@@ -972,8 +989,8 @@ const CyberMap: React.FC = () => {
           source: 'country-boundaries',
           'source-layer': 'country_boundaries',
           paint: {
-            'line-color': 'rgba(148,163,184,0.25)',
-            'line-width': 0.6,
+            'line-color': 'rgba(148,163,184,0.45)',
+            'line-width': 0.8,
           },
         });
 
@@ -985,7 +1002,7 @@ const CyberMap: React.FC = () => {
           'source-layer': 'country_boundaries',
           filter: ['==', ['get', 'iso_3166_1'], 'SO'],
           paint: {
-            'fill-color': 'rgba(56, 189, 248, 0.2)',
+            'fill-color': 'rgba(56, 189, 248, 0.35)',
           },
         });
 
@@ -997,8 +1014,8 @@ const CyberMap: React.FC = () => {
           'source-layer': 'country_boundaries',
           filter: ['==', ['get', 'iso_3166_1'], 'SO'],
           paint: {
-            'line-color': 'rgba(56, 189, 248, 0.6)',
-            'line-width': 1.5,
+            'line-color': 'rgba(56, 189, 248, 0.8)',
+            'line-width': 2,
           },
         });
 
@@ -1213,8 +1230,8 @@ const CyberMap: React.FC = () => {
         setMapLoaded(true);
       });
 
-      map.on('error', () => { if (!cancelled) setMapError('Map failed to load.'); });
-    }).catch(() => { if (!cancelled) setMapError('Map library error.'); });
+      map.on('error', (e: any) => { if (!cancelled) setMapError(e?.error?.message?.includes('WebGL') ? 'Map requires WebGL. Please use a supported browser.' : 'Map failed to load.'); });
+    }).catch((e: any) => { if (!cancelled) setMapError(`Failed to load map library: ${e?.message || 'Unknown error'}`); });
 
     return () => {
       cancelled = true;
@@ -1483,8 +1500,18 @@ const CyberMap: React.FC = () => {
             </div>
           )}
           {mapError && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90">
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90 gap-4">
               <p className="text-sm text-slate-400 font-mono">{mapError}</p>
+              <button
+                onClick={() => {
+                  setMapError(null);
+                  if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+                  setMapLoaded(false);
+                }}
+                className="px-4 py-2 text-xs font-mono rounded border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+              >
+                Retry
+              </button>
             </div>
           )}
 
