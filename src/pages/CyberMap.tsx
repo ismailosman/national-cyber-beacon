@@ -959,6 +959,49 @@ const CyberMap: React.FC = () => {
           map.fitBounds([[-180, -70], [180, 80]], { padding: 0, animate: false });
         }
 
+        // ── Somalia highlight + country boundaries ─────────────────────
+        map.addSource('country-boundaries', {
+          type: 'vector',
+          url: 'mapbox://mapbox.country-boundaries-v1',
+        });
+
+        // All country boundary outlines (thin lines for visibility)
+        map.addLayer({
+          id: 'country-boundary-lines',
+          type: 'line',
+          source: 'country-boundaries',
+          'source-layer': 'country_boundaries',
+          paint: {
+            'line-color': 'rgba(148,163,184,0.25)',
+            'line-width': 0.6,
+          },
+        });
+
+        // Somalia fill highlight
+        map.addLayer({
+          id: 'somalia-fill',
+          type: 'fill',
+          source: 'country-boundaries',
+          'source-layer': 'country_boundaries',
+          filter: ['==', ['get', 'iso_3166_1'], 'SO'],
+          paint: {
+            'fill-color': 'rgba(56, 189, 248, 0.2)',
+          },
+        });
+
+        // Somalia border highlight
+        map.addLayer({
+          id: 'somalia-border',
+          type: 'line',
+          source: 'country-boundaries',
+          'source-layer': 'country_boundaries',
+          filter: ['==', ['get', 'iso_3166_1'], 'SO'],
+          paint: {
+            'line-color': 'rgba(56, 189, 248, 0.6)',
+            'line-width': 1.5,
+          },
+        });
+
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
         map.addSource('attack-arcs-source', { type: 'geojson', data: emptyFC });
@@ -1340,13 +1383,13 @@ const CyberMap: React.FC = () => {
           {/* ── Mobile dot-grid background for contrast ─────────────────── */}
           <div className="absolute inset-0 z-[1] lg:hidden pointer-events-none"
                style={{
-                 backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.12) 1px, transparent 1px)',
+                 backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.18) 1px, transparent 1px)',
                  backgroundSize: '14px 14px',
                }} />
 
           {/* ── Header overlay ──────────────────────────────────────────── */}
           <div className="absolute top-0 left-0 right-0 z-20 flex flex-col items-center pt-4 sm:pt-6 pb-3 sm:pb-4 pointer-events-none"
-               style={{ background: window.innerWidth < 768 ? 'linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%)' : 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
+               style={{ background: window.innerWidth < 768 ? 'linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%)' : 'linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%)' }}>
             <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
               <img src={logoSrc} alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain opacity-90 hidden sm:block" />
               <div className="text-center">
