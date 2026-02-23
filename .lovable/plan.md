@@ -1,39 +1,53 @@
 
 
-## Improve Cyber Map Visibility and Highlight Somalia
+## Fix "Map Library Error" and Improve Map Visibility
 
-### Problem
-The map is too dark and hard to see. Somalia has no visual distinction on the map, making it blend into the dark background.
+### Root Cause
 
-### Changes
+The "Map library error" appears because the `import('mapbox-gl')` promise's `.catch()` handler fires with that message (line 1217). The actual underlying error is "Failed to initialize WebGL" -- this happens in the Lovable preview iframe which has limited WebGL support. However, there's also a secondary issue: if the map **does** load but WebGL init fails, the `map.on('error')` handler sets a different message. The `.catch()` is too aggressive -- it catches the import *and* any synchronous errors inside the `.then()` callback (like the `new mapboxgl.Map()` constructor throwing).
 
-#### File: `src/pages/CyberMap.tsx`
+The fix: wrap the `new Map()` constructor in a try/catch so the error message is more helpful, and add a graceful fallback with a retry mechanism instead of a dead-end error screen.
 
-**1. Add a light blue Somalia fill layer on the Mapbox map**
+### Changes (all in `src/pages/CyberMap.tsx`)
 
-After the map loads (inside the `map.on('load', ...)` callback, around line 954), add a new fill layer that highlights Somalia using Mapbox's built-in `country-boundaries` source:
+**1. Fix the "Map library error" -- better error handling**
 
-- Add a fill layer filtering for Somalia's ISO code (`SO`) from the `admin-0-country-boundaries` tileset
-- Color: light blue (`rgba(56, 189, 248, 0.2)`) with a brighter border (`rgba(56, 189, 248, 0.6)`)
-- This gives Somalia a distinct glow on the map
+- Wrap the `new mapboxgl.Map(...)` constructor (line 935) in a try/catch block
+- If the constructor throws (e.g., WebGL unavailable), set a descriptive error: "Map requires WebGL. Please use a supported browser."
+- This prevents the generic `.catch()` from showing "Map library error" when the real problem is WebGL
+- Update the `.catch()` on the import to say "Failed to load map library" for clarity
 
-**2. Improve overall map visibility**
+**2. Add a retry button to the error overlay**
 
-- Add country boundary outlines using Mapbox's built-in boundaries source so all countries are distinguishable (thin white/gray lines)
-- Brighten the mobile dot-grid background opacity from `0.12` to `0.18` (line 1343)
+- In the error overlay (line 1485-1489), add a "Retry" button that clears the error state and resets `mapRef.current = null` so the init effect re-runs
+- This helps when the error is transient (e.g., slow network)
 
-**3. Brighten the header gradient on desktop**
+**3. Use a brighter map style for better visibility**
 
-- The desktop header gradient is very opaque (`rgba(0,0,0,0.85)`), which darkens the top portion. Reduce to `rgba(0,0,0,0.6)` for better map visibility behind the header.
+- Change the Mapbox style from `mapbox://styles/mapbox/dark-v11` to `mapbox://styles/mapbox/dark-v11` but override the background and water colors after load to make them lighter. Specifically:
+  - After the map loads, set the `background` layer paint property to a slightly lighter dark (`#141824` instead of near-black)
+  - Set the `water` layer fill color to a visible dark blue (`#1a2540`) so oceans are distinguishable
+  - Brighten land color by setting `land` fill to `#1c2030`
+- This makes the map significantly more visible while keeping the dark SOC theme
 
-### Technical Detail
+**4. Increase country boundary line brightness**
 
-All changes are in `src/pages/CyberMap.tsx`:
+- Change the country boundary line color from `rgba(148,163,184,0.25)` to `rgba(148,163,184,0.45)` and width from `0.6` to `0.8` so borders are clearly visible
 
-| What | Where | Change |
+**5. Brighten Somalia highlight**
+
+- Increase Somalia fill opacity from `rgba(56, 189, 248, 0.2)` to `rgba(56, 189, 248, 0.35)`
+- Increase Somalia border from `rgba(56, 189, 248, 0.6)` to `rgba(56, 189, 248, 0.8)` and width from `1.5` to `2`
+
+### Summary of edits
+
+| Line(s) | What | Change |
 |---|---|---|
-| Somalia fill layer | Inside `map.on('load')` callback (~line 961) | Add vector source + fill + line layers for Somalia |
-| Country boundaries | Same location | Add thin boundary lines for all countries |
-| Mobile dot-grid | Line 1343 | Opacity `0.12` to `0.18` |
-| Desktop header gradient | Line 1349 | `rgba(0,0,0,0.85)` to `rgba(0,0,0,0.6)` |
+| ~935 | Map constructor | Wrap in try/catch with descriptive WebGL error |
+| ~1217 | `.catch()` handler | Change message to "Failed to load map library" |
+| ~954 (after `map.on('load')`) | Map layer overrides | Brighten background, water, and land layers |
+| ~970-976 | Country boundary lines | Opacity `0.25` to `0.45`, width `0.6` to `0.8` |
+| ~982-988 | Somalia fill | Opacity `0.2` to `0.35` |
+| ~995-1000 | Somalia border | Opacity `0.6` to `0.8`, width `1.5` to `2` |
+| ~1485-1489 | Error overlay | Add retry button to clear error and re-init |
 
