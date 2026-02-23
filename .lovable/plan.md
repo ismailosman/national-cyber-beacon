@@ -1,54 +1,39 @@
 
 
-## Create Privacy/Terms Pages and Improve Site Visibility
+## Improve Cyber Map Visibility and Highlight Somalia
 
-### 1. New Pages
+### Problem
+The map is too dark and hard to see. Somalia has no visual distinction on the map, making it blend into the dark background.
 
-#### Privacy Policy (`src/pages/Privacy.tsx`)
-- Dark-themed page matching site design (`bg-[#0a0a0f]`)
-- Uses Navbar + Footer + CookieConsent layout
-- Covers: data collection, usage, cookies, third parties, security, user rights, contact info
-- Professional legal-style content tailored to CyberDefense
+### Changes
 
-#### Terms of Service (`src/pages/Terms.tsx`)
-- Same layout and dark theme
-- Covers: acceptance, services description, user obligations, intellectual property, limitation of liability, termination, governing law, contact
+#### File: `src/pages/CyberMap.tsx`
 
-### 2. Routing (`src/App.tsx`)
-- Add `/privacy` and `/terms` routes as public pages (alongside `/contact` and `/portfolio`)
+**1. Add a light blue Somalia fill layer on the Mapbox map**
 
-### 3. Footer Links (`src/components/landing/Footer.tsx`)
-- Convert the static "Privacy Policy" and "Terms of Service" text spans to `<Link>` components pointing to `/privacy` and `/terms`
+After the map loads (inside the `map.on('load', ...)` callback, around line 954), add a new fill layer that highlights Somalia using Mapbox's built-in `country-boundaries` source:
 
-### 4. Improve Site Visibility (Too Dark)
+- Add a fill layer filtering for Somalia's ISO code (`SO`) from the `admin-0-country-boundaries` tileset
+- Color: light blue (`rgba(56, 189, 248, 0.2)`) with a brighter border (`rgba(56, 189, 248, 0.6)`)
+- This gives Somalia a distinct glow on the map
 
-The current site uses very dark grays (`gray-400`, `gray-500`) for body text, making it hard to read especially on mobile. Changes across multiple files:
+**2. Improve overall map visibility**
 
-**`src/components/landing/HeroSection.tsx`**
-- Subtitle text: `text-gray-400` to `text-gray-300`
-- Body paragraph: `text-gray-400` to `text-gray-300`
-- Card descriptions: `text-gray-500` to `text-gray-400`
+- Add country boundary outlines using Mapbox's built-in boundaries source so all countries are distinguishable (thin white/gray lines)
+- Brighten the mobile dot-grid background opacity from `0.12` to `0.18` (line 1343)
 
-**`src/components/landing/AboutSection.tsx`**
-- About body text: `text-gray-500` to `text-gray-300`
-- Card descriptions: `text-gray-500` to `text-gray-400`
+**3. Brighten the header gradient on desktop**
 
-**`src/components/landing/Footer.tsx`**
-- Brand description: `text-gray-500` to `text-gray-400`
-- Copyright and bottom bar: `text-gray-600` to `text-gray-500`
+- The desktop header gradient is very opaque (`rgba(0,0,0,0.85)`), which darkens the top portion. Reduce to `rgba(0,0,0,0.6)` for better map visibility behind the header.
 
-**`src/pages/Landing.tsx`**
-- Stats sub-text: `text-gray-500` to `text-gray-400`
+### Technical Detail
 
-### Files Summary
+All changes are in `src/pages/CyberMap.tsx`:
 
-| File | Action |
-|---|---|
-| `src/pages/Privacy.tsx` | **Create** -- Privacy Policy page |
-| `src/pages/Terms.tsx` | **Create** -- Terms of Service page |
-| `src/App.tsx` | **Edit** -- Add routes for `/privacy` and `/terms` |
-| `src/components/landing/Footer.tsx` | **Edit** -- Link Privacy/Terms text to new pages |
-| `src/components/landing/HeroSection.tsx` | **Edit** -- Brighten muted text colors |
-| `src/components/landing/AboutSection.tsx` | **Edit** -- Brighten muted text colors |
-| `src/pages/Landing.tsx` | **Edit** -- Brighten stats sub-text |
+| What | Where | Change |
+|---|---|---|
+| Somalia fill layer | Inside `map.on('load')` callback (~line 961) | Add vector source + fill + line layers for Somalia |
+| Country boundaries | Same location | Add thin boundary lines for all countries |
+| Mobile dot-grid | Line 1343 | Opacity `0.12` to `0.18` |
+| Desktop header gradient | Line 1349 | `rgba(0,0,0,0.85)` to `rgba(0,0,0,0.6)` |
 
