@@ -1005,22 +1005,22 @@ const CyberMap: React.FC = () => {
               'case',
               // Africa (amber)
               ['in', ['get', 'iso_3166_1'], ['literal', ['DZ','AO','BJ','BW','BF','BI','CV','CM','CF','TD','KM','CG','CD','CI','DJ','EG','GQ','ER','SZ','ET','GA','GM','GH','GN','GW','KE','LS','LR','LY','MG','MW','ML','MR','MU','MA','MZ','NA','NE','NG','RW','ST','SN','SC','SL','SO','ZA','SS','SD','TZ','TG','TN','UG','ZM','ZW']]],
-              'rgba(245,158,11,0.12)',
+              'rgba(245,158,11,0.25)',
               // Europe (blue)
               ['in', ['get', 'iso_3166_1'], ['literal', ['AL','AD','AT','BY','BE','BA','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IS','IE','IT','XK','LV','LI','LT','LU','MT','MD','MC','ME','NL','MK','NO','PL','PT','RO','RU','SM','RS','SK','SI','ES','SE','CH','UA','GB','VA']]],
-              'rgba(59,130,246,0.12)',
+              'rgba(59,130,246,0.25)',
               // Asia (teal)
               ['in', ['get', 'iso_3166_1'], ['literal', ['AF','AM','AZ','BH','BD','BT','BN','KH','CN','GE','IN','ID','IR','IQ','IL','JP','JO','KZ','KW','KG','LA','LB','MY','MV','MN','MM','NP','KP','OM','PK','PS','PH','QA','SA','SG','KR','LK','SY','TW','TJ','TH','TL','TR','TM','AE','UZ','VN','YE']]],
-              'rgba(20,184,166,0.12)',
+              'rgba(20,184,166,0.25)',
               // North America (purple)
               ['in', ['get', 'iso_3166_1'], ['literal', ['AG','BS','BB','BZ','CA','CR','CU','DM','DO','SV','GD','GT','HT','HN','JM','MX','NI','PA','KN','LC','VC','TT','US']]],
-              'rgba(168,85,247,0.12)',
+              'rgba(168,85,247,0.25)',
               // South America (green)
               ['in', ['get', 'iso_3166_1'], ['literal', ['AR','BO','BR','CL','CO','EC','GY','PY','PE','SR','UY','VE']]],
-              'rgba(34,197,94,0.12)',
+              'rgba(34,197,94,0.25)',
               // Oceania (rose)
               ['in', ['get', 'iso_3166_1'], ['literal', ['AU','FJ','KI','MH','FM','NR','NZ','PW','PG','WS','SB','TO','TV','VU']]],
-              'rgba(244,63,94,0.12)',
+              'rgba(244,63,94,0.25)',
               // Default (transparent)
               'rgba(0,0,0,0)'
             ],
