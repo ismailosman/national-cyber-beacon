@@ -49,7 +49,7 @@ const ProtectedRoutes = () => {
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/mol" replace />;
 
   return (
     <Routes>
@@ -86,7 +86,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/login" element={<Login />} />
+            <Route path="/mol" element={<Login />} />
             <Route path="/" element={<Landing />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/portfolio" element={<Portfolio />} />
