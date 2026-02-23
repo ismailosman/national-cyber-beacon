@@ -23,7 +23,7 @@ import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
 import Compliance from "@/pages/Compliance";
 import CertAdvisories from "@/pages/CertAdvisories";
-import ThreatMap from "@/pages/ThreatMap";
+
 import UptimeMonitor from "@/pages/UptimeMonitor";
 import DdosMonitor from "@/pages/DdosMonitor";
 import EarlyWarning from "@/pages/EarlyWarning";
@@ -93,7 +93,7 @@ const App = () => (
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/cyber-map" element={<CyberMap />} />
-            <Route path="/threat-map" element={<ThreatMap />} />
+            
             <Route path="/dashboard" element={<ProtectedRoutes />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
