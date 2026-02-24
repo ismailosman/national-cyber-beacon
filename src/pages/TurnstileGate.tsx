@@ -1,6 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import CyberMap from "./CyberMap";
-import logo from "@/assets/logo.png";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACfqOh5kqOZCLMB6";
 
@@ -14,8 +12,14 @@ declare global {
   }
 }
 
-const TurnstileGate = () => {
-  const [verified, setVerified] = useState(() => sessionStorage.getItem("turnstile_verified") === "true");
+interface TurnstileGateProps {
+  children: ReactNode;
+  sessionKey?: string;
+  domain?: string;
+}
+
+const TurnstileGate = ({ children, sessionKey = "turnstile_verified", domain = "cyberdefense.so" }: TurnstileGateProps) => {
+  const [verified, setVerified] = useState(() => sessionStorage.getItem(sessionKey) === "true");
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const widgetRef = useRef<HTMLDivElement>(null);
@@ -35,7 +39,7 @@ const TurnstileGate = () => {
       );
       const data = await res.json();
       if (data.success) {
-        sessionStorage.setItem("turnstile_verified", "true");
+        sessionStorage.setItem(sessionKey, "true");
         setVerified(true);
       } else {
         setError("Verification failed. Please try again.");
@@ -51,7 +55,7 @@ const TurnstileGate = () => {
     } finally {
       setVerifying(false);
     }
-  }, []);
+  }, [sessionKey]);
 
   useEffect(() => {
     if (verified) return;
@@ -62,7 +66,7 @@ const TurnstileGate = () => {
 
       widgetIdRef.current = window.turnstile.render(widgetRef.current, {
         sitekey: TURNSTILE_SITE_KEY,
-        theme: "dark",
+        theme: "light",
         callback: handleToken,
         "error-callback": () => setError("Challenge failed. Please try again."),
       });
@@ -88,49 +92,53 @@ const TurnstileGate = () => {
     };
   }, [verified, handleToken]);
 
-  if (verified) return <CyberMap />;
+  // Bypass on dev/preview domains
+  const hostname = window.location.hostname;
+  const bypassed = hostname === "localhost" || hostname.includes("lovable.app");
+
+  if (bypassed || verified) return <>{children}</>;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden">
-      {/* Background glow */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl" />
-      </div>
-
-      <div className="relative z-10 flex flex-col items-center gap-6 max-w-md w-full px-6">
-        {/* Logo */}
-        <img src={logo} alt="Somalia Cyber Defence" className="w-20 h-20 mb-2" />
+    <div className="min-h-screen bg-white flex flex-col items-start justify-start pt-[15vh] px-8 md:px-16">
+      <div className="max-w-2xl w-full">
+        {/* Domain header */}
+        <div className="flex items-center gap-3 mb-4">
+          <img
+            src="/favicon.png"
+            alt=""
+            className="w-8 h-8"
+          />
+          <span className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
+            {domain}
+          </span>
+        </div>
 
         {/* Heading */}
-        <div className="text-center space-y-2">
-          <h1 className="text-xl font-semibold text-foreground tracking-tight">
-            Verifying you are human
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            This process is automatic. Your browser will redirect shortly.
-          </p>
-        </div>
+        <h1 className="text-xl md:text-2xl font-semibold text-gray-800 mb-2">
+          Performing security verification
+        </h1>
+
+        {/* Description */}
+        <p className="text-sm text-gray-500 mb-8 leading-relaxed max-w-xl">
+          This website uses a security service to protect against malicious bots.
+          This page is displayed while the website verifies you are not a bot.
+        </p>
 
         {/* Turnstile widget */}
-        <div className="glass-card rounded-lg p-6 flex flex-col items-center gap-4 w-full">
+        <div className="border border-gray-200 rounded-lg p-4 inline-block">
           <div ref={widgetRef} className="min-h-[65px] flex items-center justify-center" />
-          
-          {verifying && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              Verifying...
-            </div>
-          )}
-
-          {error && (
-            <p className="text-sm text-destructive text-center">{error}</p>
-          )}
         </div>
 
-        {/* Footer */}
-        <p className="text-xs text-muted-foreground text-center mt-4">
-          cyberdefense.so needs to review the security of your connection before proceeding.
-        </p>
+        {verifying && (
+          <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
+            <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+            Verifying...
+          </div>
+        )}
+
+        {error && (
+          <p className="text-sm text-red-600 mt-4">{error}</p>
+        )}
       </div>
     </div>
   );
