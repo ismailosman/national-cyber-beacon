@@ -43,7 +43,9 @@ export async function startScan(
   repoUrl?: string,
   targetUrl = "https://cyberdefense.so"
 ): Promise<{ scan_id: string; status: string; message: string }> {
-  const body: Record<string, any> = { scan_type: type };
+  // Backend expects "vuln" instead of "dast"
+  const apiType = type === "dast" ? "vuln" : type;
+  const body: Record<string, any> = { scan_type: apiType };
   if (repoUrl) body.repo_url = repoUrl;
   if (type !== "sast" && targetUrl) body.target_url = targetUrl;
   return proxyRequest("/scan", "POST", body);
