@@ -1250,6 +1250,69 @@ const CyberMap: React.FC = () => {
           }
         });
 
+        // ── Country hover tooltip ──────────────────────────────────────
+        const hoveredCountryIdRef = { current: null as number | null };
+        const hoverPopup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          className: 'country-hover-popup',
+          offset: 12,
+        });
+
+        // Hover highlight layer
+        map.addLayer({
+          id: 'country-hover-fill',
+          type: 'fill',
+          source: 'country-boundaries',
+          'source-layer': 'country_boundaries',
+          paint: {
+            'fill-color': 'rgba(255,255,255,0.08)',
+            'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 1, 0],
+          },
+        });
+
+        map.on('mousemove', 'continent-fills', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          map.getCanvas().style.cursor = 'pointer';
+
+          // Clear previous hover
+          if (hoveredCountryIdRef.current !== null) {
+            map.setFeatureState(
+              { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: hoveredCountryIdRef.current },
+              { hover: false }
+            );
+          }
+
+          const feature = e.features[0];
+          hoveredCountryIdRef.current = feature.id ?? null;
+
+          if (feature.id !== undefined) {
+            map.setFeatureState(
+              { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: feature.id },
+              { hover: true }
+            );
+          }
+
+          const countryName = feature.properties?.name_en || feature.properties?.name || '';
+          if (countryName) {
+            hoverPopup.setLngLat(e.lngLat).setHTML(
+              `<span style="font-size:12px;font-weight:600;color:#e2e8f0;letter-spacing:0.02em">${countryName}</span>`
+            ).addTo(map);
+          }
+        });
+
+        map.on('mouseleave', 'continent-fills', () => {
+          map.getCanvas().style.cursor = '';
+          if (hoveredCountryIdRef.current !== null) {
+            map.setFeatureState(
+              { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: hoveredCountryIdRef.current },
+              { hover: false }
+            );
+            hoveredCountryIdRef.current = null;
+          }
+          hoverPopup.remove();
+        });
+
         mapRef.current = map;
         setMapLoaded(true);
       });
