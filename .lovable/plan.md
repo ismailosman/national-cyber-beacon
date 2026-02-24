@@ -1,58 +1,50 @@
 
 
-## Fix: Incomplete PDF Report + Attach PDF to Email
+## Comprehensive PDF Security Report
 
-### Issues Found
+### Problem
+The current PDF report generator (`generate-scan-report/index.ts`) only renders vulnerability scanner findings. When a scan returns zero vulnerabilities (score 100/A), the entire report is blank -- no scanner breakdown, no findings, nothing useful. Meanwhile, the scan data contains valuable recon information (Nmap, SSL, DNS, WHOIS, WhatWeb) that is completely ignored by the PDF.
 
-**Issue 1 -- PDF missing findings for "ERROR" and "WARNING" severities:**
-The PDF's `computeStats()` counts findings by standard severities (critical, high, medium, low, info) but Semgrep uses `error` and `warning` as severity values. These findings are counted in `total` via `normalizeFindings()` but NOT in the vulnerability summary boxes, causing a mismatch (e.g., Total=3 but all severity boxes show 0). The `normalizeFindings()` function uppercases severity directly, so "ERROR" and "WARNING" are valid severities but have no color mapping and fall through as grey "info" entries.
+### What Will Change
 
-**Issue 2 -- Email sends a link, not a PDF attachment:**
-The `send-pentest-email` edge function's `report_delivery` handler generates an HTML email with a "Download Report (PDF)" button linking to a dashboard URL. It does not generate the actual PDF or attach it. The Resend API supports `attachments` with base64-encoded content, which we can use.
+**`supabase/functions/generate-scan-report/index.ts`** -- Major enhancement to include all scan data:
 
-### Changes
+**Page 1 -- Executive Summary (enhanced)**
+- Keep existing: header, target info, score gauge, vulnerability summary boxes
+- Add: Recon Status Summary showing pass/fail indicators for each check performed
+- Add: Scanner Breakdown now always shows scanners even if they returned 0 findings (shows "0 - Clean" instead of hiding them)
 
-**1. `supabase/functions/generate-scan-report/index.ts` -- Fix severity mapping**
+**Page 2 -- Infrastructure & Recon Report (NEW)**
+- SSL/TLS Assessment: Extract from `recon_results.sslscan` -- protocol versions enabled/disabled, certificate details, cipher suites, heartbleed status. Show pass/fail badges.
+- Open Ports: Parse `recon_results.nmap` -- list open ports with services, show risk assessment
+- DNS Configuration: Parse `recon_results.dns` -- nameservers, DNSSEC status, record types
+- Technology Stack: Parse `recon_results.whatweb` -- detected technologies (server, frameworks, cookies)
+- Domain Registration: Parse `recon_results.whois` -- registrar, creation/expiry dates, nameservers
 
-In `computeStats()`, map Semgrep's non-standard severities to standard ones:
-- `error` maps to `high`
-- `warning` maps to `medium`
+**Page 3+ -- Detailed Findings (existing, unchanged)**
+- Vulnerability details with remediation (only rendered if findings exist)
 
-Update the `countSev` function to include these aliases:
+**Page N -- Remediation Action Plan (existing, unchanged)**
+- Prioritized remediation steps (only rendered if findings exist)
+
+### Technical Approach
+
+The recon data parsing will extract structured information from raw tool outputs:
+
 ```text
-countSev('high')   -> also count semgrep findings with severity 'error'
-countSev('medium') -> also count semgrep findings with severity 'warning'
+sslscan output  ->  Extract: TLS versions, cipher suites, cert validity, heartbleed status
+nmap output     ->  Extract: Open ports, services, OS detection
+whatweb output  ->  Extract: Server type, frameworks, cookies, headers
+whois output    ->  Extract: Registrar, dates, nameservers, DNSSEC
+dns output      ->  Extract: Nameservers, record types
 ```
 
-In `normalizeFindings()`, normalize the severity before assigning:
-- Map `ERROR` to `HIGH`, `WARNING` to `MEDIUM` so they get proper color coding and remediation priority in the PDF.
+Each section will use pass/fail indicators:
+- Green checkmark for secure configurations (TLS 1.2+, no heartbleed, etc.)
+- Red X for issues (old TLS versions, exposed ports, missing DNSSEC)
 
-**2. `supabase/functions/send-pentest-email/index.ts` -- Attach PDF to emails**
+### Email Attachment
+The PDF attachment in `send-pentest-email` is already implemented from the previous change. Once the PDF content is comprehensive, the attachment will automatically contain the full report. No changes needed to the email function.
 
-Modify the edge function to:
-- For `scan_completed` and `report_delivery` email types, call the `generate-scan-report` function internally to produce the PDF binary
-- Convert the PDF bytes to base64
-- Include it as an attachment in the Resend API call using:
-  ```json
-  {
-    "attachments": [{
-      "content": "<base64-encoded-pdf>",
-      "filename": "security-report-<target>.pdf"
-    }]
-  }
-  ```
-- The function will call `generate-scan-report` via `fetch()` using the Supabase URL and service role key (already available as secrets)
-- If PDF generation fails, the email still sends without the attachment (graceful fallback)
-
-**3. `src/services/emailService.ts` -- Pass full scan data for PDF generation**
-
-The `sendReportDeliveryEmail` function already passes the full `scanData` object. No changes needed here -- the edge function will use `scanData` to generate the PDF server-side.
-
-### Technical Details
-
-- The internal PDF generation call uses the same `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` secrets (both already configured)
-- PDF attachment is base64-encoded per Resend's API spec (max 40MB, our reports are typically under 100KB)
-- Severity normalization ensures the PDF's Vulnerability Summary boxes accurately reflect all findings
-- The `scan_completed` auto-email will also include the PDF attachment, so the pentester gets the report without clicking any links
-- The `critical_alert` email type will NOT include a PDF (it's a quick alert, not a report)
-
+### Files Modified
+- `supabase/functions/generate-scan-report/index.ts` -- Add recon data parsing and rendering (Infrastructure & Recon page)
