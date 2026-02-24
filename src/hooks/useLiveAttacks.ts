@@ -36,7 +36,7 @@ const DAY_SEED = hashStr(DAY_STRING);
 // ── Deterministic delay for the Nth threat ──
 function getDelay(index: number): number {
   const r = createSeededRand(DAY_SEED + index * 3571);
-  return 300 + r() * 700; // 0.3–1s
+  return 2500 + r() * 2500; // 2.5–5s (1-2 attacks per 5 seconds)
 }
 
 // ── Calculate current position in day's sequence ──
