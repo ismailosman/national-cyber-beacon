@@ -32,11 +32,10 @@ export async function startScan(
   repoUrl?: string,
   targetUrl = "https://cyberdefense.so"
 ): Promise<{ scan_id: string; status: string; message: string }> {
-  return proxyRequest("/scan", "POST", {
-    scan_type: type,
-    repo_url: repoUrl || null,
-    target_url: targetUrl,
-  });
+  const body: Record<string, any> = { scan_type: type };
+  if (repoUrl) body.repo_url = repoUrl;
+  if (type !== "sast" && targetUrl) body.target_url = targetUrl;
+  return proxyRequest("/scan", "POST", body);
 }
 
 export async function getScan(scanId: string): Promise<ScanResult> {
