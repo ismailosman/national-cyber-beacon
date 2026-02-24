@@ -1,36 +1,37 @@
 
 
-## Keep Attack Feed History in Sidebar
+## Add Country Name Tooltip on Hover
 
-### Problem
-The sidebar feed currently clears all previous attacks when a new burst starts (every ~20 seconds). This means only the latest 1-3 attacks are visible at any time, making the feed look empty and unrealistic.
+### What it does
+When hovering over any country on the cyber map, a tooltip will appear near the cursor showing the country's name -- similar to the reference image showing "South Africa."
 
-### Solution
-Maintain a separate, persistent history of all attacks in the feed that never gets cleared on burst start. The feed will accumulate attacks over time like a real security operations log.
+### How it works
 
-### Changes
+**File: `src/pages/CyberMap.tsx`**
 
-**File: `src/hooks/useLiveAttacks.ts`**
+1. **Add a hover-highlight fill layer** (`country-hover-fill`) on top of the existing `continent-fills` layer. This layer uses a feature-state filter (`hover: true`) to subtly brighten the hovered country, giving visual feedback.
 
-- Stop clearing old threats on burst start. Change the `addThreat` callback so it always prepends new threats to the existing list (never resets to `[threat]`).
-- Keep the `RING_BUFFER_SIZE` (100) cap so memory doesn't grow unbounded.
+2. **Add a symbol layer for the tooltip** (`country-hover-label`) that displays the `name_en` property from the Mapbox `country-boundaries-v1` tileset as a text label near the hovered country. This label will have:
+   - White text with a dark background halo for readability
+   - Small font size (~12px) matching the reference style
+   - Only visible when a country is hovered
 
-The key change is in the `addThreat` callback (line 228-233):
-```text
-// Before: clears old batch on burst start
-if (isBurstStart) return [threat];
-return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
+3. **Add mouse event handlers** on the `continent-fills` layer:
+   - `mousemove`: Track the currently hovered feature, set its `feature-state` to `{ hover: true }`, and update a React ref tracking the hovered country ISO code
+   - `mouseleave`: Clear the feature state and hide the label
+   - Change cursor to `pointer` on hover
 
-// After: always accumulate, never clear
-return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
-```
+4. **Use a Mapbox Popup** (lightweight built-in tooltip) instead of a symbol layer for simpler implementation:
+   - Create a `mapboxgl.Popup` instance with `closeButton: false, closeOnClick: false` and custom CSS class
+   - On `mousemove` over `continent-fills`, set its content to the country's `name_en` and position it at the cursor
+   - On `mouseleave`, remove the popup
+   - Style the popup with a dark semi-transparent background, white text, and no arrow -- matching the SOC dark theme
 
-This single change ensures:
-- The sidebar feed accumulates all attacks over time (up to 100 entries)
-- Attacks that have already reached Somalia and vanished from the map remain visible in the feed
-- The feed looks like a real-time security log with continuous history
-- Memory stays bounded at 100 entries maximum
+5. **Add state ref** (`hoveredCountryIdRef`) to track the previously hovered feature for clearing feature-state on the next move.
 
-### Result
-The attack feed sidebar will show a continuous, scrollable log of all recent attacks -- including those whose map lines have already disappeared -- matching the reference image's dense, realistic feed appearance.
+### Technical details
 
+- The `country-boundaries-v1` tileset includes `name_en` (English country name) on every feature
+- Using Mapbox's built-in Popup is simpler and more performant than a custom HTML overlay since it auto-positions relative to the map
+- The popup will be styled via a CSS class injected in the component to match the dark theme (dark background, white text, no border arrow)
+- The popup is created once and reused (moved/updated on each mousemove) for performance
