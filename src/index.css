@@ -200,10 +200,10 @@
 
 /* Country hover tooltip */
 .country-hover-popup .mapboxgl-popup-content {
-  background: rgba(15, 20, 30, 0.92) !important;
-  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  background: rgba(0, 0, 0, 0.85) !important;
+  border: none !important;
   padding: 6px 12px !important;
-  border-radius: 6px !important;
+  border-radius: 4px !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
 }
 .country-hover-popup .mapboxgl-popup-tip {
