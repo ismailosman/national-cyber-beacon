@@ -1,13 +1,54 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { fetchLogoPngData } from "../_shared/logoUtils.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 /* ─── PDF text sanitizer ─── */
 function s(text: string | null | undefined, maxLen = 90): string {
   return (text || '').replace(/[()\\]/g, ' ').substring(0, maxLen);
+}
+
+/* ─── Remediation Knowledge Base ─── */
+function getRemediation(finding: { tool: string; severity: string; name: string; description: string }): string {
+  const key = (finding.name + ' ' + finding.description).toLowerCase();
+
+  // Specific pattern matches
+  if (key.includes('xss') || key.includes('cross-site scripting')) return 'Sanitize all user inputs; implement Content-Security-Policy header';
+  if (key.includes('sql') && key.includes('inject')) return 'Use parameterized queries; never concatenate user input into SQL';
+  if (key.includes('csrf') || key.includes('cross-site request')) return 'Implement anti-CSRF tokens on all state-changing forms';
+  if (key.includes('open-redirect') || key.includes('open redirect')) return 'Validate redirect URLs against a strict allowlist';
+  if (key.includes('jwt') || key.includes('token')) return 'Rotate exposed secrets immediately; use short-lived tokens';
+  if (key.includes('missing-integrity') || key.includes('subresource')) return 'Add Subresource Integrity (SRI) attributes to external scripts';
+  if (key.includes('csp') || key.includes('content-security-policy')) return 'Add a strict Content-Security-Policy header to all responses';
+  if (key.includes('hsts') || key.includes('strict-transport')) return 'Add Strict-Transport-Security header with min 1-year max-age';
+  if (key.includes('ssl') || key.includes('tls') || key.includes('certificate')) return 'Renew SSL/TLS certificate; enable auto-renewal via Lets Encrypt';
+  if (key.includes('cors')) return 'Restrict Access-Control-Allow-Origin to trusted domains only';
+  if (key.includes('cookie') && (key.includes('secure') || key.includes('httponly'))) return 'Set Secure, HttpOnly, and SameSite flags on all cookies';
+  if (key.includes('header') && key.includes('missing')) return 'Add recommended security headers: CSP, HSTS, X-Frame-Options';
+  if (key.includes('directory') && (key.includes('listing') || key.includes('traversal'))) return 'Disable directory listing; restrict file access to intended paths';
+  if (key.includes('information') && key.includes('disclos')) return 'Remove server version headers; disable verbose error messages';
+  if (key.includes('clickjack') || key.includes('x-frame')) return 'Add X-Frame-Options: DENY or use CSP frame-ancestors directive';
+  if (key.includes('format') && key.includes('string')) return 'Use parameterized formatting functions; avoid user-controlled format strings';
+  if (key.includes('deserialization') || key.includes('deserializ')) return 'Avoid deserializing untrusted data; use safe serialization formats';
+  if (key.includes('upload') || key.includes('file')) return 'Validate file types and sizes; store uploads outside web root';
+  if (key.includes('command') && key.includes('inject')) return 'Avoid shell commands; use safe APIs with parameterized arguments';
+  if (key.includes('ssrf') || key.includes('server-side request')) return 'Validate and restrict outbound URLs; block internal IP ranges';
+  if (key.includes('outdated') || key.includes('version')) return 'Update to the latest stable version; enable automatic security patches';
+  if (key.includes('phishing') || key.includes('lookalike')) return 'Monitor and report lookalike domains; implement DMARC policy';
+  if (key.includes('brute') || key.includes('rate limit')) return 'Implement rate limiting and account lockout after failed attempts';
+  if (key.includes('waf')) return 'Deploy a Web Application Firewall with OWASP Core Rule Set';
+  if (key.includes('port') && key.includes('open')) return 'Close unnecessary ports; restrict access via firewall rules';
+  if (key.includes('dns') && (key.includes('zone') || key.includes('transfer'))) return 'Disable DNS zone transfers; restrict to authorized nameservers';
+  if (key.includes('spf') || key.includes('dmarc') || key.includes('dkim')) return 'Configure SPF, DKIM, and DMARC records for email authentication';
+
+  // Generic fallbacks by severity
+  if (finding.severity === 'CRITICAL') return 'Investigate and patch immediately; this poses an active exploitation risk';
+  if (finding.severity === 'HIGH') return 'Schedule remediation within 48 hours; review related attack surfaces';
+  if (finding.severity === 'MEDIUM') return 'Plan remediation within 2 weeks; monitor for exploitation attempts';
+  return 'Review and address in next maintenance cycle';
 }
 
 /* ─── Compute stats from scan result ─── */
@@ -44,59 +85,76 @@ function getGrade(score: number) {
   return 'F';
 }
 
-/* ─── Build normalized findings ─── */
+/* ─── Build normalized findings with remediation ─── */
 function normalizeFindings(result: any) {
-  const findings: { tool: string; severity: string; name: string; description: string; location: string }[] = [];
+  const findings: { tool: string; severity: string; name: string; description: string; location: string; remediation: string }[] = [];
 
   for (const f of (result.sast_results?.semgrep?.findings || [])) {
-    findings.push({
+    const entry = {
       tool: 'Semgrep',
       severity: (f.extra?.severity || 'info').toUpperCase(),
       name: s(f.check_id?.split('.')?.slice(-1)[0] || 'Finding'),
-      description: s(f.extra?.message || '', 70),
+      description: s(f.extra?.message || '', 120),
       location: s(`${f.path}:${f.start?.line}`, 40),
-    });
+      remediation: '',
+    };
+    entry.remediation = getRemediation(entry);
+    findings.push(entry);
   }
 
   for (const f of (result.dast_results?.nuclei?.findings || [])) {
-    findings.push({
+    const entry = {
       tool: 'Nuclei',
       severity: (f.info?.severity || 'info').toUpperCase(),
       name: s(f.info?.name || 'Finding'),
-      description: s(f.info?.description || '', 70),
+      description: s(f.info?.description || '', 120),
       location: s(f.matched_at || '', 40),
-    });
+      remediation: '',
+    };
+    entry.remediation = getRemediation(entry);
+    findings.push(entry);
   }
 
   for (const a of (result.dast_results?.zap?.site?.[0]?.alerts || [])) {
     const risk = (a.riskdesc || '').split(' ')[0] || 'Info';
-    findings.push({
+    const entry = {
       tool: 'ZAP',
       severity: risk.toUpperCase(),
       name: s(a.alert || 'Finding'),
-      description: s(a.desc || '', 70),
+      description: s(a.desc || '', 120),
       location: s(a.url || '', 40),
-    });
+      remediation: '',
+    };
+    entry.remediation = getRemediation(entry);
+    findings.push(entry);
   }
 
   for (const v of (result.dast_results?.nikto?.vulnerabilities || [])) {
-    findings.push({
+    const entry = {
       tool: 'Nikto',
       severity: (v.severity || 'MEDIUM').toUpperCase(),
       name: s(v.id || 'Finding'),
-      description: s(v.msg || v.message || '', 70),
+      description: s(v.msg || v.message || '', 120),
       location: s(v.url || result.target || '', 40),
-    });
+      remediation: '',
+    };
+    entry.remediation = getRemediation(entry);
+    findings.push(entry);
   }
 
-  // Sort by severity
   const order: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4, INFORMATIONAL: 4 };
   findings.sort((a, b) => (order[a.severity] ?? 5) - (order[b.severity] ?? 5));
   return findings;
 }
 
+/* ─── Logo XObject builder ─── */
+function buildLogoXObject(logoData: { width: number; height: number; rgbHex: string }, objId: number): string {
+  const { width, height, rgbHex } = logoData;
+  return `${objId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${rgbHex.length} /Filter /ASCIIHexDecode >>\nstream\n${rgbHex}>\nendstream\nendobj\n`;
+}
+
 /* ─── PDF Generator ─── */
-function generatePDF(result: any): Uint8Array {
+function generatePDF(result: any, logoData: { width: number; height: number; rgbHex: string } | null): Uint8Array {
   const stats = computeStats(result);
   const grade = getGrade(stats.score);
   const findings = normalizeFindings(result);
@@ -104,211 +162,337 @@ function generatePDF(result: any): Uint8Array {
   const target = s(result.target || 'Unknown', 60);
   const scanType = (result.type || 'unknown').toUpperCase();
   const scanDate = new Date(result.created_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-
-  const scoreColor = stats.score >= 75 ? '0.2 0.8 0.4' : stats.score >= 50 ? '1 0.7 0' : '0.9 0.2 0.2';
+  const hasLogo = !!logoData;
+  const tx = hasLogo ? 82 : 40;
 
   const pages: string[][] = [];
 
-  // ── Page 1: Summary ──
+  function addHeader(p: string[], title: string, subtitle: string) {
+    // Navy header bar
+    p.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
+    // Red accent line
+    p.push(`0.85 0.15 0.1 rg`, `0 788 595 2 re f`);
+    if (hasLogo) {
+      p.push(`q 36 0 0 36 40 798 cm /Logo Do Q`);
+    }
+    p.push(`BT /F2 16 Tf 1 1 1 rg ${tx} 812 Td (SOMALIA CYBER DEFENCE) Tj ET`);
+    p.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 800 Td (${title}) Tj ET`);
+  }
+
+  function addFooter(p: string[], pageNum: number) {
+    p.push(`0.93 0.94 0.95 rg`, `0 0 595 40 re f`);
+    p.push(`0.08 0.12 0.2 rg`, `0 40 595 1 re f`);
+    p.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg 40 22 Td (Somalia Cyber Defence | ${now} | CONFIDENTIAL) Tj ET`);
+    p.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg 480 22 Td (Page ${pageNum}) Tj ET`);
+    p.push(`BT /F1 6 Tf 0.5 0.55 0.6 rg 40 12 Td (This report contains sensitive security information. Handle with appropriate care.) Tj ET`);
+  }
+
+  // ── Page 1: Executive Summary ──
   const p1: string[] = [];
-  // Header bar
-  p1.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-  p1.push(`BT /F2 18 Tf 1 1 1 rg 40 810 Td (SECURITY SCAN REPORT) Tj ET`);
-  p1.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (CyberDefense Scanner | ${s(scanDate, 30)}) Tj ET`);
+  // White background
+  p1.push(`1 1 1 rg`, `0 0 595 842 re f`);
+  addHeader(p1, 'Security Scan Report', '');
 
-  // Background
-  p1.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
+  // Info section - light gray box
+  p1.push(`0.95 0.96 0.97 rg`, `30 700 535 80 re f`);
+  p1.push(`0.85 0.15 0.1 rg`, `30 700 3 80 re f`); // red left accent
+  p1.push(`BT /F2 12 Tf 0.08 0.12 0.2 rg 45 758 Td (Target: ${target}) Tj ET`);
+  p1.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 45 742 Td (Scan Type: ${scanType} | Scan ID: ${s(result.scan_id, 30)}) Tj ET`);
+  p1.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 45 726 Td (Scan Date: ${s(scanDate, 30)} | Generated: ${now}) Tj ET`);
 
-  // Target info bar
-  p1.push(`0.12 0.15 0.2 rg`, `30 710 535 70 re f`);
-  p1.push(`BT /F2 14 Tf 0.9 0.95 1 rg 50 756 Td (Target: ${target}) Tj ET`);
-  p1.push(`BT /F1 10 Tf 0.6 0.7 0.8 rg 50 738 Td (Scan Type: ${scanType} | Scan ID: ${s(result.scan_id, 30)}) Tj ET`);
-  p1.push(`BT /F1 9 Tf 0.6 0.7 0.8 rg 50 722 Td (Generated: ${now}) Tj ET`);
+  // Risk level badge in info box
+  const riskLabel = stats.score >= 75 ? 'LOW RISK' : stats.score >= 50 ? 'MEDIUM RISK' : 'HIGH RISK';
+  const riskColor = stats.score >= 75 ? '0.1 0.6 0.3' : stats.score >= 50 ? '0.8 0.6 0' : '0.8 0.15 0.1';
+  p1.push(`BT /F2 10 Tf ${riskColor} rg 45 710 Td (${riskLabel}) Tj ET`);
 
-  // Score box
-  p1.push(`${scoreColor} rg`, `460 720 105 60 re f`);
-  p1.push(`BT /F2 32 Tf 0.05 0.07 0.1 rg 478 742 Td (${stats.score}) Tj ET`);
-  p1.push(`BT /F1 9 Tf 0.05 0.07 0.1 rg 487 728 Td (/ 100) Tj ET`);
-  p1.push(`BT /F2 10 Tf 0.05 0.07 0.1 rg 470 715 Td (Grade: ${grade}) Tj ET`);
+  // Score box (right side)
+  const scoreColor = stats.score >= 75 ? '0.1 0.6 0.3' : stats.score >= 50 ? '0.8 0.6 0' : '0.8 0.15 0.1';
+  p1.push(`${scoreColor} rg`, `460 715 105 65 re f`);
+  p1.push(`BT /F2 36 Tf 1 1 1 rg 476 743 Td (${stats.score}) Tj ET`);
+  p1.push(`BT /F1 10 Tf 1 1 1 rg 490 728 Td (/ 100) Tj ET`);
+  p1.push(`BT /F2 11 Tf 1 1 1 rg 478 715 Td (Grade: ${grade}) Tj ET`);
+
+  // Section title: Vulnerability Summary
+  p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 682 Td (VULNERABILITY SUMMARY) Tj ET`);
+  p1.push(`0.85 0.15 0.1 rg`, `40 678 100 2 re f`);
 
   // Severity summary boxes
   const boxes = [
-    { label: 'TOTAL', value: stats.total, color: '0.9 0.95 1' },
-    { label: 'CRITICAL', value: stats.critical, color: '0.9 0.2 0.2' },
-    { label: 'HIGH', value: stats.high, color: '1 0.5 0' },
-    { label: 'MEDIUM', value: stats.medium, color: '0.9 0.8 0' },
-    { label: 'LOW', value: stats.low, color: '0.2 0.5 1' },
+    { label: 'TOTAL', value: stats.total, bg: '0.93 0.94 0.96', color: '0.08 0.12 0.2' },
+    { label: 'CRITICAL', value: stats.critical, bg: '1 0.92 0.92', color: '0.8 0.15 0.1' },
+    { label: 'HIGH', value: stats.high, bg: '1 0.95 0.9', color: '0.85 0.45 0' },
+    { label: 'MEDIUM', value: stats.medium, bg: '1 0.98 0.9', color: '0.7 0.6 0' },
+    { label: 'LOW', value: stats.low, bg: '0.9 0.95 1', color: '0.15 0.4 0.8' },
   ];
   boxes.forEach((b, i) => {
-    const bx = 50 + i * 100;
-    p1.push(`0.12 0.15 0.2 rg`, `${bx} 650 90 45 re f`);
-    p1.push(`BT /F2 20 Tf ${b.color} rg ${bx + 30} 670 Td (${b.value}) Tj ET`);
-    p1.push(`BT /F1 7 Tf 0.6 0.7 0.8 rg ${bx + 20} 655 Td (${b.label}) Tj ET`);
+    const bx = 40 + i * 105;
+    p1.push(`${b.bg} rg`, `${bx} 635 95 38 re f`);
+    p1.push(`BT /F2 22 Tf ${b.color} rg ${bx + 35} 650 Td (${b.value}) Tj ET`);
+    p1.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg ${bx + 25} 638 Td (${b.label}) Tj ET`);
   });
 
-  // Scanner breakdown
-  p1.push(`BT /F2 11 Tf 0 0.8 0.85 rg 50 630 Td (Scanner Breakdown) Tj ET`);
+  // Scanner Breakdown
+  p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 618 Td (SCANNER BREAKDOWN) Tj ET`);
+  p1.push(`0.85 0.15 0.1 rg`, `40 614 100 2 re f`);
+
   const scanners = [
-    { name: 'Semgrep  SAST ', count: stats.semgrep.length },
-    { name: 'Nuclei  DAST ', count: stats.nuclei.length },
-    { name: 'ZAP  DAST ', count: stats.zapAlerts.length },
-    { name: 'Nikto  DAST ', count: stats.niktoVulns.length },
+    { name: 'Semgrep (SAST)', count: stats.semgrep.length },
+    { name: 'Nuclei (DAST)', count: stats.nuclei.length },
+    { name: 'ZAP (DAST)', count: stats.zapAlerts.length },
+    { name: 'Nikto (DAST)', count: stats.niktoVulns.length },
   ].filter(sc => sc.count > 0);
 
-  let sy = 612;
+  let sy = 598;
+  // Table header
+  p1.push(`0.08 0.12 0.2 rg`, `40 ${sy - 2} 515 18 re f`);
+  p1.push(`BT /F2 8 Tf 1 1 1 rg 50 ${sy + 3} Td (SCANNER) Tj ET`);
+  p1.push(`BT /F2 8 Tf 1 1 1 rg 300 ${sy + 3} Td (FINDINGS) Tj ET`);
+  sy -= 18;
+
   for (const sc of scanners) {
-    p1.push(`0.12 0.15 0.2 rg`, `50 ${sy - 4} 480 18 re f`);
-    p1.push(`BT /F1 9 Tf 0.9 0.95 1 rg 55 ${sy + 2} Td (${sc.name}) Tj ET`);
-    p1.push(`BT /F2 9 Tf 0 0.8 0.85 rg 400 ${sy + 2} Td (${sc.count} findings) Tj ET`);
-    // Bar
-    const barW = Math.min(sc.count * 8, 300);
-    p1.push(`0 0.6 0.7 rg`, `55 ${sy - 2} ${barW} 3 re f`);
-    sy -= 22;
+    p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 16 re f`);
+    p1.push(`BT /F1 9 Tf 0.2 0.25 0.3 rg 50 ${sy + 2} Td (${sc.name}) Tj ET`);
+    p1.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 300 ${sy + 2} Td (${sc.count}) Tj ET`);
+    // Mini bar
+    const barW = Math.min(sc.count * 6, 180);
+    p1.push(`0.85 0.15 0.1 rg`, `340 ${sy} ${barW} 8 re f`);
+    sy -= 18;
   }
 
-  // Top findings preview
-  const topFindings = findings.slice(0, 12);
+  // Top Findings preview
+  const topFindings = findings.slice(0, 10);
   if (topFindings.length > 0) {
-    p1.push(`BT /F2 11 Tf 0 0.8 0.85 rg 50 ${sy - 10} Td (Top Findings) Tj ET`);
-    sy -= 28;
+    sy -= 8;
+    p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (TOP FINDINGS) Tj ET`);
+    p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 80 2 re f`);
+    sy -= 16;
 
     // Table header
-    p1.push(`0.12 0.15 0.2 rg`, `50 ${sy - 4} 480 18 re f`);
-    p1.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 55 ${sy + 2} Td (SEVERITY) Tj ET`);
-    p1.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 120 ${sy + 2} Td (TOOL) Tj ET`);
-    p1.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 180 ${sy + 2} Td (FINDING) Tj ET`);
-    p1.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 400 ${sy + 2} Td (LOCATION) Tj ET`);
-    sy -= 18;
+    p1.push(`0.08 0.12 0.2 rg`, `40 ${sy - 2} 515 16 re f`);
+    p1.push(`BT /F2 7 Tf 1 1 1 rg 50 ${sy + 2} Td (SEVERITY) Tj ET`);
+    p1.push(`BT /F2 7 Tf 1 1 1 rg 115 ${sy + 2} Td (TOOL) Tj ET`);
+    p1.push(`BT /F2 7 Tf 1 1 1 rg 170 ${sy + 2} Td (FINDING) Tj ET`);
+    p1.push(`BT /F2 7 Tf 1 1 1 rg 420 ${sy + 2} Td (LOCATION) Tj ET`);
+    sy -= 16;
 
     for (const f of topFindings) {
-      if (sy < 80) break;
-      const sevColor =
-        f.severity === 'CRITICAL' ? '0.9 0.2 0.2' :
-        f.severity === 'HIGH' ? '1 0.5 0' :
-        f.severity === 'MEDIUM' ? '0.9 0.8 0' :
-        f.severity === 'LOW' ? '0.2 0.5 1' : '0.5 0.5 0.5';
+      if (sy < 60) break;
+      const isAlt = topFindings.indexOf(f) % 2 === 0;
+      if (isAlt) p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 14 re f`);
 
-      p1.push(`BT /F2 8 Tf ${sevColor} rg 55 ${sy + 2} Td (${f.severity}) Tj ET`);
-      p1.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 120 ${sy + 2} Td (${f.tool}) Tj ET`);
-      p1.push(`BT /F1 8 Tf 0.9 0.95 1 rg 180 ${sy + 2} Td (${s(f.name, 35)}) Tj ET`);
-      p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 400 ${sy + 2} Td (${s(f.location, 25)}) Tj ET`);
+      const sevColor =
+        f.severity === 'CRITICAL' ? '0.8 0.15 0.1' :
+        f.severity === 'HIGH' ? '0.85 0.45 0' :
+        f.severity === 'MEDIUM' ? '0.7 0.6 0' :
+        f.severity === 'LOW' ? '0.15 0.4 0.8' : '0.5 0.5 0.5';
+
+      p1.push(`BT /F2 7 Tf ${sevColor} rg 50 ${sy + 1} Td (${f.severity}) Tj ET`);
+      p1.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 115 ${sy + 1} Td (${f.tool}) Tj ET`);
+      p1.push(`BT /F1 7 Tf 0.15 0.2 0.25 rg 170 ${sy + 1} Td (${s(f.name, 40)}) Tj ET`);
+      p1.push(`BT /F1 6 Tf 0.4 0.45 0.5 rg 420 ${sy + 1} Td (${s(f.location, 25)}) Tj ET`);
       sy -= 14;
     }
 
-    if (findings.length > 12) {
-      p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 55 ${sy + 2} Td (... and ${findings.length - 12} more findings on next page) Tj ET`);
+    if (findings.length > 10) {
+      p1.push(`BT /F1 8 Tf 0.4 0.45 0.5 rg 50 ${sy + 1} Td (... and ${findings.length - 10} more findings - see detailed report) Tj ET`);
     }
   }
 
-  // Footer
-  p1.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
-  p1.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (CyberDefense Scanner Report | ${now} | CONFIDENTIAL) Tj ET`);
-  p1.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 40 18 Td (This report contains sensitive security information. Handle with appropriate care.) Tj ET`);
+  addFooter(p1, 1);
   pages.push(p1);
 
-  // ── Page 2+: Full findings ──
-  if (findings.length > 12) {
-    const remaining = findings.slice(12);
-    let pageFindings: typeof remaining[] = [];
-    for (let i = 0; i < remaining.length; i += 35) {
-      pageFindings.push(remaining.slice(i, i + 35));
-    }
-
-    for (let pi = 0; pi < pageFindings.length; pi++) {
+  // ── Page 2+: Detailed Findings with Remediation ──
+  if (findings.length > 0) {
+    const findingsPerPage = 6;
+    for (let pageIdx = 0; pageIdx < findings.length; pageIdx += findingsPerPage) {
+      const pageFindings = findings.slice(pageIdx, pageIdx + findingsPerPage);
       const pf: string[] = [];
-      pf.push(`0.05 0.07 0.1 rg`, `0 790 595 52 re f`);
-      pf.push(`BT /F2 16 Tf 1 1 1 rg 40 810 Td (DETAILED FINDINGS) Tj ET`);
-      pf.push(`BT /F1 10 Tf 1 1 1 rg 40 797 Td (${target} | Page ${pi + 2}) Tj ET`);
-      pf.push(`0.08 0.1 0.14 rg`, `30 60 535 720 re f`);
+      pf.push(`1 1 1 rg`, `0 0 595 842 re f`);
+      addHeader(pf, 'Detailed Findings & Remediation', `${target} | Page ${pages.length + 1}`);
 
-      let fy = 760;
-      // Table header
-      pf.push(`0.12 0.15 0.2 rg`, `50 ${fy - 4} 480 18 re f`);
-      pf.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 55 ${fy + 2} Td (SEVERITY) Tj ET`);
-      pf.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 120 ${fy + 2} Td (TOOL) Tj ET`);
-      pf.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 180 ${fy + 2} Td (FINDING) Tj ET`);
-      pf.push(`BT /F2 8 Tf 0.6 0.7 0.8 rg 400 ${fy + 2} Td (LOCATION) Tj ET`);
-      fy -= 18;
+      let fy = 770;
 
-      for (const f of pageFindings[pi]) {
-        if (fy < 80) break;
+      for (const f of pageFindings) {
+        if (fy < 100) break;
+
+        // Card background
+        const cardH = 90;
+        pf.push(`0.97 0.97 0.98 rg`, `40 ${fy - cardH + 10} 515 ${cardH} re f`);
+
+        // Severity pill
         const sevColor =
-          f.severity === 'CRITICAL' ? '0.9 0.2 0.2' :
-          f.severity === 'HIGH' ? '1 0.5 0' :
-          f.severity === 'MEDIUM' ? '0.9 0.8 0' :
-          f.severity === 'LOW' ? '0.2 0.5 1' : '0.5 0.5 0.5';
+          f.severity === 'CRITICAL' ? '0.8 0.15 0.1' :
+          f.severity === 'HIGH' ? '0.85 0.45 0' :
+          f.severity === 'MEDIUM' ? '0.7 0.6 0' :
+          f.severity === 'LOW' ? '0.15 0.4 0.8' : '0.5 0.5 0.5';
+        const sevBg =
+          f.severity === 'CRITICAL' ? '1 0.92 0.92' :
+          f.severity === 'HIGH' ? '1 0.95 0.9' :
+          f.severity === 'MEDIUM' ? '1 0.98 0.9' :
+          f.severity === 'LOW' ? '0.9 0.95 1' : '0.95 0.95 0.95';
 
-        pf.push(`BT /F2 8 Tf ${sevColor} rg 55 ${fy + 2} Td (${f.severity}) Tj ET`);
-        pf.push(`BT /F1 8 Tf 0.7 0.8 0.9 rg 120 ${fy + 2} Td (${f.tool}) Tj ET`);
-        pf.push(`BT /F1 8 Tf 0.9 0.95 1 rg 180 ${fy + 2} Td (${s(f.name, 35)}) Tj ET`);
-        pf.push(`BT /F1 7 Tf 0.5 0.6 0.7 rg 400 ${fy + 2} Td (${s(f.location, 25)}) Tj ET`);
+        pf.push(`${sevBg} rg`, `50 ${fy - 2} 55 14 re f`);
+        pf.push(`BT /F2 7 Tf ${sevColor} rg 55 ${fy + 1} Td (${f.severity}) Tj ET`);
+
+        // Tool badge
+        pf.push(`0.93 0.94 0.96 rg`, `110 ${fy - 2} 42 14 re f`);
+        pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 115 ${fy + 1} Td (${f.tool}) Tj ET`);
+
+        // Finding name
+        pf.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 160 ${fy + 1} Td (${s(f.name, 55)}) Tj ET`);
+
+        fy -= 18;
+
+        // Description
+        pf.push(`BT /F1 8 Tf 0.3 0.35 0.4 rg 55 ${fy} Td (${s(f.description, 90)}) Tj ET`);
         fy -= 14;
+
+        // Location
+        pf.push(`BT /F2 7 Tf 0.4 0.45 0.5 rg 55 ${fy} Td (Location:) Tj ET`);
+        pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 100 ${fy} Td (${s(f.location, 70)}) Tj ET`);
+        fy -= 14;
+
+        // Remediation - highlighted
+        pf.push(`0.9 0.95 0.9 rg`, `50 ${fy - 3} 500 14 re f`); // light green bg
+        pf.push(`0.1 0.6 0.3 rg`, `50 ${fy - 3} 3 14 re f`); // green left accent
+        pf.push(`BT /F2 7 Tf 0.1 0.5 0.25 rg 58 ${fy} Td (Remediation:) Tj ET`);
+        pf.push(`BT /F1 7 Tf 0.15 0.4 0.2 rg 120 ${fy} Td (${s(f.remediation, 75)}) Tj ET`);
+        fy -= 22;
       }
 
-      pf.push(`0.15 0.19 0.25 rg`, `0 0 595 50 re f`);
-      pf.push(`BT /F1 8 Tf 0.5 0.6 0.7 rg 40 30 Td (CyberDefense Scanner Report | ${now} | Page ${pi + 2}) Tj ET`);
+      addFooter(pf, pages.length + 1);
       pages.push(pf);
     }
   }
 
+  // ── Remediation Summary Page ──
+  if (findings.length > 0) {
+    const ps: string[] = [];
+    ps.push(`1 1 1 rg`, `0 0 595 842 re f`);
+    addHeader(ps, 'Remediation Action Plan', `${target}`);
+
+    let ry = 770;
+
+    // Summary counts
+    const critCount = findings.filter(f => f.severity === 'CRITICAL').length;
+    const highCount = findings.filter(f => f.severity === 'HIGH').length;
+    const medCount = findings.filter(f => f.severity === 'MEDIUM').length;
+    const lowCount = findings.filter(f => f.severity === 'LOW').length;
+
+    ps.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${ry} Td (PRIORITIZED REMEDIATION PLAN) Tj ET`);
+    ps.push(`0.85 0.15 0.1 rg`, `40 ${ry - 4} 180 2 re f`);
+    ry -= 22;
+
+    ps.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 40 ${ry} Td (Total findings: ${findings.length} | Critical: ${critCount} | High: ${highCount} | Medium: ${medCount} | Low: ${lowCount}) Tj ET`);
+    ry -= 25;
+
+    // Priority sections
+    const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
+    const sevLabels: Record<string, { color: string; effort: string; timeline: string }> = {
+      CRITICAL: { color: '0.8 0.15 0.1', effort: 'Immediate', timeline: 'Fix within 24 hours' },
+      HIGH: { color: '0.85 0.45 0', effort: 'Urgent', timeline: 'Fix within 48 hours' },
+      MEDIUM: { color: '0.7 0.6 0', effort: 'Planned', timeline: 'Fix within 2 weeks' },
+      LOW: { color: '0.15 0.4 0.8', effort: 'Maintenance', timeline: 'Next maintenance cycle' },
+    };
+
+    for (const sev of severities) {
+      const sevFindings = findings.filter(f => f.severity === sev);
+      if (sevFindings.length === 0) continue;
+      if (ry < 100) break;
+
+      const info = sevLabels[sev];
+
+      // Section header
+      ps.push(`${info.color} rg`, `40 ${ry - 2} 515 18 re f`);
+      ps.push(`BT /F2 9 Tf 1 1 1 rg 50 ${ry + 2} Td (${sev} - ${sevFindings.length} finding${sevFindings.length > 1 ? 's' : ''} | ${info.effort} | ${info.timeline}) Tj ET`);
+      ry -= 22;
+
+      // Deduplicate remediations
+      const uniqueRemediations = [...new Set(sevFindings.map(f => f.remediation))];
+
+      for (const rem of uniqueRemediations.slice(0, 6)) {
+        if (ry < 100) break;
+        const relatedFindings = sevFindings.filter(f => f.remediation === rem);
+        ps.push(`0.97 0.97 0.98 rg`, `40 ${ry - 3} 515 16 re f`);
+        ps.push(`BT /F1 8 Tf 0.15 0.2 0.25 rg 50 ${ry} Td (${s(rem, 75)}) Tj ET`);
+        ps.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg 450 ${ry} Td (${relatedFindings.length} finding${relatedFindings.length > 1 ? 's' : ''}) Tj ET`);
+        ry -= 18;
+      }
+      ry -= 8;
+    }
+
+    // General recommendations
+    if (ry > 180) {
+      ry -= 10;
+      ps.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${ry} Td (GENERAL RECOMMENDATIONS) Tj ET`);
+      ps.push(`0.85 0.15 0.1 rg`, `40 ${ry - 4} 150 2 re f`);
+      ry -= 20;
+
+      const recommendations = [
+        'Implement a vulnerability management program with regular scanning schedules',
+        'Establish a patch management policy with defined SLAs per severity level',
+        'Deploy a Web Application Firewall  WAF  with OWASP Core Rule Set',
+        'Enable security headers on all web applications  CSP, HSTS, X-Frame-Options ',
+        'Conduct regular penetration testing and code reviews',
+        'Implement monitoring and alerting for security events',
+      ];
+
+      for (const rec of recommendations) {
+        if (ry < 80) break;
+        ps.push(`BT /F1 8 Tf 0.3 0.35 0.4 rg 50 ${ry} Td (${s(rec, 90)}) Tj ET`);
+        ry -= 14;
+      }
+    }
+
+    addFooter(ps, pages.length + 1);
+    pages.push(ps);
+  }
+
   // ── Assemble PDF ──
   const pageCount = pages.length;
-  const objects: string[] = [];
-  let nextObj = 1;
+  const streams = pages.map(p => new TextEncoder().encode(p.join('\n')));
 
-  // Obj 1: Catalog
-  const catalogId = nextObj++;
-  objects.push(`${catalogId} 0 obj\n<< /Type /Catalog /Pages ${catalogId + 1} 0 R >>\nendobj\n`);
+  const baseObj = hasLogo ? 6 : 5;
+  const pageObjIds = pages.map((_, i) => baseObj + i * 2);
+  const streamObjIds = pages.map((_, i) => baseObj + i * 2 + 1);
+  const totalObjects = baseObj + pageCount * 2;
 
-  // Obj 2: Pages
-  const pagesId = nextObj++;
-  const pageIds: number[] = [];
-  // Reserve page obj IDs
-  const fontId1 = nextObj++;
-  const fontId2 = nextObj++;
+  const resourceDict = hasLogo
+    ? `/Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Logo 5 0 R >>`
+    : `/Font << /F1 3 0 R /F2 4 0 R >>`;
 
-  for (let i = 0; i < pageCount; i++) pageIds.push(nextObj++);
-  for (let i = 0; i < pageCount; i++) nextObj++; // stream objs
-
-  objects.push(''); // placeholder for pages obj
-
-  // Fonts
-  objects.push(`${fontId1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n`);
-  objects.push(`${fontId2} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`);
-
-  // Page + stream objects
-  const streamIds: number[] = [];
-  let sIdx = fontId2;
-  for (let i = 0; i < pageCount; i++) {
-    const streamId = pageIds[i] + pageCount;
-    streamIds.push(streamId);
-    const streamContent = pages[i].join('\n');
-
-    objects.push(`${pageIds[i]} 0 obj\n<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Contents ${streamId} 0 R /Resources << /Font << /F1 ${fontId1} 0 R /F2 ${fontId2} 0 R >> >> >>\nendobj\n`);
-    objects.push(`${streamId} 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`);
-  }
-
-  // Fill pages obj
-  objects[1] = `${pagesId} 0 obj\n<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageCount} >>\nendobj\n`;
-
-  // Build PDF
-  let pdf = '%PDF-1.4\n';
+  const encoder = new TextEncoder();
   const offsets: number[] = [];
+  let pdf = `%PDF-1.4\n`;
 
-  for (const obj of objects) {
-    offsets.push(pdf.length);
-    pdf += obj;
+  function addObj(content: string) {
+    offsets.push(encoder.encode(pdf).length);
+    pdf += content;
   }
 
-  const xrefOffset = pdf.length;
-  pdf += `xref\n0 ${offsets.length + 1}\n0000000000 65535 f \n`;
+  addObj(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`);
+  addObj(`2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageCount} >>\nendobj\n`);
+  addObj(`3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n`);
+  addObj(`4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`);
+
+  if (hasLogo && logoData) {
+    addObj(buildLogoXObject(logoData, 5));
+  }
+
+  for (let i = 0; i < pageCount; i++) {
+    addObj(`${pageObjIds[i]} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${resourceDict} >> /Contents ${streamObjIds[i]} 0 R >>\nendobj\n`);
+    const streamContent = new TextDecoder().decode(streams[i]);
+    addObj(`${streamObjIds[i]} 0 obj\n<< /Length ${streams[i].length} >>\nstream\n${streamContent}\nendstream\nendobj\n`);
+  }
+
+  const xrefOffset = encoder.encode(pdf).length;
+  pdf += `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
   for (const offset of offsets) {
     pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
   }
+  pdf += `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
 
-  pdf += `trailer\n<< /Size ${offsets.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return new TextEncoder().encode(pdf);
+  return encoder.encode(pdf);
 }
 
 serve(async (req) => {
@@ -327,7 +511,8 @@ serve(async (req) => {
       });
     }
 
-    const pdfBytes = generatePDF(result);
+    const logoData = await fetchLogoPngData();
+    const pdfBytes = generatePDF(result, logoData);
 
     return new Response(pdfBytes, {
       status: 200,
