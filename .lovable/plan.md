@@ -1,31 +1,22 @@
 
 
-## Allow Custom Target URL + Verify Report
+## Fix Security Scanner Proxy Edge Function
 
-### 1. Make Target URL Editable in ScanForm
+### What's happening
+The upstream API at `cybersomalia.com` returns HTML (nginx 502 page) when it's down, causing the edge function to forward raw HTML to the frontend, which breaks JSON parsing and shows a blank screen.
 
-**`src/components/scanner/ScanForm.tsx`**
-- Replace the hardcoded readonly "https://cyberdefense.so" display with an editable URL input field
-- Add `targetUrl` state initialized to `https://cyberdefense.so` as a default
-- Update the `onScan` callback signature to pass `targetUrl` as a third parameter: `onScan(type, repoUrl, targetUrl)`
-- Update the Props interface: `onScan: (type: ScanType, repoUrl?: string, targetUrl?: string) => void`
-- Add URL validation (required, type="url")
-- Update DAST description to say "ZAP + Nuclei + Nikto against your target" instead of hardcoding cyberdefense.so
+### Changes
 
-### 2. Wire Target URL Through SecurityDashboard
+**1. Update `supabase/functions/security-scanner-proxy/index.ts`**
+- Replace the current implementation with the user-provided version that has cleaner error handling
+- Key improvements:
+  - Read `API_BASE` from `SECURITY_API_URL` env var (with fallback to `https://cybersomalia.com`)
+  - Check upstream `content-type` before parsing -- if non-JSON, return a structured JSON error with status 502
+  - Simpler, more readable flow
+  - Updated CORS headers to match the standard pattern
 
-**`src/components/scanner/SecurityDashboard.tsx`**
-- Update `handleStartScan` to accept and forward `targetUrl` parameter
-- Pass it to `startScan(type, repoUrl, targetUrl)` which already supports the parameter (it defaults to cyberdefense.so in securityApi.ts)
+**2. Add `SECURITY_API_URL` secret**
+- Add a new secret `SECURITY_API_URL` set to `https://cybersomalia.com` so the API base URL is configurable without code changes
 
-### 3. No Backend Changes Needed
-
-The `startScan` function in `src/services/securityApi.ts` already accepts a `targetUrl` parameter (line 33) and passes it as `target_url` to the API. The edge function proxy forwards everything. Only the UI was hardcoded.
-
-### 4. Verify Report Rendering
-
-After implementation, navigate to `/security-scanner`, run a DAST scan against a chosen site, and verify:
-- Charts render (severity donut, scanner breakdown, score gauge)
-- Expandable findings table works
-- Scan metadata displays correctly
+No frontend changes needed -- `securityApi.ts` already handles non-ok responses gracefully.
 
