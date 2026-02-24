@@ -16,33 +16,40 @@ serve(async (req) => {
   }
 
   try {
-    // Fetch the logo from the preview public folder
-    const logoUrl = "https://id-preview--58e72b13-db11-4c3f-80bd-4bc07f4fe140.lovable.app/logo.png";
-    const logoRes = await fetch(logoUrl);
-    if (!logoRes.ok) {
-      throw new Error(`Failed to fetch logo: ${logoRes.status}`);
-    }
-    const logoBytes = new Uint8Array(await logoRes.arrayBuffer());
+    const baseUrl = "https://id-preview--58e72b13-db11-4c3f-80bd-4bc07f4fe140.lovable.app";
+    const logos = [
+      { src: `${baseUrl}/logo.png`, dest: "logo.png" },
+      { src: `${baseUrl}/assets/logo-circle.png`, dest: "logo-circle.png" },
+    ];
 
-    // Upload to media bucket as logo.png
-    const uploadRes = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/media/logo.png`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "Content-Type": "image/png",
-          "x-upsert": "true",
-        },
-        body: logoBytes,
+    const results = [];
+    for (const { src, dest } of logos) {
+      const logoRes = await fetch(src);
+      if (!logoRes.ok) {
+        results.push({ dest, error: `Failed to fetch: ${logoRes.status}` });
+        continue;
       }
-    );
+      const logoBytes = new Uint8Array(await logoRes.arrayBuffer());
 
-    const result = await uploadRes.text();
-    console.log("Upload result:", uploadRes.status, result);
+      const uploadRes = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/media/${dest}`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "image/png",
+            "x-upsert": "true",
+          },
+          body: logoBytes,
+        }
+      );
+      const result = await uploadRes.text();
+      console.log(`Upload ${dest}:`, uploadRes.status, result);
+      results.push({ dest, success: uploadRes.ok, status: uploadRes.status });
+    }
 
     return new Response(
-      JSON.stringify({ success: uploadRes.ok, status: uploadRes.status, result }),
+      JSON.stringify({ results }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
