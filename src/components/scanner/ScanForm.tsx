@@ -31,7 +31,7 @@ const SCAN_TYPES = [
 
 export default function ScanForm({ onScan, scanning, apiOnline }: Props) {
   const [selectedType, setSelectedType] = useState<ScanType>("dast");
-  const [repoUrl, setRepoUrl] = useState("");
+  const [repoUrl, setRepoUrl] = useState("https://github.com/ismailosman/national-cyber-beacon");
   const [targetUrl, setTargetUrl] = useState("https://cyberdefense.so");
 
   const needsRepo = selectedType === "sast" || selectedType === "full";
