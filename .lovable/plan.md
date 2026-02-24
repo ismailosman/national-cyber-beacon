@@ -1,34 +1,31 @@
 
 
-## Fix PDF Report Layout Overlap
+## Replace Hero Section Background Video
 
-### Problem
-The Scanner Breakdown table on Page 1 shows only ~2.5 rows before the Server Information section's background rectangle overlaps and covers the remaining rows. This happens because after rendering 4 scanner rows (each 18px), the gap before the next section is only 8px, causing the Server Information background rectangle to paint over the bottom scanner rows.
+### Overview
+Replace the current hero section background video (`/herosection.mp4`) with the Shutterstock preview video URL, using it as a direct source in the video element.
 
-### Root Cause (Line-by-line trace)
-The scanner breakdown renders 4 rows at 18px spacing. After the loop, `sy` is around 508. Then only 8px gap is added before Server Information. The Server Information background rectangle (`serverInfo.length * 16 + 8` = 72px tall) extends upward and overlaps the last scanner rows.
+### Changes
 
-### Fix
+**File: `src/components/landing/HeroSection.tsx`**
 
-**File: `supabase/functions/generate-scan-report/index.ts`**
-
-1. **Increase gap between Scanner Breakdown and Server Information** (line 376): Change `sy -= 8` to `sy -= 20` to add proper clearance between the two sections.
-
-2. **Add a guard to ensure the scanner table fully renders before Server Info**: Move the Server Info section's Y start calculation to account for the full scanner table height, so even if future scanners are added, it won't overlap.
-
-3. **Reduce the Top Findings section start gap if needed** to compensate for the extra spacing above, keeping all content fitting on page 1.
-
-### Technical Details
-
-The single change is on line 376:
+Update the video `<source>` element to point to the new Shutterstock URL and change the type from `video/mp4` to `video/webm`:
 
 ```text
-Before: sy -= 8;   (line 376, before SERVER INFORMATION title)
-After:  sy -= 20;   (gives 12px more clearance)
+Before:
+  <source src="/herosection.mp4" type="video/mp4" />
+
+After:
+  <source src="https://www.shutterstock.com/shutterstock/videos/3814669891/preview/stock-footage-fast-code-and-screen-with-software-cybersecurity-or-it-for-overload-or-digital-glitch-tech.webm" type="video/webm" />
 ```
 
-This ensures the Server Information background rectangle (drawn at `sy - 4` with height `serverInfo.length * 16 + 8`) starts well below the last scanner row, preventing any overlap.
+Keep the existing `<source src="/herosection.mp4" type="video/mp4" />` as a fallback in case the external URL fails to load (e.g., due to CORS or network issues).
 
 ### Files Modified
-- `supabase/functions/generate-scan-report/index.ts` -- Increase section gap to prevent overlap
+- `src/components/landing/HeroSection.tsx` -- update video source URL
+
+### Notes
+- The Shutterstock preview URL is a `.webm` file, so it needs the correct MIME type
+- The local `/herosection.mp4` is kept as a fallback source
+- No other files need changes
 
