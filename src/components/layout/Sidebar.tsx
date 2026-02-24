@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/organizations', icon: Building2, label: 'Organizations' },
   { to: '/alerts', icon: Bell, label: 'Alert Center' },
   { to: '/incidents', icon: AlertOctagon, label: 'Incidents' },
@@ -64,11 +64,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
 
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-1">
-        {navItems.map(({ to, icon: Icon, label, end }) => (
+        {navItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
-            end={end}
             onClick={onClose}
             className={({ isActive }) =>
               cn(

@@ -1,53 +1,165 @@
+import React, { useState } from 'react';
 import { ScanResult, NucleiFinding, SemgrepFinding } from "@/types/security";
 import StatusBadge from "./StatusBadge";
-import { Loader2 } from "lucide-react";
+import ScanReportCharts from "./ScanReportCharts";
+import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-red-900/40 text-red-400 border-red-800",
-  high: "bg-orange-900/40 text-orange-400 border-orange-800",
-  medium: "bg-yellow-900/40 text-yellow-400 border-yellow-800",
-  low: "bg-blue-900/40 text-blue-400 border-blue-800",
-  info: "bg-gray-800 text-gray-400 border-gray-700",
-  error: "bg-red-900/40 text-red-400 border-red-800",
-  warning: "bg-yellow-900/40 text-yellow-400 border-yellow-800",
+  critical: "bg-red-500/20 text-red-400 border-red-500/30",
+  high: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  medium: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  low: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  info: "bg-muted text-muted-foreground border-border",
+  informational: "bg-muted text-muted-foreground border-border",
+  error: "bg-red-500/20 text-red-400 border-red-500/30",
+  warning: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
   const s = severity.toLowerCase();
   return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-medium ${SEVERITY_COLORS[s] || SEVERITY_COLORS.info}`}>
-      {severity}
-    </span>
+    <Badge className={`text-xs border ${SEVERITY_COLORS[s] || SEVERITY_COLORS.info}`}>
+      {severity.toUpperCase()}
+    </Badge>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <h4 className="text-sm font-semibold text-white border-b border-gray-800 pb-2">{title}</h4>
-      {children}
-    </div>
-  );
+const statusIcon = (status: string) => {
+  if (status === 'fail') return <XCircle className="w-4 h-4 text-red-400" />;
+  if (status === 'pass') return <CheckCircle className="w-4 h-4 text-green-400" />;
+  return <Info className="w-4 h-4 text-muted-foreground" />;
+};
+
+interface UnifiedFinding {
+  tool: string;
+  severity: string;
+  name: string;
+  description: string;
+  location: string;
+  status: string;
+  recommendation?: string;
+  evidence?: any;
+}
+
+function normalizeFindings(result: ScanResult): { tools: { name: string; icon: string; findings: UnifiedFinding[] }[] } {
+  const tools: { name: string; icon: string; findings: UnifiedFinding[] }[] = [];
+
+  // Semgrep (SAST)
+  const semgrepFindings = result.sast_results?.semgrep?.findings || [];
+  if (semgrepFindings.length > 0 || result.sast_results) {
+    tools.push({
+      name: 'Semgrep (SAST)',
+      icon: '🔍',
+      findings: semgrepFindings.map((f: SemgrepFinding) => ({
+        tool: 'Semgrep',
+        severity: f.extra.severity || 'info',
+        name: f.check_id.split('.').slice(-1)[0],
+        description: f.extra.message,
+        location: `${f.path}:${f.start.line}`,
+        status: 'fail',
+      })),
+    });
+  }
+
+  // Nuclei (DAST)
+  const nucleiFindings = result.dast_results?.nuclei?.findings || [];
+  if (nucleiFindings.length > 0 || result.dast_results?.nuclei) {
+    tools.push({
+      name: 'Nuclei (DAST)',
+      icon: '🔬',
+      findings: nucleiFindings.map((f: NucleiFinding) => ({
+        tool: 'Nuclei',
+        severity: f.info.severity || 'info',
+        name: f.info.name,
+        description: f.info.description || '',
+        location: f.matched_at,
+        status: 'fail',
+      })),
+    });
+  }
+
+  // ZAP (DAST)
+  const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
+  if (zapAlerts.length > 0 || result.dast_results?.zap) {
+    tools.push({
+      name: 'ZAP (DAST)',
+      icon: '⚡',
+      findings: zapAlerts.map((a: any) => {
+        const risk = (a.riskdesc || '').split(' ')[0]?.toLowerCase() || 'info';
+        return {
+          tool: 'ZAP',
+          severity: risk,
+          name: a.alert || 'Unknown',
+          description: a.desc || '',
+          location: a.url || '',
+          status: risk === 'informational' ? 'info' : 'fail',
+          recommendation: a.solution || undefined,
+          evidence: a.reference ? { reference: a.reference } : undefined,
+        };
+      }),
+    });
+  }
+
+  // Nikto (DAST)
+  if (result.dast_results?.nikto) {
+    const niktoData = result.dast_results.nikto;
+    const vulns = niktoData.vulnerabilities || [];
+    tools.push({
+      name: 'Nikto (DAST)',
+      icon: '🛡️',
+      findings: vulns.length > 0 ? vulns.map((v: any, i: number) => ({
+        tool: 'Nikto',
+        severity: v.severity || 'medium',
+        name: v.id || `Finding ${i + 1}`,
+        description: v.msg || v.message || JSON.stringify(v),
+        location: v.url || result.target,
+        status: 'fail',
+      })) : niktoData.raw ? [{
+        tool: 'Nikto',
+        severity: 'info',
+        name: 'Raw Nikto Output',
+        description: typeof niktoData.raw === 'string' ? niktoData.raw.slice(0, 500) : JSON.stringify(niktoData.raw).slice(0, 500),
+        location: result.target,
+        status: 'info',
+      }] : [],
+    });
+  }
+
+  return { tools };
+}
+
+function getTestStatus(findings: UnifiedFinding[]) {
+  const fails = findings.filter(f => f.status === 'fail');
+  if (fails.some(f => f.severity === 'critical')) return 'critical';
+  if (fails.some(f => f.severity === 'high')) return 'high';
+  if (fails.some(f => f.severity === 'medium')) return 'warning';
+  if (findings.length === 0) return 'clean';
+  return fails.length > 0 ? 'warning' : 'clean';
 }
 
 export default function ScanResults({ result }: { result: ScanResult }) {
-  const nucleiFindings = result.dast_results?.nuclei?.findings || [];
-  const semgrepFindings = result.sast_results?.semgrep?.findings || [];
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
-  const durationStr = (start?: string, end?: string) => {
-    if (!start || !end) return null;
-    const secs = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000);
-    return secs > 60 ? `${Math.round(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  const toggleTool = (name: string) => {
+    setExpandedTools(prev => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
   };
 
+  const { tools } = normalizeFindings(result);
+
   return (
-    <div className="bg-gray-900/80 border border-gray-800 rounded-xl overflow-hidden">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="p-5 border-b border-gray-800">
+      <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-white">Scan Results</h3>
-            <p className="text-xs text-gray-500 font-mono mt-0.5">{result.scan_id}</p>
+            <h3 className="text-sm font-semibold text-foreground font-mono">Scan Report</h3>
+            <p className="text-xs text-muted-foreground font-mono mt-0.5">{result.scan_id}</p>
           </div>
           <StatusBadge status={result.status} />
         </div>
@@ -57,142 +169,145 @@ export default function ScanResults({ result }: { result: ScanResult }) {
             { label: "Type", value: result.type.toUpperCase() },
             { label: "Target", value: result.target.replace("https://", "") },
             { label: "Started", value: new Date(result.created_at).toLocaleTimeString() },
-            { label: "SAST", value: result.sast_status ?? "N/A" },
-          ].map((item) => (
+            { label: "Status", value: result.status.toUpperCase() },
+          ].map(item => (
             <div key={item.label} className="text-center">
-              <p className="text-xs text-gray-500">{item.label}</p>
-              <p className="text-sm text-white font-medium">{item.value}</p>
+              <p className="text-xs text-muted-foreground font-mono">{item.label}</p>
+              <p className="text-sm text-foreground font-medium font-mono">{item.value}</p>
             </div>
           ))}
         </div>
 
-        {/* Progress */}
+        {/* Progress bars for running scans */}
         {result.status === "running" && (
           <div className="mt-4 space-y-2">
             {result.sast_status && (
               <div className="flex items-center gap-2 text-xs">
-                <span className="text-gray-400 w-10">SAST</span>
-                <div className="flex-1 bg-gray-800 rounded-full h-1.5">
+                <span className="text-muted-foreground w-10 font-mono">SAST</span>
+                <div className="flex-1 bg-muted rounded-full h-1.5">
                   <div className={`h-full rounded-full transition-all ${result.sast_status === "done" ? "bg-green-500 w-full" : "bg-yellow-500 w-1/2 animate-pulse"}`} />
                 </div>
-                <span className="text-gray-500">{result.sast_status}</span>
+                <span className="text-muted-foreground font-mono">{result.sast_status}</span>
               </div>
             )}
             {result.dast_status && (
               <div className="flex items-center gap-2 text-xs">
-                <span className="text-gray-400 w-10">DAST</span>
-                <div className="flex-1 bg-gray-800 rounded-full h-1.5">
+                <span className="text-muted-foreground w-10 font-mono">DAST</span>
+                <div className="flex-1 bg-muted rounded-full h-1.5">
                   <div className={`h-full rounded-full transition-all ${result.dast_status === "done" ? "bg-green-500 w-full" : "bg-yellow-500 w-1/3 animate-pulse"}`} />
                 </div>
-                <span className="text-gray-500">{result.dast_status}</span>
+                <span className="text-muted-foreground font-mono">{result.dast_status}</span>
               </div>
             )}
           </div>
         )}
       </div>
 
-      <div className="p-5 space-y-6">
-        {/* Summary cards */}
-        {result.status === "done" && (
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              {
-                label: "Semgrep Findings",
-                count: result.sast_results?.semgrep?.findings_count ?? 0,
-                color: "text-yellow-400",
-                show: !!result.sast_results,
-              },
-              {
-                label: "Nuclei Findings",
-                count: result.dast_results?.nuclei?.findings_count ?? 0,
-                color: "text-orange-400",
-                show: !!result.dast_results?.nuclei,
-              },
-              {
-                label: "ZAP Alerts",
-                count: result.dast_results?.zap?.site?.[0]?.alerts?.length ?? 0,
-                color: "text-red-400",
-                show: !!result.dast_results?.zap,
-              },
-            ]
-              .filter((c) => c.show)
-              .map((card) => (
-                <div key={card.label} className="bg-gray-800/50 rounded-lg p-3 text-center border border-gray-700/50">
-                  <p className={`text-2xl font-bold ${card.color}`}>{card.count}</p>
-                  <p className="text-xs text-gray-400 mt-1">{card.label}</p>
-                </div>
-              ))}
+      {/* Charts (only when done) */}
+      {result.status === "done" && <ScanReportCharts result={result} />}
+
+      {/* Findings Table */}
+      {result.status === "done" && tools.length > 0 && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground font-mono">Detailed Findings</h3>
           </div>
-        )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead className="font-mono">Scanner / Finding</TableHead>
+                <TableHead className="text-center font-mono">Findings</TableHead>
+                <TableHead className="text-center font-mono">Critical</TableHead>
+                <TableHead className="text-center font-mono">High</TableHead>
+                <TableHead className="text-center font-mono">Medium</TableHead>
+                <TableHead className="text-center font-mono">Low</TableHead>
+                <TableHead className="text-center font-mono">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tools.map(tool => {
+                const isExpanded = expandedTools.has(tool.name);
+                const testStatus = getTestStatus(tool.findings);
+                const fails = tool.findings.filter(f => f.status === 'fail');
 
-        {/* Nuclei Results */}
-        {nucleiFindings.length > 0 && (
-          <Section title="🔬 Nuclei Findings">
-            <div className="space-y-2">
-              {nucleiFindings.map((f: NucleiFinding, i) => (
-                <div key={i} className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
-                  <div className="flex items-center gap-2 mb-1">
-                    <SeverityBadge severity={f.info.severity} />
-                    <span className="text-sm text-white font-medium">{f.info.name}</span>
-                  </div>
-                  {f.info.description && (
-                    <p className="text-xs text-gray-400 mb-1">{f.info.description}</p>
-                  )}
-                  <p className="text-xs text-gray-500 font-mono">{f.matched_at}</p>
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
+                return (
+                  <React.Fragment key={tool.name}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-muted/30"
+                      onClick={() => toggleTool(tool.name)}
+                    >
+                      <TableCell>
+                        {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span>{tool.icon}</span>
+                          <div>
+                            <div className="font-medium text-sm">{tool.name}</div>
+                            <div className="text-xs text-muted-foreground">{tool.findings.length} finding(s)</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center font-mono">{tool.findings.length || '—'}</TableCell>
+                      <TableCell className="text-center font-mono text-red-400">{fails.filter(f => f.severity === 'critical').length || '—'}</TableCell>
+                      <TableCell className="text-center font-mono text-orange-400">{fails.filter(f => f.severity === 'high').length || '—'}</TableCell>
+                      <TableCell className="text-center font-mono text-yellow-400">{fails.filter(f => f.severity === 'medium').length || '—'}</TableCell>
+                      <TableCell className="text-center font-mono text-blue-400">{fails.filter(f => f.severity === 'low').length || '—'}</TableCell>
+                      <TableCell className="text-center">
+                        {testStatus === 'critical' && <Badge variant="destructive" className="text-xs">🔴 Critical</Badge>}
+                        {testStatus === 'high' && <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-xs">🟠 High</Badge>}
+                        {testStatus === 'warning' && <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs">⚠ Issues</Badge>}
+                        {testStatus === 'clean' && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">✓ Clean</Badge>}
+                      </TableCell>
+                    </TableRow>
 
-        {/* Semgrep Results */}
-        {semgrepFindings.length > 0 && (
-          <Section title="🔍 Semgrep Findings">
-            <div className="space-y-2">
-              {semgrepFindings.map((f: SemgrepFinding, i) => (
-                <div key={i} className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
-                  <div className="flex items-center gap-2 mb-1">
-                    <SeverityBadge severity={f.extra.severity} />
-                    <span className="text-sm text-white font-medium">{f.check_id.split(".").slice(-1)[0]}</span>
-                  </div>
-                  <p className="text-xs text-gray-400 mb-1">{f.extra.message}</p>
-                  <p className="text-xs text-gray-500 font-mono">
-                    {f.path}:{f.start.line}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
+                    {isExpanded && tool.findings.map((f, fi) => (
+                      <TableRow key={`${tool.name}-${fi}`} className="bg-muted/10">
+                        <TableCell />
+                        <TableCell colSpan={7}>
+                          <div className="py-2 space-y-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {statusIcon(f.status)}
+                              <SeverityBadge severity={f.severity} />
+                              <span className="text-sm font-medium">{f.name}</span>
+                            </div>
+                            {f.description && (
+                              <p className="text-sm text-muted-foreground">{f.description.slice(0, 300)}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground font-mono">{f.location}</p>
+                            {f.recommendation && (
+                              <div className="text-sm bg-neon-cyan/5 border border-neon-cyan/10 rounded p-2">
+                                <Shield className="w-3 h-3 inline mr-1 text-neon-cyan" />
+                                <strong className="text-neon-cyan">Fix:</strong> {f.recommendation}
+                              </div>
+                            )}
+                            {f.evidence && (
+                              <details className="text-xs">
+                                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Evidence</summary>
+                                <pre className="mt-1 p-2 rounded bg-muted/30 overflow-auto text-xs">{JSON.stringify(f.evidence, null, 2)}</pre>
+                              </details>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
-        {/* Nikto Results */}
-        {result.dast_results?.nikto && (
-          <Section title="🛡️ Nikto Results">
-            <pre className="text-xs text-gray-300 bg-gray-800/50 rounded-lg p-3 border border-gray-700/50 overflow-x-auto whitespace-pre-wrap max-h-64">
-              {result.dast_results.nikto.raw ||
-                JSON.stringify(result.dast_results.nikto, null, 2)}
-            </pre>
-          </Section>
-        )}
-
-        {/* ZAP Results */}
-        {result.dast_results?.zap && (
-          <Section title="⚡ ZAP Results">
-            <pre className="text-xs text-gray-300 bg-gray-800/50 rounded-lg p-3 border border-gray-700/50 overflow-x-auto whitespace-pre-wrap max-h-64">
-              {JSON.stringify(result.dast_results.zap, null, 2).slice(0, 3000)}
-            </pre>
-          </Section>
-        )}
-
-        {/* No results yet */}
-        {result.status === "running" && (
-          <div className="text-center py-8">
-            <Loader2 className="w-8 h-8 animate-spin text-green-500 mx-auto mb-3" />
-            <p className="text-sm text-white font-medium">Scan in progress...</p>
-            <p className="text-xs text-gray-500 mt-1">This can take 5–15 minutes</p>
-          </div>
-        )}
-      </div>
+      {/* Running state */}
+      {result.status === "running" && (
+        <div className="text-center py-8">
+          <Loader2 className="w-8 h-8 animate-spin text-green-500 mx-auto mb-3" />
+          <p className="text-sm text-foreground font-medium font-mono">Scan in progress...</p>
+          <p className="text-xs text-muted-foreground mt-1">This can take 5–15 minutes</p>
+        </div>
+      )}
     </div>
   );
 }
