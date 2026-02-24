@@ -1,119 +1,71 @@
-## Redesign Landing Page with Video Hero, Light/Dark Mode, and Professional Look
 
-### Overview
 
-Completely redesign the landing page to feature a cinematic video hero section, add a global light/dark mode toggle, and brighten the overall aesthetic for a more professional appearance. The feature cards grid (Reduce Attack Surface, Uncover Security Gaps, etc.) shown in the screenshot will be removed from the hero.
+## Fix PDF Report Layout and Keep Header/Footer Dark in Light Mode
+
+### Problems Identified
+
+**PDF Report Issues:**
+1. **Scanner Breakdown table is cut off on Page 1** -- Only 2.5 rows visible (Nikto, Nuclei, partial Semgrep). The SERVER INFORMATION section overlaps the bottom of the breakdown table because the Y coordinate continues downward without checking if the breakdown finished rendering.
+2. **HTML tags in descriptions** -- ZAP descriptions contain raw HTML like `<p>Content Security Policy...` and `</p>`. These need to be stripped before rendering in the PDF.
+3. **"INFORMATIONAL" severity label truncated** -- The severity badge is 55px wide, but "INFORMATIONAL" text overflows, showing as "INFORMATIONA". Need to abbreviate to "INFO" for display.
+4. **Wasted space on detailed findings pages** -- Pages 3-6 only show 6 findings per page with large card heights (90px each), leaving massive blank areas on many pages. Should fit more findings per page.
+
+**Landing Page Issue:**
+5. **Header and Footer turn light in light mode** -- The Navbar and Footer use CSS variables (`--landing-nav-bg`, `--landing-card`) that change to white in light mode. User wants them to always stay dark regardless of theme.
 
 ### Changes
 
-**1. Upload video to file storage**
+**1. `supabase/functions/generate-scan-report/index.ts` -- Fix PDF layout**
 
-- Copy `user-uploads://herosection.mp4` to `public/herosection.mp4` for direct use as a background video in the hero section
-- Also upload it to the `media` storage bucket for CDN delivery
+- **Strip HTML tags**: Update the `s()` sanitizer function to also strip HTML tags (`<p>`, `</p>`, `<br>`, etc.) from text before rendering.
+- **Fix severity label**: Map "INFORMATIONAL" to "INFO" in the severity badge text to prevent truncation.
+- **Increase findings per page**: Change `findingsPerPage` from 6 to 8 and reduce card height from 90px to 70px to better utilize page space.
+- **Fix Scanner Breakdown overlap**: The table and server info render correctly based on the Y tracking, but the issue is the alternating row background rectangles. Ensure proper spacing so the last scanner row doesn't get clipped.
 
-**2. Add light mode CSS variables (`src/index.css`)**
+**2. `src/components/landing/Navbar.tsx` -- Always dark header**
 
-- Add a `.light` class (or `:root` without `.dark`) with light-mode equivalents for all CSS variables (white backgrounds, dark text, lighter card colors, etc.)
-- Remove the `html { color-scheme: dark; }` forced override
-- Keep the existing dark variables under `.dark` class
+- Replace `bg-[hsl(var(--landing-nav-bg))]` with hardcoded dark background: `bg-gray-950` (or the dark navy `bg-[#0d1117]`).
+- Replace text color variables with fixed light text colors for nav items.
+- Keep the theme toggle functional but make the header itself always dark.
 
-**3. Create a ThemeProvider + toggle component**
+**3. `src/components/landing/Footer.tsx` -- Always dark footer**
 
-- `next-themes` is already installed. Wrap the app with `ThemeProvider` in `src/main.tsx` or `src/App.tsx`
-- Create `src/components/ThemeToggle.tsx` -- a Sun/Moon icon button that toggles between light and dark mode
-
-**4. Redesign `src/components/landing/HeroSection.tsx**`
-
-- Remove the 2x2 feature cards grid entirely (the section shown in the screenshot)
-- Replace with a full-width video background hero:
-  - `<video autoPlay muted loop playsInline>` with `herosection.mp4` as source
-  - Dark overlay gradient on top for text readability
-  - Centered headline text, subtitle, and CTA buttons
-  - The video fills the entire hero viewport height
-- Keep the existing headline copy and CTA buttons, just centered over the video
-
-**5. Update `src/components/landing/Navbar.tsx**`
-
-- Add the `ThemeToggle` button to the navbar (both desktop and mobile views)
-- Update hardcoded `bg-gray-950` to use theme-aware classes (`bg-white dark:bg-gray-950`)
-- Update text colors to be theme-aware (`text-gray-700 dark:text-gray-300`)
-
-**6. Update `src/pages/Landing.tsx**`
-
-- Replace hardcoded dark backgrounds (`bg-[#0a0a0f]`) with theme-aware classes (`bg-white dark:bg-[#0a0a0f]`)
-- Update the Stats Trust Bar section with theme-aware styling
-- Update text colors throughout
-
-**7. Update `src/components/landing/AboutSection.tsx**`
-
-- Replace hardcoded dark backgrounds with theme-aware classes
-- Update card borders, text colors, and backgrounds for light mode
-
-**8. Update `src/components/landing/Footer.tsx**`
-
-- Make footer theme-aware (light background in light mode, dark in dark mode)
-- Update text and border colors
-
-**9. Update `src/components/landing/CookieConsent.tsx**`
-
-- Already light-themed; add dark mode variant styling
-
-**10. Update `src/pages/Contact.tsx` and `src/pages/Portfolio.tsx**`
-
-- Make these pages theme-aware as well, since they share the same Navbar/Footer
-
-**11. Wrap app with ThemeProvider (`src/App.tsx`)**
-
-- Wrap the entire app with `<ThemeProvider attribute="class" defaultTheme="dark">`
-- This enables the `dark:` prefix in Tailwind to work
+- Replace `bg-[hsl(var(--landing-card))]` with hardcoded dark background.
+- Replace text/border color variables with fixed dark-theme colors.
+- Ensure all text remains light-colored regardless of theme.
 
 ### Technical Details
 
 ```text
-Theme setup:
-- next-themes ThemeProvider with attribute="class"
-- Default theme: "dark" (preserves current look on first visit)
-- Tailwind already configured with darkMode: ["class"]
-- Light mode: white/gray backgrounds, dark text
-- Dark mode: existing SOC dark theme preserved exactly
+PDF text sanitizer update:
+  function s(text, maxLen):
+    - Strip HTML tags: .replace(/<[^>]*>/g, '')
+    - Then existing sanitization
 
-Video hero:
-- <video> tag with autoPlay, muted, loop, playsInline
-- object-fit: cover, absolute positioned behind content
-- Semi-transparent overlay gradient for text contrast
-- Responsive: video covers full section on all screen sizes
+Severity label fix:
+  - In detailed findings, map severity for badge display:
+    "INFORMATIONAL" -> "INFO"
 
-Theme toggle:
-- Sun icon in dark mode, Moon icon in light mode
-- Placed in navbar next to the CTA button
-- Smooth transition between modes
+Findings per page:
+  - findingsPerPage: 6 -> 8
+  - Card height: 90px -> 70px
+  - Description truncation stays at 90 chars
 
-Light mode color scheme:
-- Background: white (#ffffff)
-- Cards: #f8f9fa with subtle borders
-- Text: gray-900 for headings, gray-600 for body
-- Accent: #FF4D2E (unchanged)
-- Navbar: white with subtle bottom border
+Navbar always-dark:
+  - bg-gray-950 (fixed, not theme-variable)
+  - Text: text-gray-400 hover:text-white
+  - Border: border-gray-800
+  - Mobile menu: same dark treatment
+
+Footer always-dark:
+  - bg-gray-950 text-gray-400
+  - Headings: text-white
+  - Border: border-gray-800
+  - Links: hover:text-white
 ```
 
 ### Files Modified
+- `supabase/functions/generate-scan-report/index.ts` -- Strip HTML tags, fix severity labels, increase density
+- `src/components/landing/Navbar.tsx` -- Hardcode dark background/text colors
+- `src/components/landing/Footer.tsx` -- Hardcode dark background/text colors
 
-- `public/herosection.mp4` -- video asset copied from upload
-- `src/index.css` -- add light mode CSS variables
-- `src/App.tsx` -- wrap with ThemeProvider
-- `src/components/ThemeToggle.tsx` -- new theme toggle component
-- `src/components/landing/HeroSection.tsx` -- redesigned with video background, cards removed
-- `src/components/landing/Navbar.tsx` -- theme-aware + toggle button
-- `src/components/landing/AboutSection.tsx` -- theme-aware styling
-- `src/components/landing/Footer.tsx` -- theme-aware styling
-- `src/components/landing/CookieConsent.tsx` -- dark mode variant
-- `src/pages/Landing.tsx` -- theme-aware wrapper
-- `src/pages/Contact.tsx` -- theme-aware styling
-- `src/pages/Portfolio.tsx` -- theme-aware styling
-
-### Notes
-
-- The dashboard (behind login) keeps its SOC dark theme unchanged -- light/dark mode only affects landing pages
-- The `#FF4D2E` brand accent color stays consistent across both modes
-- Default theme is dark to match the current experience; users can switch to light  
-Please make sure the vidoe is loop play
