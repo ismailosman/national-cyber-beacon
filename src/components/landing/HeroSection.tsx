@@ -11,6 +11,7 @@ const HeroSection: React.FC = () => (
       playsInline
       className="absolute inset-0 w-full h-full object-cover"
     >
+      <source src="https://www.shutterstock.com/shutterstock/videos/3814669891/preview/stock-footage-fast-code-and-screen-with-software-cybersecurity-or-it-for-overload-or-digital-glitch-tech.webm" type="video/webm" />
       <source src="/herosection.mp4" type="video/mp4" />
     </video>
 
