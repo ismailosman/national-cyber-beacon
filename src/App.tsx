@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
 import Landing from "@/pages/Landing";
+import TurnstileGate from "@/pages/TurnstileGate";
 import Contact from "@/pages/Contact";
 import Portfolio from "@/pages/Portfolio";
 import Privacy from "@/pages/Privacy";
@@ -89,12 +90,12 @@ const App = () => (
           <AuthProvider>
             <Routes>
               <Route path="/mol" element={<Login />} />
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<TurnstileGate><Landing /></TurnstileGate>} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
-              <Route path="/cyber-map" element={<CyberMap />} />
+              <Route path="/cyber-map" element={<TurnstileGate sessionKey="turnstile_cybermap"><CyberMap /></TurnstileGate>} />
               
               <Route path="/dashboard" element={<ProtectedRoutes />} />
               <Route path="/*" element={<ProtectedRoutes />} />
