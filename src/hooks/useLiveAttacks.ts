@@ -133,7 +133,6 @@ const WEIGHTED_SOURCES: { country: string; state: string; lat: number; lng: numb
 
 // Regional target locations (Somalia weighted ~50%)
 const REGION_TARGETS = [
-  // Somalia (duplicated for ~50% weight)
   { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
   { lat: 2.039, lng: 45.358, country: 'Somalia', state: 'Mogadishu' },
@@ -144,28 +143,64 @@ const REGION_TARGETS = [
   { lat: 9.558, lng: 44.070, country: 'Somalia', state: 'Ahmed Dhagah' },
   { lat: 9.565, lng: 44.058, country: 'Somalia', state: "Ga'an Libah" },
   { lat: 9.553, lng: 44.075, country: 'Somalia', state: 'Mohamed Mooge' },
-  // Duplicate Somalia for weighting
   { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
-  // Djibouti
   { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
-  // Kenya
   { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
   { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
-  // Ethiopia
   { lat: 9.025, lng: 38.747, country: 'Ethiopia', state: 'Addis Ababa' },
   { lat: 9.601, lng: 41.850, country: 'Ethiopia', state: 'Dire Dawa' },
-  // Tanzania
   { lat: -6.792, lng: 39.208, country: 'Tanzania', state: 'Dar es Salaam' },
   { lat: -6.163, lng: 35.752, country: 'Tanzania', state: 'Dodoma' },
-  // South Sudan
   { lat: 4.859, lng: 31.571, country: 'South Sudan', state: 'Juba' },
-  // Sudan
   { lat: 15.500, lng: 32.560, country: 'Sudan', state: 'Khartoum' },
-  // Uganda
   { lat: 0.347, lng: 32.582, country: 'Uganda', state: 'Kampala' },
-  // Rwanda
   { lat: -1.940, lng: 29.874, country: 'Rwanda', state: 'Kigali' },
+];
+
+// ── USA corridor targets ─────────────────────────────────────────────────────
+const USA_TARGETS = [
+  { lat: 38.90, lng: -77.04, country: 'USA', state: 'Washington DC' },
+  { lat: 40.71, lng: -74.00, country: 'USA', state: 'New York' },
+  { lat: 34.05, lng: -118.24, country: 'USA', state: 'Los Angeles' },
+  { lat: 41.88, lng: -87.63, country: 'USA', state: 'Chicago' },
+  { lat: 29.76, lng: -95.37, country: 'USA', state: 'Houston' },
+  { lat: 33.75, lng: -84.39, country: 'USA', state: 'Atlanta' },
+  { lat: 47.61, lng: -122.33, country: 'USA', state: 'Seattle' },
+  { lat: 25.76, lng: -80.19, country: 'USA', state: 'Miami' },
+];
+
+// ── USA corridor sources (state-level threat actors) ─────────────────────────
+const USA_THREAT_SOURCES = [
+  ...Array(4).fill({ country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 }),
+  ...Array(3).fill({ country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 }),
+  ...Array(2).fill({ country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 }),
+  ...Array(4).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+];
+
+// ── EU corridor targets ──────────────────────────────────────────────────────
+const EU_TARGETS = [
+  { lat: 51.51, lng: -0.13, country: 'UK', state: 'London' },
+  { lat: 48.86, lng: 2.35, country: 'France', state: 'Paris' },
+  { lat: 52.52, lng: 13.41, country: 'Germany', state: 'Berlin' },
+  { lat: 52.37, lng: 4.90, country: 'Netherlands', state: 'Amsterdam' },
+  { lat: 50.85, lng: 4.35, country: 'Belgium', state: 'Brussels' },
+  { lat: 40.42, lng: -3.70, country: 'Spain', state: 'Madrid' },
+  { lat: 41.90, lng: 12.50, country: 'Italy', state: 'Rome' },
+  { lat: 59.33, lng: 18.07, country: 'Sweden', state: 'Stockholm' },
+];
+
+// ── EU corridor sources (South America + Asia) ──────────────────────────────
+const EU_THREAT_SOURCES = [
+  ...Array(2).fill({ country: 'Brazil', state: 'São Paulo', lat: -14.23, lng: -51.92 }),
+  { country: 'Argentina', state: 'Buenos Aires', lat: -34.60, lng: -58.38 },
+  { country: 'Colombia', state: 'Bogota', lat: 4.71, lng: -74.07 },
+  { country: 'Venezuela', state: 'Caracas', lat: 10.48, lng: -66.90 },
+  ...Array(3).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+  ...Array(2).fill({ country: 'India', state: 'Mumbai', lat: 20.59, lng: 78.96 }),
+  { country: 'Vietnam', state: 'Hanoi', lat: 14.05, lng: 108.27 },
+  { country: 'Indonesia', state: 'Jakarta', lat: -0.78, lng: 113.92 },
+  { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
 ];
 
 const ATTACK_TYPES: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
@@ -203,8 +238,21 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 // Generate the Nth threat of the day deterministically (seeded PRNG per index)
 function generateDayThreat(index: number): LiveThreat {
   const rand = createSeededRand(DAY_SEED + index * 7919);
-  const source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
-  const target = REGION_TARGETS[Math.floor(rand() * REGION_TARGETS.length)];
+
+  // Pick corridor: 50% East Africa, 25% USA, 25% EU
+  const corridorRoll = rand();
+  let source, target;
+  if (corridorRoll < 0.50) {
+    source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
+    target = REGION_TARGETS[Math.floor(rand() * REGION_TARGETS.length)];
+  } else if (corridorRoll < 0.75) {
+    source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
+    target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
+  } else {
+    source = EU_THREAT_SOURCES[Math.floor(rand() * EU_THREAT_SOURCES.length)];
+    target = EU_TARGETS[Math.floor(rand() * EU_TARGETS.length)];
+  }
+
   const attack_type = ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)];
   const signatures = ATTACK_SIGNATURES[attack_type];
   const name = signatures[Math.floor(rand() * signatures.length)];
