@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { ScanResult, NucleiFinding, SemgrepFinding } from "@/types/security";
 import StatusBadge from "./StatusBadge";
 import ScanReportCharts from "./ScanReportCharts";
-import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { toast } from "sonner";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -141,6 +143,7 @@ function getTestStatus(findings: UnifiedFinding[]) {
 
 export default function ScanResults({ result }: { result: ScanResult }) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   const toggleTool = (name: string) => {
     setExpandedTools(prev => {
@@ -149,6 +152,35 @@ export default function ScanResults({ result }: { result: ScanResult }) {
       return next;
     });
   };
+
+  async function handleExportPDF() {
+    setExporting(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/generate-scan-report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+        },
+        body: JSON.stringify({ result }),
+      });
+      if (!res.ok) throw new Error('Failed to generate PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `scan-report-${result.scan_id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('PDF report downloaded');
+    } catch (err: any) {
+      toast.error(err.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const { tools } = normalizeFindings(result);
 
@@ -161,7 +193,21 @@ export default function ScanResults({ result }: { result: ScanResult }) {
             <h3 className="text-sm font-semibold text-foreground font-mono">Scan Report</h3>
             <p className="text-xs text-muted-foreground font-mono mt-0.5">{result.scan_id}</p>
           </div>
-          <StatusBadge status={result.status} />
+          <div className="flex items-center gap-2">
+            {result.status === "done" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportPDF}
+                disabled={exporting}
+                className="gap-1.5"
+              >
+                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                Export PDF
+              </Button>
+            )}
+            <StatusBadge status={result.status} />
+          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-3">
