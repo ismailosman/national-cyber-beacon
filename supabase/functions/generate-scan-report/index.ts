@@ -15,7 +15,6 @@ function s(text: string | null | undefined, maxLen = 90): string {
 function getRemediation(finding: { tool: string; severity: string; name: string; description: string }): string {
   const key = (finding.name + ' ' + finding.description).toLowerCase();
 
-  // Specific pattern matches
   if (key.includes('xss') || key.includes('cross-site scripting')) return 'Sanitize all user inputs; implement Content-Security-Policy header';
   if (key.includes('sql') && key.includes('inject')) return 'Use parameterized queries; never concatenate user input into SQL';
   if (key.includes('csrf') || key.includes('cross-site request')) return 'Implement anti-CSRF tokens on all state-changing forms';
@@ -43,22 +42,36 @@ function getRemediation(finding: { tool: string; severity: string; name: string;
   if (key.includes('port') && key.includes('open')) return 'Close unnecessary ports; restrict access via firewall rules';
   if (key.includes('dns') && (key.includes('zone') || key.includes('transfer'))) return 'Disable DNS zone transfers; restrict to authorized nameservers';
   if (key.includes('spf') || key.includes('dmarc') || key.includes('dkim')) return 'Configure SPF, DKIM, and DMARC records for email authentication';
+  if (key.includes('ip address') || key.includes('private ip')) return 'Remove IP addresses from headers and cookies; use domain names instead';
+  if (key.includes('content-type') || key.includes('mime')) return 'Set X-Content-Type-Options: nosniff on all responses';
+  if (key.includes('breach') || key.includes('compression')) return 'Disable HTTP compression on pages with sensitive data or CSRF tokens';
+  if (key.includes('robots')) return 'Review robots.txt entries; ensure no sensitive paths are exposed';
 
-  // Generic fallbacks by severity
   if (finding.severity === 'CRITICAL') return 'Investigate and patch immediately; this poses an active exploitation risk';
   if (finding.severity === 'HIGH') return 'Schedule remediation within 48 hours; review related attack surfaces';
   if (finding.severity === 'MEDIUM') return 'Plan remediation within 2 weeks; monitor for exploitation attempts';
   return 'Review and address in next maintenance cycle';
 }
 
+/* ─── Resolve results: API returns vuln_results, frontend sends dast_results ─── */
+function resolveResults(result: any) {
+  return {
+    nuclei: result.dast_results?.nuclei || result.vuln_results?.nuclei || { findings: [], findings_count: 0 },
+    nikto: result.dast_results?.nikto || result.vuln_results?.nikto || null,
+    zap: result.dast_results?.zap || result.vuln_results?.zap || null,
+    sqlmap: result.vuln_results?.sqlmap || null,
+    semgrep: result.sast_results?.semgrep || null,
+  };
+}
+
 /* ─── Compute stats from scan result ─── */
 function computeStats(result: any) {
-  const nuclei = result.dast_results?.nuclei?.findings || [];
-  const semgrep = result.sast_results?.semgrep?.findings || [];
-  const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
-  const niktoVulns = result.dast_results?.nikto?.vulnerabilities || [];
+  const resolved = resolveResults(result);
+  const nuclei = resolved.nuclei?.findings || [];
+  const semgrep = resolved.semgrep?.findings || [];
+  const zapAlerts = resolved.zap?.site?.[0]?.alerts || [];
+  const niktoVulns = resolved.nikto?.vulnerabilities || [];
 
-  // Map Semgrep's non-standard severities to standard ones
   const sevAliases: Record<string, string[]> = {
     critical: ['critical'],
     high: ['high', 'error'],
@@ -84,10 +97,10 @@ function computeStats(result: any) {
   const medium = countSev('medium');
   const low = countSev('low');
   const info = countSev('info');
-  const total = critical + high + medium + low + info;
-  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1)));
+  const total = critical + high + medium + low + info + niktoVulns.length;
+  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1 + niktoVulns.length * 2)));
 
-  return { critical, high, medium, low, info, total, score, nuclei, semgrep, zapAlerts, niktoVulns };
+  return { critical, high, medium, low, info, total, score, nuclei, semgrep, zapAlerts, niktoVulns, resolved };
 }
 
 function getGrade(score: number) {
@@ -101,8 +114,8 @@ function getGrade(score: number) {
 /* ─── Build normalized findings with remediation ─── */
 function normalizeFindings(result: any) {
   const findings: { tool: string; severity: string; name: string; description: string; location: string; remediation: string }[] = [];
+  const resolved = resolveResults(result);
 
-  // Normalize Semgrep severities: ERROR→HIGH, WARNING→MEDIUM
   const normalizeSev = (sev: string): string => {
     const upper = sev.toUpperCase();
     if (upper === 'ERROR') return 'HIGH';
@@ -110,7 +123,7 @@ function normalizeFindings(result: any) {
     return upper;
   };
 
-  for (const f of (result.sast_results?.semgrep?.findings || [])) {
+  for (const f of (resolved.semgrep?.findings || [])) {
     const entry = {
       tool: 'Semgrep',
       severity: normalizeSev(f.extra?.severity || 'info'),
@@ -123,7 +136,7 @@ function normalizeFindings(result: any) {
     findings.push(entry);
   }
 
-  for (const f of (result.dast_results?.nuclei?.findings || [])) {
+  for (const f of (resolved.nuclei?.findings || [])) {
     const entry = {
       tool: 'Nuclei',
       severity: (f.info?.severity || 'info').toUpperCase(),
@@ -136,7 +149,7 @@ function normalizeFindings(result: any) {
     findings.push(entry);
   }
 
-  for (const a of (result.dast_results?.zap?.site?.[0]?.alerts || [])) {
+  for (const a of (resolved.zap?.site?.[0]?.alerts || [])) {
     const risk = (a.riskdesc || '').split(' ')[0] || 'Info';
     const entry = {
       tool: 'ZAP',
@@ -150,10 +163,10 @@ function normalizeFindings(result: any) {
     findings.push(entry);
   }
 
-  for (const v of (result.dast_results?.nikto?.vulnerabilities || [])) {
+  for (const v of (resolved.nikto?.vulnerabilities || [])) {
     const entry = {
       tool: 'Nikto',
-      severity: (v.severity || 'MEDIUM').toUpperCase(),
+      severity: 'MEDIUM',
       name: s(v.id || 'Finding'),
       description: s(v.msg || v.message || '', 120),
       location: s(v.url || result.target || '', 40),
@@ -166,6 +179,82 @@ function normalizeFindings(result: any) {
   const order: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4, INFORMATIONAL: 4 };
   findings.sort((a, b) => (order[a.severity] ?? 5) - (order[b.severity] ?? 5));
   return findings;
+}
+
+/* ─── Classify Nikto findings into security categories ─── */
+function classifyNiktoFindings(nikto: any) {
+  const vulns = nikto?.vulnerabilities || [];
+  const checks: { category: string; findings: { msg: string; status: 'fail' | 'pass' | 'info'; severity: string; recommendation: string }[] }[] = [];
+
+  const headerFindings: any[] = [];
+  const cookieFindings: any[] = [];
+  const infoDisclosureFindings: any[] = [];
+  const configFindings: any[] = [];
+
+  for (const v of vulns) {
+    const msg = (v.msg || v.message || '').toLowerCase();
+    if (msg.includes('x-frame') || msg.includes('x-content-type') || msg.includes('strict-transport') || msg.includes('csp') || msg.includes('header')) {
+      headerFindings.push(v);
+    } else if (msg.includes('cookie') || msg.includes('set-cookie')) {
+      cookieFindings.push(v);
+    } else if (msg.includes('ip address') || msg.includes('version') || msg.includes('server') || msg.includes('disclos')) {
+      infoDisclosureFindings.push(v);
+    } else {
+      configFindings.push(v);
+    }
+  }
+
+  if (headerFindings.length > 0 || vulns.length > 0) {
+    checks.push({
+      category: 'Security Headers',
+      findings: headerFindings.length > 0
+        ? headerFindings.map(v => ({
+            msg: s(v.msg || v.message, 85),
+            status: 'fail' as const,
+            severity: 'medium',
+            recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
+          }))
+        : [{ msg: 'All security headers present', status: 'pass' as const, severity: 'info', recommendation: '' }],
+    });
+  }
+
+  if (cookieFindings.length > 0) {
+    checks.push({
+      category: 'Cookie Security',
+      findings: cookieFindings.map(v => ({
+        msg: s(v.msg || v.message, 85),
+        status: 'fail' as const,
+        severity: 'medium',
+        recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
+      })),
+    });
+  }
+
+  if (infoDisclosureFindings.length > 0) {
+    checks.push({
+      category: 'Information Disclosure',
+      findings: infoDisclosureFindings.map(v => ({
+        msg: s(v.msg || v.message, 85),
+        status: 'fail' as const,
+        severity: 'low',
+        recommendation: getRemediation({ tool: 'Nikto', severity: 'LOW', name: v.id || '', description: v.msg || '' }),
+      })),
+    });
+  }
+
+  if (configFindings.length > 0) {
+    checks.push({
+      category: 'Server Configuration',
+      findings: configFindings.map(v => ({
+        msg: s(v.msg || v.message, 85),
+        status: 'fail' as const,
+        severity: 'medium',
+        recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
+      })),
+    });
+  }
+
+  return checks;
 }
 
 /* ─── Logo XObject builder ─── */
@@ -182,16 +271,14 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
   const now = new Date().toISOString().split('T')[0];
   const target = s(result.target || 'Unknown', 60);
   const scanType = (result.type || 'unknown').toUpperCase();
-  const scanDate = new Date(result.created_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const scanDate = result.created_at ? new Date(result.created_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : now;
   const hasLogo = !!logoData;
   const tx = hasLogo ? 82 : 40;
 
   const pages: string[][] = [];
 
-  function addHeader(p: string[], title: string, subtitle: string) {
-    // Navy header bar
+  function addHeader(p: string[], title: string, _subtitle: string) {
     p.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
-    // Red accent line
     p.push(`0.85 0.15 0.1 rg`, `0 788 595 2 re f`);
     if (hasLogo) {
       p.push(`q 36 0 0 36 40 798 cm /Logo Do Q`);
@@ -210,34 +297,31 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
 
   // ── Page 1: Executive Summary ──
   const p1: string[] = [];
-  // White background
   p1.push(`1 1 1 rg`, `0 0 595 842 re f`);
   addHeader(p1, 'Security Scan Report', '');
 
-  // Info section - light gray box
+  // Info section
   p1.push(`0.95 0.96 0.97 rg`, `30 700 535 80 re f`);
-  p1.push(`0.85 0.15 0.1 rg`, `30 700 3 80 re f`); // red left accent
+  p1.push(`0.85 0.15 0.1 rg`, `30 700 3 80 re f`);
   p1.push(`BT /F2 12 Tf 0.08 0.12 0.2 rg 45 758 Td (Target: ${target}) Tj ET`);
   p1.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 45 742 Td (Scan Type: ${scanType} | Scan ID: ${s(result.scan_id, 30)}) Tj ET`);
   p1.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 45 726 Td (Scan Date: ${s(scanDate, 30)} | Generated: ${now}) Tj ET`);
 
-  // Risk level badge in info box
   const riskLabel = stats.score >= 75 ? 'LOW RISK' : stats.score >= 50 ? 'MEDIUM RISK' : 'HIGH RISK';
   const riskColor = stats.score >= 75 ? '0.1 0.6 0.3' : stats.score >= 50 ? '0.8 0.6 0' : '0.8 0.15 0.1';
   p1.push(`BT /F2 10 Tf ${riskColor} rg 45 710 Td (${riskLabel}) Tj ET`);
 
-  // Score box (right side)
+  // Score box
   const scoreColor = stats.score >= 75 ? '0.1 0.6 0.3' : stats.score >= 50 ? '0.8 0.6 0' : '0.8 0.15 0.1';
   p1.push(`${scoreColor} rg`, `460 715 105 65 re f`);
   p1.push(`BT /F2 36 Tf 1 1 1 rg 476 743 Td (${stats.score}) Tj ET`);
   p1.push(`BT /F1 10 Tf 1 1 1 rg 490 728 Td (/ 100) Tj ET`);
   p1.push(`BT /F2 11 Tf 1 1 1 rg 478 715 Td (Grade: ${grade}) Tj ET`);
 
-  // Section title: Vulnerability Summary
+  // Vulnerability Summary
   p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 682 Td (VULNERABILITY SUMMARY) Tj ET`);
   p1.push(`0.85 0.15 0.1 rg`, `40 678 100 2 re f`);
 
-  // Severity summary boxes
   const boxes = [
     { label: 'TOTAL', value: stats.total, bg: '0.93 0.94 0.96', color: '0.08 0.12 0.2' },
     { label: 'CRITICAL', value: stats.critical, bg: '1 0.92 0.92', color: '0.8 0.15 0.1' },
@@ -252,43 +336,70 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
     p1.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg ${bx + 25} 638 Td (${b.label}) Tj ET`);
   });
 
-  // Scanner Breakdown
+  // Scanner Breakdown - always show all scanners
   p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 618 Td (SCANNER BREAKDOWN) Tj ET`);
   p1.push(`0.85 0.15 0.1 rg`, `40 614 100 2 re f`);
 
   const scanners = [
-    { name: 'Semgrep (SAST)', count: stats.semgrep.length },
+    { name: 'Nikto (Web Scanner)', count: stats.niktoVulns.length },
     { name: 'Nuclei (DAST)', count: stats.nuclei.length },
+    { name: 'Semgrep (SAST)', count: stats.semgrep.length },
     { name: 'ZAP (DAST)', count: stats.zapAlerts.length },
-    { name: 'Nikto (DAST)', count: stats.niktoVulns.length },
-  ].filter(sc => sc.count > 0);
+  ];
 
   let sy = 598;
-  // Table header
   p1.push(`0.08 0.12 0.2 rg`, `40 ${sy - 2} 515 18 re f`);
   p1.push(`BT /F2 8 Tf 1 1 1 rg 50 ${sy + 3} Td (SCANNER) Tj ET`);
-  p1.push(`BT /F2 8 Tf 1 1 1 rg 300 ${sy + 3} Td (FINDINGS) Tj ET`);
+  p1.push(`BT /F2 8 Tf 1 1 1 rg 250 ${sy + 3} Td (FINDINGS) Tj ET`);
+  p1.push(`BT /F2 8 Tf 1 1 1 rg 350 ${sy + 3} Td (STATUS) Tj ET`);
   sy -= 18;
 
   for (const sc of scanners) {
-    p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 16 re f`);
+    const isAlt = scanners.indexOf(sc) % 2 === 0;
+    if (isAlt) p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 16 re f`);
     p1.push(`BT /F1 9 Tf 0.2 0.25 0.3 rg 50 ${sy + 2} Td (${sc.name}) Tj ET`);
-    p1.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 300 ${sy + 2} Td (${sc.count}) Tj ET`);
-    // Mini bar
-    const barW = Math.min(sc.count * 6, 180);
-    p1.push(`0.85 0.15 0.1 rg`, `340 ${sy} ${barW} 8 re f`);
+    p1.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 250 ${sy + 2} Td (${sc.count}) Tj ET`);
+    const statusText = sc.count === 0 ? 'Clean' : `${sc.count} issue${sc.count > 1 ? 's' : ''}`;
+    const statusColor = sc.count === 0 ? '0.1 0.6 0.3' : '0.85 0.45 0';
+    p1.push(`BT /F2 8 Tf ${statusColor} rg 350 ${sy + 2} Td (${statusText}) Tj ET`);
+    if (sc.count > 0) {
+      const barW = Math.min(sc.count * 8, 120);
+      p1.push(`0.85 0.15 0.1 rg`, `420 ${sy} ${barW} 8 re f`);
+    }
     sy -= 18;
   }
 
+  // Server Info from Nikto
+  const niktoData = stats.resolved.nikto;
+  if (niktoData) {
+    sy -= 8;
+    p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (SERVER INFORMATION) Tj ET`);
+    p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 120 2 re f`);
+    sy -= 18;
+
+    const serverInfo = [
+      { label: 'Host', value: niktoData.host || result.target || 'N/A' },
+      { label: 'IP Address', value: niktoData.ip || 'N/A' },
+      { label: 'Port', value: niktoData.port || '443' },
+      { label: 'Web Server', value: niktoData.banner || 'Unknown' },
+    ];
+
+    p1.push(`0.95 0.96 0.97 rg`, `40 ${sy - 4} 515 ${serverInfo.length * 16 + 8} re f`);
+    for (const info of serverInfo) {
+      p1.push(`BT /F2 8 Tf 0.4 0.45 0.5 rg 50 ${sy} Td (${info.label}:) Tj ET`);
+      p1.push(`BT /F1 8 Tf 0.15 0.2 0.25 rg 140 ${sy} Td (${s(info.value, 60)}) Tj ET`);
+      sy -= 16;
+    }
+  }
+
   // Top Findings preview
-  const topFindings = findings.slice(0, 10);
+  const topFindings = findings.slice(0, 8);
   if (topFindings.length > 0) {
     sy -= 8;
     p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (TOP FINDINGS) Tj ET`);
     p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 80 2 re f`);
     sy -= 16;
 
-    // Table header
     p1.push(`0.08 0.12 0.2 rg`, `40 ${sy - 2} 515 16 re f`);
     p1.push(`BT /F2 7 Tf 1 1 1 rg 50 ${sy + 2} Td (SEVERITY) Tj ET`);
     p1.push(`BT /F2 7 Tf 1 1 1 rg 115 ${sy + 2} Td (TOOL) Tj ET`);
@@ -314,15 +425,127 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
       sy -= 14;
     }
 
-    if (findings.length > 10) {
-      p1.push(`BT /F1 8 Tf 0.4 0.45 0.5 rg 50 ${sy + 1} Td (... and ${findings.length - 10} more findings - see detailed report) Tj ET`);
+    if (findings.length > 8) {
+      p1.push(`BT /F1 8 Tf 0.4 0.45 0.5 rg 50 ${sy + 1} Td (... and ${findings.length - 8} more findings - see detailed report) Tj ET`);
     }
+  } else {
+    // No findings -- show a clean bill of health
+    sy -= 12;
+    p1.push(`0.9 0.97 0.9 rg`, `40 ${sy - 20} 515 40 re f`);
+    p1.push(`0.1 0.6 0.3 rg`, `40 ${sy - 20} 3 40 re f`);
+    p1.push(`BT /F2 11 Tf 0.1 0.5 0.25 rg 55 ${sy - 2} Td (No Critical Vulnerabilities Found) Tj ET`);
+    p1.push(`BT /F1 8 Tf 0.2 0.4 0.2 rg 55 ${sy - 16} Td (All vulnerability scanners completed without detecting critical or high-severity issues.) Tj ET`);
   }
 
   addFooter(p1, 1);
   pages.push(p1);
 
-  // ── Page 2+: Detailed Findings with Remediation ──
+  // ── Page 2: Infrastructure Assessment ──
+  if (niktoData || findings.length > 0) {
+    const p2: string[] = [];
+    p2.push(`1 1 1 rg`, `0 0 595 842 re f`);
+    addHeader(p2, 'Infrastructure Security Assessment', `${target}`);
+
+    let iy = 770;
+
+    // Nikto categorized findings
+    const categories = classifyNiktoFindings(niktoData);
+
+    if (categories.length > 0) {
+      p2.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${iy} Td (WEB SERVER SECURITY CHECKS) Tj ET`);
+      p2.push(`0.85 0.15 0.1 rg`, `40 ${iy - 4} 170 2 re f`);
+      iy -= 22;
+
+      for (const cat of categories) {
+        if (iy < 120) break;
+
+        // Category header
+        const failCount = cat.findings.filter(f => f.status === 'fail').length;
+        const passCount = cat.findings.filter(f => f.status === 'pass').length;
+        const catColor = failCount > 0 ? '0.85 0.15 0.1' : '0.1 0.6 0.3';
+        const catStatus = failCount > 0 ? `${failCount} Issue${failCount > 1 ? 's' : ''}` : 'Passed';
+
+        p2.push(`0.08 0.12 0.2 rg`, `40 ${iy - 2} 515 18 re f`);
+        p2.push(`BT /F2 9 Tf 1 1 1 rg 50 ${iy + 2} Td (${cat.category}) Tj ET`);
+        p2.push(`BT /F2 8 Tf ${catColor === '0.1 0.6 0.3' ? '0.5 0.9 0.5' : '1 0.7 0.7'} rg 450 ${iy + 2} Td (${catStatus}) Tj ET`);
+        iy -= 20;
+
+        for (const finding of cat.findings) {
+          if (iy < 100) break;
+
+          const icon = finding.status === 'pass' ? 'PASS' : 'FAIL';
+          const iconColor = finding.status === 'pass' ? '0.1 0.6 0.3' : '0.85 0.15 0.1';
+
+          // Status badge
+          const badgeBg = finding.status === 'pass' ? '0.9 0.97 0.9' : '1 0.92 0.92';
+          p2.push(`${badgeBg} rg`, `50 ${iy - 3} 35 14 re f`);
+          p2.push(`BT /F2 7 Tf ${iconColor} rg 53 ${iy} Td (${icon}) Tj ET`);
+
+          // Finding description
+          p2.push(`BT /F1 7 Tf 0.15 0.2 0.25 rg 92 ${iy} Td (${s(finding.msg, 80)}) Tj ET`);
+          iy -= 14;
+
+          // Remediation if fail
+          if (finding.status === 'fail' && finding.recommendation) {
+            p2.push(`0.93 0.96 0.93 rg`, `92 ${iy - 2} 460 12 re f`);
+            p2.push(`BT /F1 6 Tf 0.1 0.5 0.25 rg 96 ${iy + 1} Td (Fix: ${s(finding.recommendation, 80)}) Tj ET`);
+            iy -= 14;
+          }
+        }
+        iy -= 8;
+      }
+    }
+
+    // SQLMap section
+    const sqlmapOutput = stats.resolved.sqlmap?.output;
+    if (sqlmapOutput !== undefined) {
+      if (iy > 150) {
+        p2.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${iy} Td (SQL INJECTION TEST) Tj ET`);
+        p2.push(`0.85 0.15 0.1 rg`, `40 ${iy - 4} 120 2 re f`);
+        iy -= 22;
+
+        const sqlmapClean = !sqlmapOutput || sqlmapOutput.trim() === '';
+        const sqlBg = sqlmapClean ? '0.9 0.97 0.9' : '1 0.92 0.92';
+        const sqlColor = sqlmapClean ? '0.1 0.6 0.3' : '0.85 0.15 0.1';
+        const sqlStatus = sqlmapClean ? 'PASS' : 'FAIL';
+        const sqlMsg = sqlmapClean ? 'No SQL injection vulnerabilities detected' : 'Potential SQL injection vulnerabilities found';
+
+        p2.push(`${sqlBg} rg`, `40 ${iy - 8} 515 24 re f`);
+        p2.push(`${sqlColor} rg`, `40 ${iy - 8} 3 24 re f`);
+        p2.push(`BT /F2 8 Tf ${sqlColor} rg 55 ${iy - 1} Td (${sqlStatus}) Tj ET`);
+        p2.push(`BT /F1 8 Tf 0.15 0.2 0.25 rg 92 ${iy - 1} Td (${sqlMsg}) Tj ET`);
+        iy -= 36;
+      }
+    }
+
+    // Scan Methodology section
+    if (iy > 200) {
+      p2.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${iy} Td (SCAN METHODOLOGY) Tj ET`);
+      p2.push(`0.85 0.15 0.1 rg`, `40 ${iy - 4} 120 2 re f`);
+      iy -= 20;
+
+      const methodology = [
+        { tool: 'Nikto', desc: 'Web server scanner for dangerous files, outdated software, and misconfigurations' },
+        { tool: 'Nuclei', desc: 'Template-based vulnerability scanner with 8000+ security checks' },
+        { tool: 'ZAP', desc: 'OWASP web application security scanner for DAST analysis' },
+        { tool: 'Semgrep', desc: 'Static analysis tool scanning source code for security patterns' },
+        { tool: 'SQLMap', desc: 'Automated SQL injection detection and exploitation testing' },
+      ];
+
+      p2.push(`0.95 0.96 0.97 rg`, `40 ${iy - 4} 515 ${methodology.length * 16 + 8} re f`);
+      for (const m of methodology) {
+        if (iy < 80) break;
+        p2.push(`BT /F2 8 Tf 0.08 0.12 0.2 rg 50 ${iy} Td (${m.tool}) Tj ET`);
+        p2.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 120 ${iy} Td (${s(m.desc, 75)}) Tj ET`);
+        iy -= 16;
+      }
+    }
+
+    addFooter(p2, pages.length + 1);
+    pages.push(p2);
+  }
+
+  // ── Page 3+: Detailed Findings with Remediation ──
   if (findings.length > 0) {
     const findingsPerPage = 6;
     for (let pageIdx = 0; pageIdx < findings.length; pageIdx += findingsPerPage) {
@@ -336,11 +559,9 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
       for (const f of pageFindings) {
         if (fy < 100) break;
 
-        // Card background
         const cardH = 90;
         pf.push(`0.97 0.97 0.98 rg`, `40 ${fy - cardH + 10} 515 ${cardH} re f`);
 
-        // Severity pill
         const sevColor =
           f.severity === 'CRITICAL' ? '0.8 0.15 0.1' :
           f.severity === 'HIGH' ? '0.85 0.45 0' :
@@ -355,27 +576,22 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
         pf.push(`${sevBg} rg`, `50 ${fy - 2} 55 14 re f`);
         pf.push(`BT /F2 7 Tf ${sevColor} rg 55 ${fy + 1} Td (${f.severity}) Tj ET`);
 
-        // Tool badge
         pf.push(`0.93 0.94 0.96 rg`, `110 ${fy - 2} 42 14 re f`);
         pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 115 ${fy + 1} Td (${f.tool}) Tj ET`);
 
-        // Finding name
         pf.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 160 ${fy + 1} Td (${s(f.name, 55)}) Tj ET`);
 
         fy -= 18;
 
-        // Description
         pf.push(`BT /F1 8 Tf 0.3 0.35 0.4 rg 55 ${fy} Td (${s(f.description, 90)}) Tj ET`);
         fy -= 14;
 
-        // Location
         pf.push(`BT /F2 7 Tf 0.4 0.45 0.5 rg 55 ${fy} Td (Location:) Tj ET`);
         pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 100 ${fy} Td (${s(f.location, 70)}) Tj ET`);
         fy -= 14;
 
-        // Remediation - highlighted
-        pf.push(`0.9 0.95 0.9 rg`, `50 ${fy - 3} 500 14 re f`); // light green bg
-        pf.push(`0.1 0.6 0.3 rg`, `50 ${fy - 3} 3 14 re f`); // green left accent
+        pf.push(`0.9 0.95 0.9 rg`, `50 ${fy - 3} 500 14 re f`);
+        pf.push(`0.1 0.6 0.3 rg`, `50 ${fy - 3} 3 14 re f`);
         pf.push(`BT /F2 7 Tf 0.1 0.5 0.25 rg 58 ${fy} Td (Remediation:) Tj ET`);
         pf.push(`BT /F1 7 Tf 0.15 0.4 0.2 rg 120 ${fy} Td (${s(f.remediation, 75)}) Tj ET`);
         fy -= 22;
@@ -394,7 +610,6 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
 
     let ry = 770;
 
-    // Summary counts
     const critCount = findings.filter(f => f.severity === 'CRITICAL').length;
     const highCount = findings.filter(f => f.severity === 'HIGH').length;
     const medCount = findings.filter(f => f.severity === 'MEDIUM').length;
@@ -407,7 +622,6 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
     ps.push(`BT /F1 9 Tf 0.3 0.35 0.4 rg 40 ${ry} Td (Total findings: ${findings.length} | Critical: ${critCount} | High: ${highCount} | Medium: ${medCount} | Low: ${lowCount}) Tj ET`);
     ry -= 25;
 
-    // Priority sections
     const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
     const sevLabels: Record<string, { color: string; effort: string; timeline: string }> = {
       CRITICAL: { color: '0.8 0.15 0.1', effort: 'Immediate', timeline: 'Fix within 24 hours' },
@@ -423,12 +637,10 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
 
       const info = sevLabels[sev];
 
-      // Section header
       ps.push(`${info.color} rg`, `40 ${ry - 2} 515 18 re f`);
       ps.push(`BT /F2 9 Tf 1 1 1 rg 50 ${ry + 2} Td (${sev} - ${sevFindings.length} finding${sevFindings.length > 1 ? 's' : ''} | ${info.effort} | ${info.timeline}) Tj ET`);
       ry -= 22;
 
-      // Deduplicate remediations
       const uniqueRemediations = [...new Set(sevFindings.map(f => f.remediation))];
 
       for (const rem of uniqueRemediations.slice(0, 6)) {
