@@ -225,11 +225,8 @@ export function useLiveAttacks(enabled: boolean) {
     return () => { todayListeners.delete(setTodayCount); };
   }, []);
 
-  const addThreat = useCallback((threat: LiveThreat, isBurstStart: boolean) => {
-    setThreats(prev => {
-      if (isBurstStart) return [threat]; // clear old batch
-      return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
-    });
+  const addThreat = useCallback((threat: LiveThreat, _isBurstStart: boolean) => {
+    setThreats(prev => [threat, ...prev].slice(0, RING_BUFFER_SIZE));
     incrementSharedCount();
   }, []);
 
