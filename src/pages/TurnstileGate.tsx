@@ -97,7 +97,13 @@ const TurnstileGate = ({ children, sessionKey = "turnstile_verified", domain = "
   const hostname = window.location.hostname;
   const bypassed = hostname === "localhost" || hostname.includes("lovable.app");
 
-  if (bypassed || verified) return <>{children}</>;
+  if (bypassed) return <>{children}</>;
+
+  if (verified) return (
+    <div className="animate-fade-in">
+      {children}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-start justify-start pt-[15vh] px-8 md:px-16">
