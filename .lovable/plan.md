@@ -1,63 +1,58 @@
 
+Goal: make every attack line fully disappear the instant it reaches Somalia, with zero lingering arc visibility, while keeping only the arrival flash effect.
 
-## Make Attack Lines Disappear Instantly on Arrival
+What is happening now (root cause):
+1. There are two render paths for attack visuals in `src/pages/CyberMap.tsx`:
+   - Canvas overlay arcs (recently updated to use `impact` phase)
+   - Map-layer GeoJSON arcs (`attack-full-arcs`, `attack-arcs-glow`, `attack-arcs`)
+2. The map-layer path still keeps/outputs arc geometry after arrival (especially via `buildFullArcsGeoJSON`), so users still see lines even if canvas logic hides them.
+3. The map-layer animation clock currently mixes `Date.now()` and `performance.now()`, which can keep state timing wrong and allow stale visuals to persist.
 
-### Problem
-Currently, when an attack arc reaches Somalia (progress reaches 1.0), it enters a "fading" phase where it gradually fades out over ~60 frames (~1 second). The user wants lines to vanish immediately upon reaching the destination.
+Implementation plan (single file: `src/pages/CyberMap.tsx`):
 
-### Change
+1) Fix timing source consistency for arc lifecycle
+- In “sync new threats into arc state”, set `startTime` using `performance.now()` (and reduced-motion equivalent based on `performance.now()`), so elapsed/progress/fade calculations are accurate in the RAF loop.
+- Keep all arc-state lifecycle math on the same clock (`performance.now()`).
 
-**File: `src/pages/CyberMap.tsx`** -- Remove the arc immediately when it finishes traveling
+2) Stop emitting any line geometry once an arc arrives
+- Update `buildArcsGeoJSON(states)`:
+  - Render only while `0 < progress < 1`.
+  - Remove the “after arrival show full arc” branch.
+- Update `buildFullArcsGeoJSON(states)`:
+  - Render guide rail only while `progress < 1`.
+  - Do not output full-arc features for impacted attacks.
+- Result: all mapbox line layers receive no post-impact line features.
 
-In the animation loop (around line 743-755), instead of transitioning to a `fading` phase when `progress >= 1`, simply remove the arc from the array immediately. The impact rings at the destination will still fire since those are triggered separately, but the arc line itself will be gone instantly.
+3) Remove arc state immediately at first impact (after triggering flash)
+- In the RAF tick loop (map-layer state update):
+  - When `newProgress >= 1`:
+    - Trigger flash once (existing `flashStatesRef` logic).
+    - Immediately delete the arc from `arcStatesRef`.
+    - `continue` so no lingering opacity/fade line lifecycle applies.
+- Keep flash/ring effects independent via `flashStatesRef`, so arrival still feels realistic without line clutter.
 
-```text
-// Current behavior (lines 743-755):
-if (arc.phase === 'animating') {
-  arc.progress = Math.min(arc.progress + SPEED * dt, 1);
-  if (arc.progress >= 1) {
-    arc.phase       = 'fading';
-    arc.fadeOpacity = 1;
-  }
-} else {
-  arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
-  if (arc.fadeOpacity <= 0) {
-    arcs.splice(i, 1);
-    continue;
-  }
-}
+4) Clean up now-obsolete fade behavior for map-layer arcs
+- Since arcs are removed on impact, map-layer fade constants/branches should be simplified to avoid conflicting future behavior.
+- Preserve canvas behavior as-is (it already hides arc lines in `impact` phase).
 
-// New behavior:
-if (arc.phase === 'animating') {
-  arc.progress = Math.min(arc.progress + SPEED * dt, 1);
-  if (arc.progress >= 1) {
-    arc.phase       = 'impact';
-    arc.fadeOpacity = 0;   // line invisible immediately
-  }
-} else if (arc.phase === 'impact') {
-  // Only keep the arc alive for impact rings, no visible line
-  arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
-  if (arc.fadeOpacity <= -1) {  // allow impact rings time to play
-    arcs.splice(i, 1);
-    continue;
-  }
-}
-```
+5) Verification checklist (desktop + mobile `/cyber-map`)
+- Watch a line travel into Somalia:
+  - At arrival frame, line is gone immediately (no faint guide rail, no glow, no core trace).
+  - Only impact flash/ring remains briefly.
+- Let multiple bursts run:
+  - No historical line accumulation.
+  - Map remains visually clean between bursts.
+- Toggle Live off/on:
+  - No stale lines reappear.
+- Pan/zoom test:
+  - No ghost arc artifacts after camera movement.
 
-Also update the guide rail and trail rendering sections to skip drawing when `arc.phase === 'impact'` -- wrap the guide rail block (~line 776-793) and the trail/core line block (~line 795-830) in a condition:
+Acceptance criteria:
+- Zero visible attack line segments after impact.
+- Arrival flash still plays.
+- No persistent/stacked old lines over time.
+- Visual result matches “clean, realistic live-threat map” requirement.
 
-```text
-if (arc.phase !== 'impact') {
-  // ... guide rail drawing ...
-  // ... glow trail drawing ...
-  // ... core bright line drawing ...
-}
-```
-
-The impact ring animations (destination rings at ~lines 855-900) will continue to render during the `impact` phase, so the user still sees the arrival effect but the line itself is gone.
-
-### Result
-- Attack arcs travel from source to Somalia as before
-- The moment an arc reaches its destination, the line vanishes completely
-- Impact rings still animate at the arrival point for visual feedback
-- Clean, professional look with no lingering arc lines cluttering the map
+Technical notes:
+- This is intentionally strict removal (impact = line death) rather than fade.
+- By fixing the clock mismatch and post-impact feature emission together, we eliminate both “intended linger” and “buggy stale” line persistence paths.
