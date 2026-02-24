@@ -37,8 +37,8 @@ const Navbar: React.FC = () => {
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 bg-[hsl(var(--landing-nav-bg))] ${
-        scrolled ? 'shadow-md border-b border-[hsl(var(--landing-nav-border))]' : ''
+      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 bg-gray-950 ${
+        scrolled ? 'shadow-md border-b border-gray-800' : ''
       }`}
     >
       <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
@@ -51,7 +51,7 @@ const Navbar: React.FC = () => {
             <li key={item.label}>
               <button
                 onClick={() => handleNav(item)}
-                className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors"
+                className="text-sm font-medium text-gray-400 hover:text-white transition-colors"
               >
                 {item.label}
               </button>
@@ -83,7 +83,7 @@ const Navbar: React.FC = () => {
           <ThemeToggle />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 text-[hsl(var(--landing-muted))]"
+            className="p-2 text-gray-400"
             aria-label="Toggle menu"
           >
             {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -92,13 +92,13 @@ const Navbar: React.FC = () => {
       </nav>
 
       {mobileOpen && (
-        <div className="md:hidden bg-[hsl(var(--landing-nav-bg))] border-t border-[hsl(var(--landing-nav-border))] px-6 pb-4">
+        <div className="md:hidden bg-gray-950 border-t border-gray-800 px-6 pb-4">
           <ul className="flex flex-col gap-4 pt-2">
             {NAV_ITEMS.map((item) => (
               <li key={item.label}>
                 <button
                   onClick={() => handleNav(item)}
-                  className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors w-full text-left"
+                  className="text-sm font-medium text-gray-400 hover:text-white transition-colors w-full text-left"
                 >
                   {item.label}
                 </button>
