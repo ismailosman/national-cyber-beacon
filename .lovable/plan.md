@@ -1,40 +1,37 @@
 
 
-## Add More African Cities & Shuffle All Targets
+## Simultaneous Multi-Region Attacks & Higher Daily Counter
 
-### Problem
-The `GLOBAL_SOUTH_TARGETS` array is visually grouped by country with comments, making the pattern obvious. It also lacks coverage across West, Central, and Southern Africa.
+### What Changes
 
-### Solution
-1. Add ~10 new African cities spanning West, Central, and Southern Africa
-2. Remove the country-group comments and shuffle all entries so no regional clustering is apparent
+**1. Burst multi-corridor attacks** -- Instead of firing one attack at a time, each tick will generate 2-3 attacks targeting different corridors simultaneously. When Africa/Somalia gets hit, USA and EU will also show attacks at the same moment, making the map feel like a coordinated global threat landscape.
 
-### Changes
+**2. Increase daily attack count** -- Raise the base counter from 3,000-15,000 to 15,000-45,000 so the "Attacks Today" number looks more realistic and impressive.
+
+### Technical Details
 
 **File: `src/hooks/useLiveAttacks.ts`**
 
-Replace the `GLOBAL_SOUTH_TARGETS` array (lines 148-180) with a shuffled version that includes new cities and removes grouping comments.
+1. **New function `generateBurst(index)`** -- generates 2-3 threats at once, each forced into a different corridor (Somalia/Global South, USA, EU) so attacks always appear across multiple regions simultaneously. Uses the seeded PRNG to pick how many (2 or 3) and assigns each a distinct corridor.
 
-**New cities to add:**
+2. **Update `addThreat` to `addThreats` (batch)** -- accepts an array of threats and appends them all at once to the ring buffer, incrementing the shared counter by the batch size.
 
-| Country | City | Lat | Lng |
-|---------|------|-----|-----|
-| Nigeria | Lagos | 6.52 | 3.38 |
-| Nigeria | Abuja | 9.06 | 7.49 |
-| Ghana | Accra | 5.60 | -0.19 |
-| Cameroon | Douala | 4.05 | 9.77 |
-| Senegal | Dakar | 14.72 | -17.47 |
-| Morocco | Casablanca | 33.57 | -7.59 |
-| Tunisia | Tunis | 36.81 | 10.17 |
-| South Africa | Johannesburg | -26.20 | 28.04 |
-| South Africa | Cape Town | -33.92 | 18.42 |
-| Mozambique | Maputo | -25.97 | 32.57 |
-| DR Congo | Kinshasa | -4.44 | 15.27 |
-| Libya | Tripoli | 32.90 | 13.18 |
+3. **Update the timer loop** -- instead of calling `generateDayThreat(index)` once, call `generateBurst(index)` which returns an array of 2-3 threats, then advance the shared index by 1 per tick (each tick = one burst).
 
-**Shuffled order** -- all entries will be interleaved (African, MENA, South Asian cities mixed together) with no grouping comments, so the array reads like a random global list rather than a region-by-region catalog.
+4. **Raise BASE_COUNT** -- change from `3_000 + rand * 12_000` to `15_000 + rand * 30_000` for a higher daily number.
 
-### Technical Detail
+### Corridor assignment per burst
 
-The array grows from 24 to ~36 entries. Since targets are picked randomly via `rand() * length`, the larger pool naturally spreads attacks across more countries without changing any corridor logic or weights.
+```text
+Burst of 3:
+  - Attack 1: Somalia or Global South (50/50)
+  - Attack 2: USA corridor
+  - Attack 3: EU corridor
+
+Burst of 2:
+  - Attack 1: Somalia or Global South (50/50)
+  - Attack 2: USA or EU (50/50)
+```
+
+This guarantees every burst hits multiple regions, so the map always shows simultaneous global activity.
 
