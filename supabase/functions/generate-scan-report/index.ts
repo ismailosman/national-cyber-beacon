@@ -373,7 +373,7 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
   // Server Info from Nikto
   const niktoData = stats.resolved.nikto;
   if (niktoData && sy > 120) {
-    sy -= 8;
+    sy -= 20;
     p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (SERVER INFORMATION) Tj ET`);
     p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 120 2 re f`);
     sy -= 18;
