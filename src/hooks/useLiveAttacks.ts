@@ -145,38 +145,42 @@ const SOMALIA_TARGETS = [
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
 ];
 
-// MENA & Global South targets
 const GLOBAL_SOUTH_TARGETS = [
-  { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
-  { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
-  { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
-  { lat: 9.025, lng: 38.747, country: 'Ethiopia', state: 'Addis Ababa' },
-  { lat: 9.601, lng: 41.850, country: 'Ethiopia', state: 'Dire Dawa' },
-  { lat: -6.792, lng: 39.208, country: 'Tanzania', state: 'Dar es Salaam' },
-  { lat: -6.163, lng: 35.752, country: 'Tanzania', state: 'Dodoma' },
-  { lat: 4.859, lng: 31.571, country: 'South Sudan', state: 'Juba' },
-  { lat: 15.500, lng: 32.560, country: 'Sudan', state: 'Khartoum' },
-  { lat: 0.347, lng: 32.582, country: 'Uganda', state: 'Kampala' },
-  { lat: -1.940, lng: 29.874, country: 'Rwanda', state: 'Kigali' },
-  // Egypt
-  { lat: 30.044, lng: 31.236, country: 'Egypt', state: 'Cairo' },
-  { lat: 31.200, lng: 29.919, country: 'Egypt', state: 'Alexandria' },
-  // Saudi Arabia
+  { lat: 6.524, lng: 3.379, country: 'Nigeria', state: 'Lagos' },
   { lat: 24.713, lng: 46.675, country: 'Saudi Arabia', state: 'Riyadh' },
-  { lat: 21.486, lng: 39.192, country: 'Saudi Arabia', state: 'Jeddah' },
-  // Algeria
-  { lat: 36.753, lng: 3.042, country: 'Algeria', state: 'Algiers' },
-  { lat: 35.697, lng: -0.633, country: 'Algeria', state: 'Oran' },
-  // Pakistan
+  { lat: -26.204, lng: 28.045, country: 'South Africa', state: 'Johannesburg' },
   { lat: 33.693, lng: 73.039, country: 'Pakistan', state: 'Islamabad' },
-  { lat: 24.861, lng: 67.010, country: 'Pakistan', state: 'Karachi' },
-  // India
+  { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
+  { lat: 36.806, lng: 10.166, country: 'Tunisia', state: 'Tunis' },
   { lat: 19.076, lng: 72.878, country: 'India', state: 'Mumbai' },
-  { lat: 28.614, lng: 77.209, country: 'India', state: 'New Delhi' },
-  // Qatar
+  { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
+  { lat: 32.902, lng: 13.180, country: 'Libya', state: 'Tripoli' },
+  { lat: 9.025, lng: 38.747, country: 'Ethiopia', state: 'Addis Ababa' },
+  { lat: 21.486, lng: 39.192, country: 'Saudi Arabia', state: 'Jeddah' },
+  { lat: 4.051, lng: 9.768, country: 'Cameroon', state: 'Douala' },
   { lat: 25.286, lng: 51.534, country: 'Qatar', state: 'Doha' },
-  // Angola
+  { lat: -6.792, lng: 39.208, country: 'Tanzania', state: 'Dar es Salaam' },
+  { lat: 33.573, lng: -7.589, country: 'Morocco', state: 'Casablanca' },
+  { lat: 28.614, lng: 77.209, country: 'India', state: 'New Delhi' },
+  { lat: 30.044, lng: 31.236, country: 'Egypt', state: 'Cairo' },
+  { lat: -4.441, lng: 15.266, country: 'DR Congo', state: 'Kinshasa' },
+  { lat: 14.716, lng: -17.467, country: 'Senegal', state: 'Dakar' },
+  { lat: 24.861, lng: 67.010, country: 'Pakistan', state: 'Karachi' },
+  { lat: -33.925, lng: 18.424, country: 'South Africa', state: 'Cape Town' },
+  { lat: 9.060, lng: 7.486, country: 'Nigeria', state: 'Abuja' },
+  { lat: 4.859, lng: 31.571, country: 'South Sudan', state: 'Juba' },
+  { lat: 36.753, lng: 3.042, country: 'Algeria', state: 'Algiers' },
+  { lat: -25.966, lng: 32.573, country: 'Mozambique', state: 'Maputo' },
+  { lat: 15.500, lng: 32.560, country: 'Sudan', state: 'Khartoum' },
+  { lat: 5.603, lng: -0.187, country: 'Ghana', state: 'Accra' },
+  { lat: 31.200, lng: 29.919, country: 'Egypt', state: 'Alexandria' },
+  { lat: -1.940, lng: 29.874, country: 'Rwanda', state: 'Kigali' },
+  { lat: 9.601, lng: 41.850, country: 'Ethiopia', state: 'Dire Dawa' },
   { lat: -8.839, lng: 13.234, country: 'Angola', state: 'Luanda' },
+  { lat: 0.347, lng: 32.582, country: 'Uganda', state: 'Kampala' },
+  { lat: 35.697, lng: -0.633, country: 'Algeria', state: 'Oran' },
+  { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
+  { lat: -6.163, lng: 35.752, country: 'Tanzania', state: 'Dodoma' },
 ];
 
 // ── USA corridor targets ─────────────────────────────────────────────────────
