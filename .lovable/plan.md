@@ -1,43 +1,47 @@
+## Fix Country Click to Open Panel for All Countries
 
+### Problem
 
-## Expand Attack Targets & Fix Country Hover Tooltip
+Clicking on the map only works for Somalia because it uses a hardcoded bounding box check (lat 0-12, lng 41-51). Other countries like Kenya, Ethiopia, Djibouti, etc. have no click handler on the map fill layer, so nothing happens when you click them.
 
-### 1. Expand attack targets to neighbouring countries
+### Solution
 
-**File: `src/hooks/useLiveAttacks.ts`**
+**File: `src/pages/CyberMap.tsx**`
 
-Rename `SOMALIA_TARGETS` to `REGION_TARGETS` and add target locations for Djibouti, Kenya, Ethiopia, Tanzania, South Sudan, Sudan, Uganda, and Rwanda alongside the existing Somalia targets. Somalia will still receive the majority of attacks (~50%), with the rest distributed across neighbours.
-
-New targets to add:
-- Djibouti: Djibouti City (11.588, 43.145)
-- Kenya: Nairobi (-1.286, 36.817), Mombasa (-4.043, 39.668)
-- Ethiopia: Addis Ababa (9.025, 38.747), Dire Dawa (9.601, 41.850)
-- Tanzania: Dar es Salaam (-6.792, 39.208), Dodoma (-6.163, 35.752)
-- South Sudan: Juba (4.859, 31.571)
-- Sudan: Khartoum (15.500, 32.560)
-- Uganda: Kampala (0.347, 32.582)
-- Rwanda: Kigali (-1.940, 29.874)
-
-Somalia targets will be duplicated in the array to maintain ~50% weight.
-
-### 2. Fix country hover tooltip -- white text on black background
-
-**File: `src/index.css`**
-
-Update the `.country-hover-popup .mapboxgl-popup-content` CSS to use a solid black background with white text, matching the reference image exactly:
-- Background: `rgba(0, 0, 0, 0.85)` (solid black, slightly transparent)
-- Border: none or very subtle
-- Padding: `6px 12px`
-- Border-radius: `4px`
-
-**File: `src/pages/CyberMap.tsx`**
-
-Update the inline HTML in the popup `setHTML` call to use `color: #ffffff` (pure white) instead of `#e2e8f0`.
+1. **Replace the Somalia bounding-box click handler** (lines 1257-1264) with a click handler on the `country-hover-target` layer that works for ALL countries:
+  - On click, read the `name_en` property from the clicked feature
+  - If the country is "Somalia", open the `SomaliaPanel` (existing behavior)
+  - For any other country, set `selectedCountry` to the country name, opening the `CountryPanel`
+2. **Add missing ISO codes** to `COUNTRY_ISO` for the new target countries so the flag icon displays correctly:
+  - `'Djibouti': 'dj'`
+  - `'Tanzania': 'tz'`
+  - `'South Sudan': 'ss'`
+  - `'Sudan': 'sd'`
+  - `'Uganda': 'ug'`
+  - `'Rwanda': 'rw'`
+3. **Add cursor pointer** on hover over the `country-hover-target` layer (if not already present) so users see a clickable affordance everywhere.
 
 ### Technical details
 
-- The `REGION_TARGETS` array will have Somalia entries repeated to keep them weighted higher
-- The `generateDayThreat` function just picks from the targets array randomly, so no logic change needed there
-- The tooltip fix addresses both the styling (CSS) and the text color (inline HTML)
-- The hover target layer (`country-hover-target`) and event handlers remain unchanged -- the tooltip should already be working with the `promoteId` fix from the last edit
+The key change is switching from:
 
+```text
+map.on('click', (e) => {
+  // hardcoded Somalia bounding box only
+});
+```
+
+To:
+
+```text
+map.on('click', 'country-hover-target', (e) => {
+  const name = e.features?.[0]?.properties?.name_en;
+  if (name === 'Somalia') { setSomaliaPanel(true); }
+  else if (name) { setSelectedCountry(name); }
+});
+```
+
+This reuses the existing `country-hover-target` interactive layer (added in a previous fix) that already covers all countries. The `CountryPanel` component already accepts any country name and generates seeded data for it, so no changes needed there.  
+
+
+Add a legend or stats panel showing attack distribution by target country
