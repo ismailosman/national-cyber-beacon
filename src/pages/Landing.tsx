@@ -14,19 +14,19 @@ const stats = [
 ];
 
 const Landing: React.FC = () => (
-  <div className="min-h-screen bg-[#0a0a0f] text-white">
+  <div className="min-h-screen bg-[hsl(var(--landing-bg))] text-[hsl(var(--landing-fg))]">
     <Navbar />
     <main>
       <HeroSection />
 
       {/* Stats Trust Bar */}
-      <section className="relative border-y border-gray-800/50 bg-[#0c0c13]">
+      <section className="relative border-y border-[hsl(var(--landing-card-border))] bg-[hsl(var(--landing-card))]">
         <div className="max-w-7xl mx-auto px-6 py-10 grid grid-cols-2 lg:grid-cols-4 gap-8">
           {stats.map(({ icon: Icon, label, sub }) => (
             <div key={sub} className="text-center">
               <Icon className="w-5 h-5 text-[#FF4D2E] mx-auto mb-2" strokeWidth={1.8} />
-              <div className="text-2xl sm:text-3xl font-extrabold text-white">{label}</div>
-              <div className="text-xs sm:text-sm text-gray-400 mt-1">{sub}</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-[hsl(var(--landing-fg))]">{label}</div>
+              <div className="text-xs sm:text-sm text-[hsl(var(--landing-muted))] mt-1">{sub}</div>
             </div>
           ))}
         </div>

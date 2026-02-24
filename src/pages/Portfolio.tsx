@@ -5,7 +5,7 @@ import Footer from '@/components/landing/Footer';
 import CookieConsent from '@/components/landing/CookieConsent';
 
 const Portfolio: React.FC = () => (
-  <div className="min-h-screen bg-white text-gray-900" style={{ colorScheme: 'light' }}>
+  <div className="min-h-screen bg-[hsl(var(--landing-bg))] text-[hsl(var(--landing-fg))]">
     <Navbar />
     <main className="pt-20">
       <PortfolioSection />

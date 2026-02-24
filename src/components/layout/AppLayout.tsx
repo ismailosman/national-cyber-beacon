@@ -8,7 +8,7 @@ const AppLayout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="dark flex h-screen overflow-hidden bg-background soc-bg">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex w-60 flex-col flex-shrink-0">
         <Sidebar />

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Zap } from 'lucide-react';
 import logoSrc from '@/assets/logo.png';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const NAV_ITEMS = [
   { label: 'Home', href: '/', type: 'scroll', anchor: '#hero' },
@@ -25,11 +26,7 @@ const Navbar: React.FC = () => {
 
   const handleNav = (item: typeof NAV_ITEMS[0]) => {
     setMobileOpen(false);
-    if (item.type === 'link') {
-      navigate(item.href);
-      return;
-    }
-    // Scroll items
+    if (item.type === 'link') { navigate(item.href); return; }
     if (isLanding) {
       const el = document.querySelector(item.anchor!);
       el?.scrollIntoView({ behavior: 'smooth' });
@@ -40,8 +37,8 @@ const Navbar: React.FC = () => {
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-shadow duration-300 bg-gray-950 ${
-        scrolled ? 'shadow-md' : ''
+      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 bg-[hsl(var(--landing-nav-bg))] ${
+        scrolled ? 'shadow-md border-b border-[hsl(var(--landing-nav-border))]' : ''
       }`}
     >
       <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
@@ -54,7 +51,7 @@ const Navbar: React.FC = () => {
             <li key={item.label}>
               <button
                 onClick={() => handleNav(item)}
-                className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors"
               >
                 {item.label}
               </button>
@@ -70,6 +67,9 @@ const Navbar: React.FC = () => {
             </Link>
           </li>
           <li>
+            <ThemeToggle />
+          </li>
+          <li>
             <Link
               to="/contact"
               className="inline-flex items-center px-5 py-2 rounded-full text-xs font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors"
@@ -79,23 +79,26 @@ const Navbar: React.FC = () => {
           </li>
         </ul>
 
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="md:hidden p-2 text-gray-300"
-          aria-label="Toggle menu"
-        >
-          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeToggle />
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 text-[hsl(var(--landing-muted))]"
+            aria-label="Toggle menu"
+          >
+            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </nav>
 
       {mobileOpen && (
-        <div className="md:hidden bg-gray-950 border-t border-gray-800 px-6 pb-4">
+        <div className="md:hidden bg-[hsl(var(--landing-nav-bg))] border-t border-[hsl(var(--landing-nav-border))] px-6 pb-4">
           <ul className="flex flex-col gap-4 pt-2">
             {NAV_ITEMS.map((item) => (
               <li key={item.label}>
                 <button
                   onClick={() => handleNav(item)}
-                  className="text-sm font-medium text-gray-300 hover:text-white transition-colors w-full text-left"
+                  className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors w-full text-left"
                 >
                   {item.label}
                 </button>

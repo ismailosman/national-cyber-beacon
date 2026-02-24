@@ -2,11 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Somalia Cyber Defense Observatory — SOC Dark Theme */
+/* Somalia Cyber Defense Observatory — Dual Theme */
 
 @layer base {
+  /* ── Light mode (default for landing pages) ──────────────────────────── */
   :root {
-    /* Dark SOC Background */
+    --background: 0 0% 100%;
+    --foreground: 220 15% 15%;
+
+    --card: 210 20% 98%;
+    --card-foreground: 220 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 15%;
+
+    --primary: 186 100% 50%;
+    --primary-foreground: 216 28% 7%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 15% 30%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 220 14% 94%;
+    --accent-foreground: 186 100% 40%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 186 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* SOC Neon Colors (used in dashboard, kept consistent) */
+    --neon-cyan: 186 100% 50%;
+    --neon-green: 145 100% 50%;
+    --neon-amber: 38 100% 55%;
+    --neon-red: 0 100% 60%;
+    --neon-blue: 217 91% 60%;
+    --neon-purple: 270 80% 65%;
+
+    --status-secure: 145 100% 50%;
+    --status-warning: 38 100% 55%;
+    --status-critical: 0 100% 60%;
+
+    --glass-bg: 220 14% 96%;
+    --glass-border: 220 13% 88%;
+
+    /* Sidebar (dashboard stays dark regardless) */
+    --sidebar-background: 216 28% 8%;
+    --sidebar-foreground: 210 40% 85%;
+    --sidebar-primary: 186 100% 50%;
+    --sidebar-primary-foreground: 216 28% 7%;
+    --sidebar-accent: 216 28% 14%;
+    --sidebar-accent-foreground: 186 100% 70%;
+    --sidebar-border: 216 28% 14%;
+    --sidebar-ring: 186 100% 50%;
+
+    /* Landing-specific tokens */
+    --landing-bg: 0 0% 100%;
+    --landing-fg: 220 15% 15%;
+    --landing-muted: 220 10% 45%;
+    --landing-card: 210 20% 98%;
+    --landing-card-border: 220 13% 90%;
+    --landing-nav-bg: 0 0% 100%;
+    --landing-nav-border: 220 13% 91%;
+  }
+
+  /* ── Dark mode ──────────────────────────────────────────────────────── */
+  .dark {
     --background: 216 28% 7%;
     --foreground: 210 40% 95%;
 
@@ -16,7 +83,6 @@
     --popover: 216 28% 10%;
     --popover-foreground: 210 40% 95%;
 
-    /* Cyan neon primary */
     --primary: 186 100% 50%;
     --primary-foreground: 216 28% 7%;
 
@@ -36,39 +102,16 @@
     --input: 216 28% 14%;
     --ring: 186 100% 50%;
 
-    --radius: 0.5rem;
-
-    /* SOC Neon Colors */
-    --neon-cyan: 186 100% 50%;
-    --neon-green: 145 100% 50%;
-    --neon-amber: 38 100% 55%;
-    --neon-red: 0 100% 60%;
-    --neon-blue: 217 91% 60%;
-    --neon-purple: 270 80% 65%;
-
-    /* Status colors */
-    --status-secure: 145 100% 50%;
-    --status-warning: 38 100% 55%;
-    --status-critical: 0 100% 60%;
-
-    /* Glassmorphism */
     --glass-bg: 216 28% 12%;
     --glass-border: 216 28% 20%;
 
-    /* Sidebar */
-    --sidebar-background: 216 28% 8%;
-    --sidebar-foreground: 210 40% 85%;
-    --sidebar-primary: 186 100% 50%;
-    --sidebar-primary-foreground: 216 28% 7%;
-    --sidebar-accent: 216 28% 14%;
-    --sidebar-accent-foreground: 186 100% 70%;
-    --sidebar-border: 216 28% 14%;
-    --sidebar-ring: 186 100% 50%;
-  }
-
-  /* Force dark mode always */
-  html {
-    color-scheme: dark;
+    --landing-bg: 220 20% 5%;
+    --landing-fg: 210 40% 95%;
+    --landing-muted: 215 20% 55%;
+    --landing-card: 216 28% 10%;
+    --landing-card-border: 216 28% 18%;
+    --landing-nav-bg: 220 20% 5%;
+    --landing-nav-border: 216 28% 16%;
   }
 }
 
@@ -80,97 +123,61 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', 'JetBrains Mono', system-ui, sans-serif;
-    background-image: 
-      radial-gradient(ellipse at 20% 50%, hsl(186 100% 50% / 0.04) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 20%, hsl(217 91% 60% / 0.04) 0%, transparent 50%);
     min-height: 100vh;
   }
 
+  /* Dashboard-only radial bg (applied via class) */
+  .soc-bg {
+    background-image: 
+      radial-gradient(ellipse at 20% 50%, hsl(186 100% 50% / 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, hsl(217 91% 60% / 0.04) 0%, transparent 50%);
+  }
+
   /* Scrollbar styling */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: hsl(var(--background));
-  }
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--neon-cyan) / 0.5);
-  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: hsl(var(--background)); }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--neon-cyan) / 0.5); }
 }
 
 @layer utilities {
   /* Neon glow effects */
-  .glow-cyan {
-    box-shadow: 0 0 20px hsl(var(--neon-cyan) / 0.3), 0 0 40px hsl(var(--neon-cyan) / 0.15);
-  }
-  .glow-green {
-    box-shadow: 0 0 20px hsl(var(--neon-green) / 0.3), 0 0 40px hsl(var(--neon-green) / 0.15);
-  }
-  .glow-amber {
-    box-shadow: 0 0 20px hsl(var(--neon-amber) / 0.3), 0 0 40px hsl(var(--neon-amber) / 0.15);
-  }
-  .glow-red {
-    box-shadow: 0 0 20px hsl(var(--neon-red) / 0.3), 0 0 40px hsl(var(--neon-red) / 0.15);
-  }
+  .glow-cyan { box-shadow: 0 0 20px hsl(var(--neon-cyan) / 0.3), 0 0 40px hsl(var(--neon-cyan) / 0.15); }
+  .glow-green { box-shadow: 0 0 20px hsl(var(--neon-green) / 0.3), 0 0 40px hsl(var(--neon-green) / 0.15); }
+  .glow-amber { box-shadow: 0 0 20px hsl(var(--neon-amber) / 0.3), 0 0 40px hsl(var(--neon-amber) / 0.15); }
+  .glow-red { box-shadow: 0 0 20px hsl(var(--neon-red) / 0.3), 0 0 40px hsl(var(--neon-red) / 0.15); }
 
-  /* Text glow */
-  .text-glow-cyan {
-    text-shadow: 0 0 10px hsl(var(--neon-cyan) / 0.8), 0 0 20px hsl(var(--neon-cyan) / 0.4);
-  }
-  .text-glow-green {
-    text-shadow: 0 0 10px hsl(var(--neon-green) / 0.8), 0 0 20px hsl(var(--neon-green) / 0.4);
-  }
-  .text-glow-amber {
-    text-shadow: 0 0 10px hsl(var(--neon-amber) / 0.8), 0 0 20px hsl(var(--neon-amber) / 0.4);
-  }
-  .text-glow-red {
-    text-shadow: 0 0 10px hsl(var(--neon-red) / 0.8), 0 0 20px hsl(var(--neon-red) / 0.4);
-  }
+  .text-glow-cyan { text-shadow: 0 0 10px hsl(var(--neon-cyan) / 0.8), 0 0 20px hsl(var(--neon-cyan) / 0.4); }
+  .text-glow-green { text-shadow: 0 0 10px hsl(var(--neon-green) / 0.8), 0 0 20px hsl(var(--neon-green) / 0.4); }
+  .text-glow-amber { text-shadow: 0 0 10px hsl(var(--neon-amber) / 0.8), 0 0 20px hsl(var(--neon-amber) / 0.4); }
+  .text-glow-red { text-shadow: 0 0 10px hsl(var(--neon-red) / 0.8), 0 0 20px hsl(var(--neon-red) / 0.4); }
 
-  /* Glassmorphism card */
   .glass-card {
     background: hsl(var(--glass-bg) / 0.8);
     backdrop-filter: blur(12px);
     border: 1px solid hsl(var(--glass-border));
   }
 
-  /* Scan line animation overlay */
   .scanlines::after {
     content: '';
     position: absolute;
     inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      hsl(var(--foreground) / 0.01) 2px,
-      hsl(var(--foreground) / 0.01) 4px
-    );
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, hsl(var(--foreground) / 0.01) 2px, hsl(var(--foreground) / 0.01) 4px);
     pointer-events: none;
   }
 
-  /* Pulse animation for live indicators */
-  .pulse-cyan {
-    animation: pulse-cyan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
+  .pulse-cyan { animation: pulse-cyan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   @keyframes pulse-cyan {
     0%, 100% { opacity: 1; box-shadow: 0 0 8px hsl(var(--neon-cyan) / 0.6); }
     50% { opacity: 0.7; box-shadow: 0 0 16px hsl(var(--neon-cyan) / 0.3); }
   }
 
-  /* Border severity */
   .border-secure { border-left-color: hsl(var(--status-secure)); }
   .border-warning { border-left-color: hsl(var(--status-warning)); }
   .border-critical { border-left-color: hsl(var(--status-critical)); }
 }
 
-/* ── Mapbox dark-theme popup overrides ───────────────────────────────────── */
+/* ── Mapbox dark-theme popup overrides ───────────────────────────────── */
 .mapboxgl-popup-content {
   background: hsl(216 28% 11% / 0.97) !important;
   border: 1px solid hsl(216 28% 22%) !important;
@@ -183,57 +190,33 @@
   border-top-color: hsl(216 28% 11% / 0.97) !important;
   border-bottom-color: hsl(216 28% 11% / 0.97) !important;
 }
-.mapboxgl-popup-close-button {
-  color: hsl(215 20% 55%) !important;
-  font-size: 16px !important;
-  padding: 4px 8px !important;
-  line-height: 1 !important;
-}
-.mapboxgl-popup-close-button:hover {
-  color: hsl(210 40% 95%) !important;
-  background: transparent !important;
-}
-.mapboxgl-ctrl-group {
-  background: hsl(216 28% 10%) !important;
-  border: 1px solid hsl(216 28% 18%) !important;
-}
-.mapboxgl-ctrl-group button {
-  color: hsl(210 40% 85%) !important;
-}
-.mapboxgl-ctrl-group button:hover {
-  background: hsl(216 28% 16%) !important;
-}
-.mapboxgl-ctrl-attrib {
-  background: hsl(216 28% 8% / 0.8) !important;
-  color: hsl(215 20% 45%) !important;
-}
-.mapboxgl-ctrl-attrib a {
-  color: hsl(186 100% 50% / 0.7) !important;
-}
+.mapboxgl-popup-close-button { color: hsl(215 20% 55%) !important; font-size: 16px !important; padding: 4px 8px !important; line-height: 1 !important; }
+.mapboxgl-popup-close-button:hover { color: hsl(210 40% 95%) !important; background: transparent !important; }
+.mapboxgl-ctrl-group { background: hsl(216 28% 10%) !important; border: 1px solid hsl(216 28% 18%) !important; }
+.mapboxgl-ctrl-group button { color: hsl(210 40% 85%) !important; }
+.mapboxgl-ctrl-group button:hover { background: hsl(216 28% 16%) !important; }
+.mapboxgl-ctrl-attrib { background: hsl(216 28% 8% / 0.8) !important; color: hsl(215 20% 45%) !important; }
+.mapboxgl-ctrl-attrib a { color: hsl(186 100% 50% / 0.7) !important; }
 
-/* ── Critical alert pulse ring ───────────────────────────────────────────── */
+/* ── Critical alert pulse ring ───────────────────────────────────────── */
 @keyframes alert-pulse {
   0%   { transform: scale(1);   opacity: 0.9; }
   70%  { transform: scale(3);   opacity: 0;   }
   100% { transform: scale(3);   opacity: 0;   }
 }
 .critical-pulse-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
+  position: absolute; inset: 0; border-radius: 50%;
   background: #ef4444;
   animation: alert-pulse 2s ease-out infinite;
 }
 
-/* ── Cyber attack map impact pulse ──────────────────────────────────────── */
+/* ── Cyber attack map impact pulse ──────────────────────────────────── */
 @keyframes cyber-impact {
   0%   { transform: scale(0.5); opacity: 1; }
   100% { transform: scale(4);   opacity: 0; }
 }
 .cyber-impact-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
+  position: absolute; inset: 0; border-radius: 50%;
   border: 2px solid #22d3ee;
   animation: cyber-impact 1.5s ease-out infinite;
 }
@@ -243,31 +226,18 @@
   50%  { opacity: 0.7; }
   100% { opacity: 1; }
 }
-.cyber-counter {
-  animation: cyber-counter-tick 2s ease-in-out infinite;
-}
+.cyber-counter { animation: cyber-counter-tick 2s ease-in-out infinite; }
 
 @keyframes cyber-dot-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.5; transform: scale(1.5); }
 }
-.cyber-source-dot {
-  animation: cyber-dot-pulse 1.5s ease-in-out infinite;
-}
+.cyber-source-dot { animation: cyber-dot-pulse 1.5s ease-in-out infinite; }
 
 /* Landing page float animations */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-@keyframes float-delayed {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-@keyframes float-slow {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes float-delayed { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes float-slow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-float-delayed { animation: float-delayed 3.5s ease-in-out 0.5s infinite; }
 .animate-float-slow { animation: float-slow 4s ease-in-out 1s infinite; }

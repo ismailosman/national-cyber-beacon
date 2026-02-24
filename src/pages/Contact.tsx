@@ -96,7 +96,6 @@ const Contact: React.FC = () => {
     }
     setLoading(true);
     try {
-      // Verify turnstile (skip in dev)
       if (!isDev) {
         const { data: verify } = await supabase.functions.invoke('verify-turnstile', {
           body: { token: turnstileToken },
@@ -124,14 +123,14 @@ const Contact: React.FC = () => {
     'w-full rounded-lg border border-white/50 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-white/50';
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-[hsl(var(--landing-bg))] text-[hsl(var(--landing-fg))]">
       <Navbar />
       <main className="pt-20">
-        <section className="bg-[#0a0a0f]">
+        <section>
             <div className="grid lg:grid-cols-2 min-h-[700px]">
               {/* Left — Info */}
-              <div className="bg-[#1a1a2e] text-white p-10 lg:p-16 flex flex-col justify-center">
-                <h2 className="text-3xl sm:text-4xl font-extrabold leading-tight mb-6">
+              <div className="bg-[hsl(var(--landing-card))] border-r border-[hsl(var(--landing-card-border))] p-10 lg:p-16 flex flex-col justify-center">
+                <h2 className="text-3xl sm:text-4xl font-extrabold leading-tight mb-6 text-[hsl(var(--landing-fg))]">
                   CyberDefense Security Solutions Evaluation
                 </h2>
                 <img
@@ -139,12 +138,12 @@ const Contact: React.FC = () => {
                   alt="Cybersecurity professional"
                   className="rounded-xl w-full max-w-sm mb-8 shadow-lg"
                 />
-                <p className="text-white/70 leading-relaxed mb-4">
+                <p className="text-[hsl(var(--landing-muted))] leading-relaxed mb-4">
                   Protect your organization with our comprehensive cybersecurity services — from
                   real-time threat monitoring and AI-driven detection to infrastructure hardening
                   and incident response.
                 </p>
-                <p className="text-white/70 leading-relaxed">
+                <p className="text-[hsl(var(--landing-muted))] leading-relaxed">
                   Our team of experts has protected government agencies, financial institutions, and
                   critical infrastructure across East Africa.
                 </p>
@@ -196,7 +195,6 @@ const Contact: React.FC = () => {
                       </div>
                       <textarea rows={3} placeholder="Comments" value={form.comments} onChange={e => setForm(f => ({ ...f, comments: e.target.value }))} className={inputCls + ' resize-none'} />
 
-                      {/* Turnstile CAPTCHA */}
                       {!isDev && <div ref={turnstileRef} className="my-2" />}
 
                       <button
