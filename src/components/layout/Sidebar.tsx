@@ -24,6 +24,7 @@ const navItems = [
   { to: '/reports', icon: FileText, label: 'Reports' },
   { to: '/playbooks', icon: FileText, label: 'Playbooks' },
   { to: '/admin/security-monitor', icon: Shield, label: 'Security Monitor' },
+  { to: '/security-scanner', icon: Search, label: 'Security Scanner' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
