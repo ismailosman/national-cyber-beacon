@@ -1,28 +1,63 @@
 
 
-## Make Attack Lines Thick and Highly Visible
+## Make Attack Lines Disappear Instantly on Arrival
 
-### Overview
-Increase line widths across all arc rendering layers to match the reference image, which shows bold, prominent attack lines with strong glow.
+### Problem
+Currently, when an attack arc reaches Somalia (progress reaches 1.0), it enters a "fading" phase where it gradually fades out over ~60 frames (~1 second). The user wants lines to vanish immediately upon reaching the destination.
 
-### Changes
+### Change
 
-**File: `src/pages/CyberMap.tsx`** -- Increase all line widths
+**File: `src/pages/CyberMap.tsx`** -- Remove the arc immediately when it finishes traveling
 
-| Layer | Line | Current | New |
-|-------|------|---------|-----|
-| Guide rail (dim base arc) | 781 | `1.2` | `2.5` |
-| Glow trail | 806 | `6` | `14` |
-| Core bright line | 820 | `1.5` | `3.5` |
-| Impact ring 1 | 864 | `1.5` | `2.5` |
-| Impact ring 2 (flash) | 881 | `2.5` | `3.5` |
-| Impact ring 3 (outer) | 894 | `1.5` | `2.5` |
+In the animation loop (around line 743-755), instead of transitioning to a `fading` phase when `progress >= 1`, simply remove the arc from the array immediately. The impact rings at the destination will still fire since those are triggered separately, but the arc line itself will be gone instantly.
 
-Also increase glow intensity:
-- **Line 808**: `shadowBlur` from `12` to `20` for stronger glow trail effect
-- **Line 804**: glow alpha from `0.25` to `0.4` for more visible trailing glow
-- **Line 779**: base guide rail alpha from `0.18` to `0.25` so the full arc path is more visible
+```text
+// Current behavior (lines 743-755):
+if (arc.phase === 'animating') {
+  arc.progress = Math.min(arc.progress + SPEED * dt, 1);
+  if (arc.progress >= 1) {
+    arc.phase       = 'fading';
+    arc.fadeOpacity = 1;
+  }
+} else {
+  arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
+  if (arc.fadeOpacity <= 0) {
+    arcs.splice(i, 1);
+    continue;
+  }
+}
+
+// New behavior:
+if (arc.phase === 'animating') {
+  arc.progress = Math.min(arc.progress + SPEED * dt, 1);
+  if (arc.progress >= 1) {
+    arc.phase       = 'impact';
+    arc.fadeOpacity = 0;   // line invisible immediately
+  }
+} else if (arc.phase === 'impact') {
+  // Only keep the arc alive for impact rings, no visible line
+  arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
+  if (arc.fadeOpacity <= -1) {  // allow impact rings time to play
+    arcs.splice(i, 1);
+    continue;
+  }
+}
+```
+
+Also update the guide rail and trail rendering sections to skip drawing when `arc.phase === 'impact'` -- wrap the guide rail block (~line 776-793) and the trail/core line block (~line 795-830) in a condition:
+
+```text
+if (arc.phase !== 'impact') {
+  // ... guide rail drawing ...
+  // ... glow trail drawing ...
+  // ... core bright line drawing ...
+}
+```
+
+The impact ring animations (destination rings at ~lines 855-900) will continue to render during the `impact` phase, so the user still sees the arrival effect but the line itself is gone.
 
 ### Result
-Attack arcs will appear bold and prominent like the reference image, with thick glowing lines that are easy to see against the dark map background.
-
+- Attack arcs travel from source to Somalia as before
+- The moment an arc reaches its destination, the line vanishes completely
+- Impact rings still animate at the arrival point for visual feedback
+- Clean, professional look with no lingering arc lines cluttering the map
