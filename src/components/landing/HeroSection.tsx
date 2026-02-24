@@ -16,7 +16,7 @@ const HeroSection: React.FC = () => (
     </video>
 
     {/* Overlay */}
-    <div className="absolute inset-0 bg-black/60 dark:bg-black/50" />
+    <div className="absolute inset-0 bg-black/70 dark:bg-black/65" />
 
     {/* Content */}
     <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
