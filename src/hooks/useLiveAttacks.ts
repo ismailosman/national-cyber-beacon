@@ -131,8 +131,9 @@ const WEIGHTED_SOURCES: { country: string; state: string; lat: number; lng: numb
   ...THREAT_SOURCES,
 ];
 
-// Somalia target locations
-const SOMALIA_TARGETS = [
+// Regional target locations (Somalia weighted ~50%)
+const REGION_TARGETS = [
+  // Somalia (duplicated for ~50% weight)
   { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
   { lat: 2.039, lng: 45.358, country: 'Somalia', state: 'Mogadishu' },
@@ -143,6 +144,28 @@ const SOMALIA_TARGETS = [
   { lat: 9.558, lng: 44.070, country: 'Somalia', state: 'Ahmed Dhagah' },
   { lat: 9.565, lng: 44.058, country: 'Somalia', state: "Ga'an Libah" },
   { lat: 9.553, lng: 44.075, country: 'Somalia', state: 'Mohamed Mooge' },
+  // Duplicate Somalia for weighting
+  { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
+  { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
+  // Djibouti
+  { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
+  // Kenya
+  { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
+  { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
+  // Ethiopia
+  { lat: 9.025, lng: 38.747, country: 'Ethiopia', state: 'Addis Ababa' },
+  { lat: 9.601, lng: 41.850, country: 'Ethiopia', state: 'Dire Dawa' },
+  // Tanzania
+  { lat: -6.792, lng: 39.208, country: 'Tanzania', state: 'Dar es Salaam' },
+  { lat: -6.163, lng: 35.752, country: 'Tanzania', state: 'Dodoma' },
+  // South Sudan
+  { lat: 4.859, lng: 31.571, country: 'South Sudan', state: 'Juba' },
+  // Sudan
+  { lat: 15.500, lng: 32.560, country: 'Sudan', state: 'Khartoum' },
+  // Uganda
+  { lat: 0.347, lng: 32.582, country: 'Uganda', state: 'Kampala' },
+  // Rwanda
+  { lat: -1.940, lng: 29.874, country: 'Rwanda', state: 'Kigali' },
 ];
 
 const ATTACK_TYPES: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
@@ -181,7 +204,7 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 function generateDayThreat(index: number): LiveThreat {
   const rand = createSeededRand(DAY_SEED + index * 7919);
   const source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
-  const target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
+  const target = REGION_TARGETS[Math.floor(rand() * REGION_TARGETS.length)];
   const attack_type = ATTACK_TYPES[Math.floor(rand() * ATTACK_TYPES.length)];
   const signatures = ATTACK_SIGNATURES[attack_type];
   const name = signatures[Math.floor(rand() * signatures.length)];

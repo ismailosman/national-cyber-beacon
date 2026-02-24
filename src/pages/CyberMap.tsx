@@ -1311,7 +1311,7 @@ const CyberMap: React.FC = () => {
           const countryName = feature.properties?.name_en || feature.properties?.name || '';
           if (countryName) {
             hoverPopup.setLngLat(e.lngLat).setHTML(
-              `<span style="font-size:12px;font-weight:600;color:#e2e8f0;letter-spacing:0.02em">${countryName}</span>`
+              `<span style="font-size:12px;font-weight:600;color:#ffffff;letter-spacing:0.02em">${countryName}</span>`
             ).addTo(map);
           }
         });
