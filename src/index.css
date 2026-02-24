@@ -234,6 +234,33 @@
 }
 .cyber-source-dot { animation: cyber-dot-pulse 1.5s ease-in-out infinite; }
 
+/* Animated gradient border */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animated-border-wrapper {
+  background: linear-gradient(270deg, #FF4D2E, #3b82f6, #10b981, #a855f7, #22d3ee, #FF4D2E);
+  background-size: 400% 400%;
+  animation: gradient-shift 6s ease infinite;
+  border-radius: 1rem;
+  padding: 2px;
+}
+
+.animated-border-inner {
+  background: hsl(var(--landing-card));
+  border-radius: calc(1rem - 2px);
+}
+
+.animated-border-line {
+  height: 2px;
+  background: linear-gradient(270deg, #FF4D2E, #3b82f6, #10b981, #a855f7, #22d3ee, #FF4D2E);
+  background-size: 400% 400%;
+  animation: gradient-shift 4s ease infinite;
+}
+
 /* Landing page float animations */
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 @keyframes float-delayed { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
