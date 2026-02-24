@@ -145,8 +145,8 @@ const SOMALIA_TARGETS = [
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
 ];
 
-// Other African targets
-const AFRICA_TARGETS = [
+// MENA & Global South targets
+const GLOBAL_SOUTH_TARGETS = [
   { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
   { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
   { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
@@ -158,6 +158,25 @@ const AFRICA_TARGETS = [
   { lat: 15.500, lng: 32.560, country: 'Sudan', state: 'Khartoum' },
   { lat: 0.347, lng: 32.582, country: 'Uganda', state: 'Kampala' },
   { lat: -1.940, lng: 29.874, country: 'Rwanda', state: 'Kigali' },
+  // Egypt
+  { lat: 30.044, lng: 31.236, country: 'Egypt', state: 'Cairo' },
+  { lat: 31.200, lng: 29.919, country: 'Egypt', state: 'Alexandria' },
+  // Saudi Arabia
+  { lat: 24.713, lng: 46.675, country: 'Saudi Arabia', state: 'Riyadh' },
+  { lat: 21.486, lng: 39.192, country: 'Saudi Arabia', state: 'Jeddah' },
+  // Algeria
+  { lat: 36.753, lng: 3.042, country: 'Algeria', state: 'Algiers' },
+  { lat: 35.697, lng: -0.633, country: 'Algeria', state: 'Oran' },
+  // Pakistan
+  { lat: 33.693, lng: 73.039, country: 'Pakistan', state: 'Islamabad' },
+  { lat: 24.861, lng: 67.010, country: 'Pakistan', state: 'Karachi' },
+  // India
+  { lat: 19.076, lng: 72.878, country: 'India', state: 'Mumbai' },
+  { lat: 28.614, lng: 77.209, country: 'India', state: 'New Delhi' },
+  // Qatar
+  { lat: 25.286, lng: 51.534, country: 'Qatar', state: 'Doha' },
+  // Angola
+  { lat: -8.839, lng: 13.234, country: 'Angola', state: 'Luanda' },
 ];
 
 // ── USA corridor targets ─────────────────────────────────────────────────────
@@ -241,15 +260,15 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 function generateDayThreat(index: number): LiveThreat {
   const rand = createSeededRand(DAY_SEED + index * 7919);
 
-  // Pick corridor: 30% Somalia, 20% Africa, 25% USA, 25% EU
+  // Pick corridor: 20% Somalia, 30% MENA & Global South, 25% USA, 25% EU
   const corridorRoll = rand();
   let source, target;
-  if (corridorRoll < 0.30) {
+  if (corridorRoll < 0.20) {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
     target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
   } else if (corridorRoll < 0.50) {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
-    target = AFRICA_TARGETS[Math.floor(rand() * AFRICA_TARGETS.length)];
+    target = GLOBAL_SOUTH_TARGETS[Math.floor(rand() * GLOBAL_SOUTH_TARGETS.length)];
   } else if (corridorRoll < 0.75) {
     source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
     target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
