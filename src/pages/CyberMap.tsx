@@ -434,19 +434,13 @@ const TAIL_FRACTION = 0.18;
 function buildArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   for (const state of states.values()) {
-    if (state.progress <= 0) continue;
+    if (state.progress <= 0 || state.progress >= 1) continue; // no line after arrival
 
-    let coords: [number, number][];
-    if (state.progress >= 1) {
-      // After arrival: show full arc so it persists then fades
-      coords = state.arcCoords;
-    } else {
-      // During travel: show only a short moving tail segment (traveling beam effect)
-      const sliceEnd   = Math.max(2, Math.ceil(state.progress * (state.arcCoords.length - 1)));
-      const tailLength = Math.max(4, Math.floor(sliceEnd * TAIL_FRACTION));
-      const sliceStart = Math.max(0, sliceEnd - tailLength);
-      coords = state.arcCoords.slice(sliceStart, sliceEnd);
-    }
+    // During travel: show only a short moving tail segment (traveling beam effect)
+    const sliceEnd   = Math.max(2, Math.ceil(state.progress * (state.arcCoords.length - 1)));
+    const tailLength = Math.max(4, Math.floor(sliceEnd * TAIL_FRACTION));
+    const sliceStart = Math.max(0, sliceEnd - tailLength);
+    const coords = state.arcCoords.slice(sliceStart, sliceEnd);
 
     if (coords.length < 2) continue;
     features.push({
@@ -484,17 +478,13 @@ function buildProjectilesGeoJSON(states: Map<string, ArcState>): GeoJSON.Feature
 function buildFullArcsGeoJSON(states: Map<string, ArcState>): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   for (const state of states.values()) {
-    if (state.opacity <= 0) continue;
-    // During travel: dim guide rail (0.25); after hit: solid bright line that fades
-    const opacity = state.progress >= 1
-      ? state.opacity * 0.75
-      : state.opacity * 0.28;
+    if (state.opacity <= 0 || state.progress >= 1) continue; // no guide rail after arrival
     features.push({
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: state.arcCoords },
       properties: {
         color: ATTACK_COLORS[state.threat.attack_type],
-        opacity,
+        opacity: state.opacity * 0.28,
       },
     });
   }
@@ -1328,7 +1318,7 @@ const CyberMap: React.FC = () => {
       arcStatesRef.current.set(threat.id, {
         threat,
         arcCoords: computeBezierArc(threat.source, threat.target),
-        startTime: prefersReducedMotion ? Date.now() - TRAVEL_DURATION * 1000 : Date.now(),
+        startTime: prefersReducedMotion ? performance.now() - TRAVEL_DURATION * 1000 : performance.now(),
         progress:  prefersReducedMotion ? 1 : 0,
         opacity:   1,
       });
@@ -1347,30 +1337,23 @@ const CyberMap: React.FC = () => {
       for (const [id, state] of arcStatesRef.current) {
         const elapsed = (now - state.startTime) / 1000;
         const newProgress = Math.min(elapsed / TRAVEL_DURATION, 1);
-        const newOpacity  = elapsed > (VISIBLE_DURATION - FADE_DURATION)
-          ? Math.max(0, 1 - (elapsed - (VISIBLE_DURATION - FADE_DURATION)) / FADE_DURATION)
-          : 1;
-
-        if (newOpacity <= 0) {
+        // On arrival: trigger flash, then immediately remove arc (no fade/linger)
+        if (newProgress >= 1) {
+          if (!state.impacted) {
+            flashStatesRef.current.set(id, {
+              id,
+              color:     ATTACK_COLORS[state.threat.attack_type],
+              coords:    [state.threat.target.lng, state.threat.target.lat],
+              startTime: now,
+            });
+          }
           arcStatesRef.current.delete(id);
           changed = true;
           continue;
         }
 
-        // Detect first impact moment → trigger flash
-        if (newProgress >= 1 && !state.impacted) {
-          state.impacted = true;
-          flashStatesRef.current.set(id, {
-            id,
-            color:     ATTACK_COLORS[state.threat.attack_type],
-            coords:    [state.threat.target.lng, state.threat.target.lat],
-            startTime: now,
-          });
-        }
-
-        if (state.progress !== newProgress || state.opacity !== newOpacity) {
+        if (state.progress !== newProgress) {
           state.progress = newProgress;
-          state.opacity  = newOpacity;
           changed = true;
         }
       }
