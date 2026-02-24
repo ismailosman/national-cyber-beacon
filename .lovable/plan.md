@@ -1,22 +1,13 @@
 
+## Add GitHub Token Secret
 
-## Fix Security Scanner Proxy Edge Function
+### What needs to happen
+Add a new secret called `GITHUB_TOKEN` to securely store the user's GitHub API token. This token is likely used by the security scanner's SAST functionality when cloning/accessing GitHub repositories for static analysis.
 
-### What's happening
-The upstream API at `cybersomalia.com` returns HTML (nginx 502 page) when it's down, causing the edge function to forward raw HTML to the frontend, which breaks JSON parsing and shows a blank screen.
+### Steps
+1. Add a new secret `GITHUB_TOKEN` via the secrets tool
+2. Verify any edge functions that need the token (e.g., `security-scanner-proxy`) can access it via `Deno.env.get("GITHUB_TOKEN")`
 
-### Changes
-
-**1. Update `supabase/functions/security-scanner-proxy/index.ts`**
-- Replace the current implementation with the user-provided version that has cleaner error handling
-- Key improvements:
-  - Read `API_BASE` from `SECURITY_API_URL` env var (with fallback to `https://cybersomalia.com`)
-  - Check upstream `content-type` before parsing -- if non-JSON, return a structured JSON error with status 502
-  - Simpler, more readable flow
-  - Updated CORS headers to match the standard pattern
-
-**2. Add `SECURITY_API_URL` secret**
-- Add a new secret `SECURITY_API_URL` set to `https://cybersomalia.com` so the API base URL is configurable without code changes
-
-No frontend changes needed -- `securityApi.ts` already handles non-ok responses gracefully.
-
+### Technical details
+- The secret will be stored securely and accessible to all backend functions
+- No code changes are needed unless the token needs to be passed to the upstream API -- the scanner proxy already forwards requests to `cybersomalia.com` which may handle GitHub access on its own
