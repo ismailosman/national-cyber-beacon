@@ -585,7 +585,7 @@ interface CanvasArc {
   dstLat:       number;
   color:        string;
   progress:     number;      // 0→1 while animating
-  phase:        'animating' | 'fading';
+  phase:        'animating' | 'fading' | 'impact';
   fadeOpacity:  number;      // 1→0 while fading
   lastFrame:    number;      // timestamp of last RAF tick (ms)
 }
@@ -743,12 +743,12 @@ const CyberMap: React.FC = () => {
         if (arc.phase === 'animating') {
           arc.progress = Math.min(arc.progress + SPEED * dt, 1);
           if (arc.progress >= 1) {
-            arc.phase       = 'fading';
-            arc.fadeOpacity = 1;
+            arc.phase       = 'impact';
+            arc.fadeOpacity = 0;
           }
-        } else {
+        } else if (arc.phase === 'impact') {
           arc.fadeOpacity -= (1 / FADE_FRAMES) * dt;
-          if (arc.fadeOpacity <= 0) {
+          if (arc.fadeOpacity <= -1) {
             arcs.splice(i, 1);
             continue;
           }
@@ -774,9 +774,9 @@ const CyberMap: React.FC = () => {
         const tailSeg    = Math.max(0, currentSeg - Math.ceil(CANVAS_SEGMENTS * CANVAS_TAIL));
 
         // ── Full solid arc line (guide rail, dim) ───────────────────────
-        {
+        if (arc.phase !== 'impact') {
           ctx.save();
-          ctx.globalAlpha = baseOpacity * (arc.phase === 'fading' ? 0.6 : 0.25);
+          ctx.globalAlpha = baseOpacity * 0.25;
           ctx.strokeStyle = arc.color;
           ctx.lineWidth   = 2.5;
           ctx.beginPath();
@@ -870,9 +870,9 @@ const CyberMap: React.FC = () => {
           ctx.restore();
         }
 
-        // ── Impact flash rings (on first hit, for 60 frames) ─────────────
-        if (arc.phase === 'fading' && arc.fadeOpacity > 0.8) {
-          const flashT = 1 - (arc.fadeOpacity - 0.8) / 0.2; // 0→1 quickly
+        // ── Impact flash rings (on arrival) ─────────────────────────────
+        if (arc.phase === 'impact' && arc.fadeOpacity > -0.5) {
+          const flashT = Math.min(1, (-arc.fadeOpacity) / 0.5); // 0→1 over impact phase
           const eased  = 1 - Math.pow(1 - flashT, 3);
           // Inner burst ring
           ctx.save();
