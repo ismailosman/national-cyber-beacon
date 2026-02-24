@@ -1,13 +1,12 @@
 
-## Add GitHub Token Secret
+## Update SECURITY_API_KEY
 
-### What needs to happen
-Add a new secret called `GITHUB_TOKEN` to securely store the user's GitHub API token. This token is likely used by the security scanner's SAST functionality when cloning/accessing GitHub repositories for static analysis.
+Update the existing `SECURITY_API_KEY` secret with the new value provided by the user. This key is used by the `security-scanner-proxy` edge function to authenticate requests to the backend API at cybersomalia.com.
 
 ### Steps
-1. Add a new secret `GITHUB_TOKEN` via the secrets tool
-2. Verify any edge functions that need the token (e.g., `security-scanner-proxy`) can access it via `Deno.env.get("GITHUB_TOKEN")`
+1. Update the `SECURITY_API_KEY` secret with the new value
+2. The change takes effect immediately for all edge functions
 
-### Technical details
-- The secret will be stored securely and accessible to all backend functions
-- No code changes are needed unless the token needs to be passed to the upstream API -- the scanner proxy already forwards requests to `cybersomalia.com` which may handle GitHub access on its own
+### Impact
+- No code changes needed
+- The `security-scanner-proxy` edge function will automatically use the new key for all API requests
