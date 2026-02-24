@@ -1,37 +1,138 @@
 
 
-## Simultaneous Multi-Region Attacks & Higher Daily Counter
+## Fix Missing Country Flags
 
-### What Changes
+### Problem
+The `COUNTRY_ISO` lookup map in `CyberMap.tsx` (line 14-24) only has ~24 country entries, but the attack simulation uses 40+ countries across all corridors. Any country not in the map falls back to `'un'` (the UN flag), which is why Bolivia, Morocco, Mauritania, and many others show the wrong flag.
 
-**1. Burst multi-corridor attacks** -- Instead of firing one attack at a time, each tick will generate 2-3 attacks targeting different corridors simultaneously. When Africa/Somalia gets hit, USA and EU will also show attacks at the same moment, making the map feel like a coordinated global threat landscape.
+### Solution
+Expand the `COUNTRY_ISO` map to include every country that appears in the attack data (sources and targets), plus common countries that Mapbox might return when clicking on the map.
 
-**2. Increase daily attack count** -- Raise the base counter from 3,000-15,000 to 15,000-45,000 so the "Attacks Today" number looks more realistic and impressive.
+### Changes
 
-### Technical Details
+**File: `src/pages/CyberMap.tsx` (lines 14-24)**
 
-**File: `src/hooks/useLiveAttacks.ts`**
+Add the following missing country ISO codes to the `COUNTRY_ISO` record:
 
-1. **New function `generateBurst(index)`** -- generates 2-3 threats at once, each forced into a different corridor (Somalia/Global South, USA, EU) so attacks always appear across multiple regions simultaneously. Uses the seeded PRNG to pick how many (2 or 3) and assigns each a distinct corridor.
+| Country | ISO | Source |
+|---------|-----|--------|
+| Tunisia | tn | GLOBAL_SOUTH_TARGETS |
+| Libya | ly | GLOBAL_SOUTH_TARGETS |
+| Cameroon | cm | GLOBAL_SOUTH_TARGETS |
+| Qatar | qa | GLOBAL_SOUTH_TARGETS |
+| Morocco | ma | GLOBAL_SOUTH_TARGETS |
+| DR Congo | cd | GLOBAL_SOUTH_TARGETS |
+| Senegal | sn | GLOBAL_SOUTH_TARGETS |
+| Mozambique | mz | GLOBAL_SOUTH_TARGETS |
+| Angola | ao | GLOBAL_SOUTH_TARGETS |
+| Algeria | dz | GLOBAL_SOUTH_TARGETS |
+| Belgium | be | EU_TARGETS |
+| Spain | es | EU_TARGETS |
+| Italy | it | EU_TARGETS |
+| Sweden | se | EU_TARGETS |
+| Argentina | ar | EU_THREAT_SOURCES |
+| Colombia | co | EU_THREAT_SOURCES |
+| Chile | cl | THREAT_SOURCES |
+| Venezuela | ve | EU_THREAT_SOURCES |
+| Ghana | gh | THREAT_SOURCES |
 
-2. **Update `addThreat` to `addThreats` (batch)** -- accepts an array of threats and appends them all at once to the ring buffer, incrementing the shared counter by the batch size.
+Also add common countries users might click on the map that aren't in the attack data:
 
-3. **Update the timer loop** -- instead of calling `generateDayThreat(index)` once, call `generateBurst(index)` which returns an array of 2-3 threats, then advance the shared index by 1 per tick (each tick = one burst).
+| Country | ISO |
+|---------|-----|
+| Bolivia | bo |
+| Paraguay | py |
+| Mauritania | mr |
+| Mexico | mx |
+| Peru | pe |
+| Uruguay | uy |
+| Ecuador | ec |
+| Afghanistan | af |
+| Iraq | iq |
+| Syria | sy |
+| Yemen | ye |
+| Jordan | jo |
+| Lebanon | lb |
+| Oman | om |
+| UAE | ae |
+| Kuwait | kw |
+| Bahrain | bh |
+| Myanmar | mm |
+| Thailand | th |
+| Philippines | ph |
+| Malaysia | my |
+| Bangladesh | bd |
+| Sri Lanka | lk |
+| Nepal | np |
+| Poland | pl |
+| Czech Republic | cz |
+| Austria | at |
+| Switzerland | ch |
+| Norway | no |
+| Denmark | dk |
+| Finland | fi |
+| Portugal | pt |
+| Greece | gr |
+| Ireland | ie |
+| Hungary | hu |
+| Serbia | rs |
+| Croatia | hr |
+| Bulgaria | bg |
+| Slovakia | sk |
+| Lithuania | lt |
+| Latvia | lv |
+| Estonia | ee |
+| Moldova | md |
+| Belarus | by |
+| Georgia | ge |
+| Armenia | am |
+| Azerbaijan | az |
+| Kazakhstan | kz |
+| Uzbekistan | uz |
+| Mongolia | mn |
+| Taiwan | tw |
+| New Zealand | nz |
+| Australia | au |
+| Papua New Guinea | pg |
+| Fiji | fj |
+| Cuba | cu |
+| Jamaica | jm |
+| Haiti | ht |
+| Dominican Republic | do |
+| Honduras | hn |
+| Guatemala | gt |
+| Costa Rica | cr |
+| Panama | pa |
+| Nicaragua | ni |
+| El Salvador | sv |
+| Trinidad and Tobago | tt |
+| Zambia | zm |
+| Zimbabwe | zw |
+| Botswana | bw |
+| Namibia | na |
+| Madagascar | mg |
+| Mali | ml |
+| Niger | ne |
+| Burkina Faso | bf |
+| Ivory Coast | ci |
+| Benin | bj |
+| Togo | tg |
+| Sierra Leone | sl |
+| Liberia | lr |
+| Guinea | gn |
+| Gambia | gm |
+| Gabon | ga |
+| Congo | cg |
+| Central African Republic | cf |
+| Chad | td |
+| Eritrea | er |
+| Malawi | mw |
+| Lesotho | ls |
+| Eswatini | sz |
+| Somalia | so |
 
-4. **Raise BASE_COUNT** -- change from `3_000 + rand * 12_000` to `15_000 + rand * 30_000` for a higher daily number.
+This comprehensive list covers virtually every country a user could click on the world map, ensuring the correct flag is always displayed instead of the UN default.
 
-### Corridor assignment per burst
-
-```text
-Burst of 3:
-  - Attack 1: Somalia or Global South (50/50)
-  - Attack 2: USA corridor
-  - Attack 3: EU corridor
-
-Burst of 2:
-  - Attack 1: Somalia or Global South (50/50)
-  - Attack 2: USA or EU (50/50)
-```
-
-This guarantees every burst hits multiple regions, so the map always shows simultaneous global activity.
+### Technical Note
+The flags are loaded from `https://flagcdn.com/w40/{iso}.png`. The ISO codes used are the standard ISO 3166-1 alpha-2 codes (lowercase). The fallback `'un'` will still work for any truly obscure or unrecognized territory names that Mapbox might return.
 
