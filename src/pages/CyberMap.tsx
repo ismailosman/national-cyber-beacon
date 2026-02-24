@@ -12,6 +12,7 @@ import {
 // ── Country ISO codes for flag CDN ────────────────────────────────────────────
 
 const COUNTRY_ISO: Record<string, string> = {
+  // Original entries
   'China': 'cn', 'Russia': 'ru', 'Iran': 'ir', 'North Korea': 'kp',
   'USA': 'us', 'Netherlands': 'nl', 'Germany': 'de', 'Ukraine': 'ua',
   'Brazil': 'br', 'India': 'in', 'Nigeria': 'ng', 'Pakistan': 'pk',
@@ -20,7 +21,44 @@ const COUNTRY_ISO: Record<string, string> = {
   'Egypt': 'eg', 'Singapore': 'sg', 'Canada': 'ca', 'Japan': 'jp',
   'Israel': 'il', 'Somalia': 'so', 'Kenya': 'ke', 'Ethiopia': 'et',
   'Djibouti': 'dj', 'Tanzania': 'tz', 'South Sudan': 'ss',
-  'Sudan': 'sd', 'Uganda': 'ug', 'Rwanda': 'rw',
+  'Sudan': 'sd', 'Uganda': 'ug', 'Rwanda': 'rw', 'South Africa': 'za',
+  // Attack data countries
+  'Tunisia': 'tn', 'Libya': 'ly', 'Cameroon': 'cm', 'Qatar': 'qa',
+  'Morocco': 'ma', 'DR Congo': 'cd', 'Senegal': 'sn', 'Mozambique': 'mz',
+  'Angola': 'ao', 'Algeria': 'dz', 'Ghana': 'gh',
+  'Belgium': 'be', 'Spain': 'es', 'Italy': 'it', 'Sweden': 'se',
+  'Argentina': 'ar', 'Colombia': 'co', 'Chile': 'cl', 'Venezuela': 've',
+  // Americas
+  'Bolivia': 'bo', 'Paraguay': 'py', 'Mexico': 'mx', 'Peru': 'pe',
+  'Uruguay': 'uy', 'Ecuador': 'ec', 'Cuba': 'cu', 'Jamaica': 'jm',
+  'Haiti': 'ht', 'Dominican Republic': 'do', 'Honduras': 'hn',
+  'Guatemala': 'gt', 'Costa Rica': 'cr', 'Panama': 'pa',
+  'Nicaragua': 'ni', 'El Salvador': 'sv', 'Trinidad and Tobago': 'tt',
+  // Middle East & Central Asia
+  'Afghanistan': 'af', 'Iraq': 'iq', 'Syria': 'sy', 'Yemen': 'ye',
+  'Jordan': 'jo', 'Lebanon': 'lb', 'Oman': 'om', 'UAE': 'ae',
+  'Kuwait': 'kw', 'Bahrain': 'bh', 'Kazakhstan': 'kz', 'Uzbekistan': 'uz',
+  'Georgia': 'ge', 'Armenia': 'am', 'Azerbaijan': 'az',
+  // Asia-Pacific
+  'Myanmar': 'mm', 'Thailand': 'th', 'Philippines': 'ph', 'Malaysia': 'my',
+  'Bangladesh': 'bd', 'Sri Lanka': 'lk', 'Nepal': 'np', 'Mongolia': 'mn',
+  'Taiwan': 'tw', 'Australia': 'au', 'New Zealand': 'nz',
+  'Papua New Guinea': 'pg', 'Fiji': 'fj',
+  // Europe
+  'Poland': 'pl', 'Czech Republic': 'cz', 'Austria': 'at',
+  'Switzerland': 'ch', 'Norway': 'no', 'Denmark': 'dk', 'Finland': 'fi',
+  'Portugal': 'pt', 'Greece': 'gr', 'Ireland': 'ie', 'Hungary': 'hu',
+  'Serbia': 'rs', 'Croatia': 'hr', 'Bulgaria': 'bg', 'Slovakia': 'sk',
+  'Lithuania': 'lt', 'Latvia': 'lv', 'Estonia': 'ee', 'Moldova': 'md',
+  'Belarus': 'by',
+  // Africa
+  'Mauritania': 'mr', 'Zambia': 'zm', 'Zimbabwe': 'zw', 'Botswana': 'bw',
+  'Namibia': 'na', 'Madagascar': 'mg', 'Mali': 'ml', 'Niger': 'ne',
+  'Burkina Faso': 'bf', 'Ivory Coast': 'ci', 'Benin': 'bj', 'Togo': 'tg',
+  'Sierra Leone': 'sl', 'Liberia': 'lr', 'Guinea': 'gn', 'Gambia': 'gm',
+  'Gabon': 'ga', 'Congo': 'cg', 'Central African Republic': 'cf',
+  'Chad': 'td', 'Eritrea': 'er', 'Malawi': 'mw', 'Lesotho': 'ls',
+  'Eswatini': 'sz',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
