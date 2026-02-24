@@ -65,6 +65,15 @@ export default function SecurityDashboard() {
     if (activeScan?.scan_id === scanId) setActiveScan(null);
   }
 
+  async function handleClearAll() {
+    const toClear = history.filter(s => s.status === "done" || s.status === "error");
+    await Promise.all(toClear.map(s => deleteScan(s.scan_id)));
+    if (activeScan && toClear.some(s => s.scan_id === activeScan.scan_id)) {
+      setActiveScan(null);
+    }
+    fetchHistory();
+  }
+
   return (
     <div className="min-h-screen bg-background p-6">
       {/* Header */}
@@ -101,6 +110,7 @@ export default function SecurityDashboard() {
             scans={history}
             onView={handleViewScan}
             onDelete={handleDeleteScan}
+            onClearAll={handleClearAll}
             activeScanId={activeScan?.scan_id}
           />
         </div>
