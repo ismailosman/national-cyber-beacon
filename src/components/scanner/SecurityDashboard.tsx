@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ScanResult, ScanSummary, ScanType } from "@/types/security";
 import { startScan, listScans, getScan, deleteScan, checkHealth, pollScan } from "@/services/securityApi";
+import { sendScanCompletedEmail, sendCriticalAlertEmail, hasCriticalFindings } from "@/services/emailService";
 import ScanForm from "./ScanForm";
 import ScanResults from "./ScanResults";
 import ScanHistory from "./ScanHistory";
@@ -28,7 +29,7 @@ export default function SecurityDashboard() {
     } catch {}
   }
 
-  async function handleStartScan(type: ScanType, repoUrl?: string, targetUrl?: string) {
+  async function handleStartScan(type: ScanType, repoUrl?: string, targetUrl?: string, clientEmail?: string, clientName?: string) {
     setError(null);
     setScanning(true);
     setActiveScan(null);
@@ -36,9 +37,27 @@ export default function SecurityDashboard() {
 
     try {
       const { scan_id } = await startScan(type, repoUrl, targetUrl);
-      const stop = pollScan(scan_id, (result) => {
+      const stop = pollScan(scan_id, async (result) => {
         setActiveScan(result);
-        if (result.status === "done" || result.status === "error") {
+        if (result.status === "done") {
+          setScanning(false);
+          fetchHistory();
+          try {
+            await sendScanCompletedEmail(result, clientEmail, clientName);
+            console.log("✅ Scan completed email sent");
+          } catch (err) {
+            console.error("Email error:", err);
+          }
+          if (hasCriticalFindings(result)) {
+            try {
+              await sendCriticalAlertEmail(result, clientEmail, clientName);
+              console.log("🚨 Critical alert email sent");
+            } catch (err) {
+              console.error("Critical alert email error:", err);
+            }
+          }
+        }
+        if (result.status === "error") {
           setScanning(false);
           fetchHistory();
         }

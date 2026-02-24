@@ -3,7 +3,7 @@ import { ScanType } from "@/types/security";
 import { Loader2 } from "lucide-react";
 
 interface Props {
-  onScan: (type: ScanType, repoUrl?: string, targetUrl?: string) => void;
+  onScan: (type: ScanType, repoUrl?: string, targetUrl?: string, clientEmail?: string, clientName?: string) => void;
   scanning: boolean;
   apiOnline: boolean | null;
 }
@@ -33,13 +33,15 @@ export default function ScanForm({ onScan, scanning, apiOnline }: Props) {
   const [selectedType, setSelectedType] = useState<ScanType>("dast");
   const [repoUrl, setRepoUrl] = useState("https://github.com/ismailosman/national-cyber-beacon");
   const [targetUrl, setTargetUrl] = useState("https://cyberdefense.so");
+  const [clientName, setClientName] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
 
   const needsRepo = selectedType === "sast" || selectedType === "full";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!apiOnline) return;
-    onScan(selectedType, needsRepo ? repoUrl : undefined, targetUrl);
+    onScan(selectedType, needsRepo ? repoUrl : undefined, targetUrl, clientEmail || undefined, clientName || undefined);
   }
 
   return (
@@ -97,6 +99,29 @@ export default function ScanForm({ onScan, scanning, apiOnline }: Props) {
             required
             className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
           />
+        </div>
+
+        {/* Client Notifications */}
+        <div className="border-t border-gray-700 pt-4 mt-2">
+          <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide">
+            Client Notifications (optional)
+          </p>
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Client name"
+              className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+            />
+            <input
+              type="email"
+              value={clientEmail}
+              onChange={(e) => setClientEmail(e.target.value)}
+              placeholder="Client email"
+              className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+            />
+          </div>
         </div>
 
         {/* Submit */}
