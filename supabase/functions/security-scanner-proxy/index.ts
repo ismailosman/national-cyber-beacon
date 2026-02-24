@@ -40,12 +40,28 @@ Deno.serve(async (req: Request) => {
     }
 
     const response = await fetch(targetUrl, fetchOptions);
-    const data = await response.text();
-    console.log("Upstream status:", response.status);
+    const upstreamContentType = response.headers.get("content-type") ?? "";
+    const raw = await response.text();
+    console.log("Upstream status:", response.status, "content-type:", upstreamContentType);
 
-    return new Response(data, {
+    // Always return JSON to the browser. Some upstream failures return HTML (nginx 502 pages),
+    // which breaks JSON parsing in the frontend.
+    let body = raw;
+    let contentType = upstreamContentType;
+
+    if (!upstreamContentType.toLowerCase().includes("application/json")) {
+      body = JSON.stringify({
+        error: "Upstream returned non-JSON response",
+        upstream_status: response.status,
+        upstream_content_type: upstreamContentType,
+        upstream_body: raw.slice(0, 2000),
+      });
+      contentType = "application/json";
+    }
+
+    return new Response(body, {
       status: response.status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": contentType || "application/json" },
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

@@ -6,21 +6,32 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 async function proxyRequest<T>(path: string, method = "GET", body?: any): Promise<T> {
   const url = `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
-  
+
   const res = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
-      "apikey": SUPABASE_KEY,
+      apikey: SUPABASE_KEY,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || err.error || "API Error");
+  const text = await res.text();
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
   }
-  return res.json();
+
+  if (!res.ok) {
+    const detail = json?.detail || json?.error || res.statusText || "API Error";
+    throw new Error(detail);
+  }
+
+  // Successful but non-JSON response (should be rare) — return raw text.
+  if (json === null) return text as unknown as T;
+  return json as T;
 }
 
 export async function checkHealth(): Promise<{ status: string; version: string }> {
