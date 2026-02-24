@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { toETLocaleTimeString } from "@/lib/dateUtils";
 import { sendReportDeliveryEmail } from "@/services/emailService";
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -293,7 +294,7 @@ export default function ScanResults({ result, clientEmail, clientName }: ScanRes
           {[
             { label: "Type", value: result.type.toUpperCase() },
             { label: "Target", value: result.target.replace("https://", "") },
-            { label: "Started", value: new Date(result.created_at).toLocaleTimeString() },
+            { label: "Started", value: toETLocaleTimeString(result.created_at) },
             { label: "Status", value: result.status.toUpperCase() },
           ].map(item => (
             <div key={item.label} className="text-center">

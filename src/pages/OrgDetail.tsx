@@ -7,7 +7,8 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -116,7 +117,7 @@ const OrgDetail: React.FC = () => {
         .order('created_at', { ascending: false })
         .limit(30);
       return (data || []).reverse().map((r: any) => ({
-        day: format(new Date(r.created_at), 'MMM dd'),
+        day: formatET(r.created_at, 'MMM dd'),
         score: r.score,
       }));
     },
@@ -622,7 +623,7 @@ const OrgDetail: React.FC = () => {
                     </td>
                     <td className="p-3 text-center font-mono font-bold text-neon-cyan">{chk.score}</td>
                     <td className="p-3 text-right text-xs text-muted-foreground font-mono">
-                      {format(new Date(chk.checked_at), 'MMM dd HH:mm')}
+                      {formatET(chk.checked_at, 'MMM dd HH:mm')}
                     </td>
                   </tr>
                 );

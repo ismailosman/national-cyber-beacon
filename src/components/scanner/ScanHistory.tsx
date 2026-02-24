@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
+import { toETLocaleString } from "@/lib/dateUtils";
 
 interface Props {
   scans: ScanSummary[];
@@ -81,7 +82,7 @@ export default function ScanHistory({ scans, onView, onDelete, onClearAll, activ
                 <StatusBadge status={s.status} small />
               </div>
               <p className="text-xs text-gray-500 truncate">
-                {new Date(s.created_at).toLocaleString()}
+                {toETLocaleString(s.created_at)}
               </p>
             </div>
             <button

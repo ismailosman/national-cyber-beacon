@@ -4,7 +4,7 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { ShieldCheck, ShieldX, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
-import { format } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 
 interface DastSummary {
   critical?: number;
@@ -147,7 +147,7 @@ const OrgCard: React.FC<OrgCardProps> = ({
             )}
             {dastScannedAt && (
               <span className="text-[9px] text-muted-foreground font-mono ml-auto">
-                {format(new Date(dastScannedAt), 'MMM dd')}
+                {formatET(dastScannedAt, 'MMM dd')}
               </span>
             )}
           </>

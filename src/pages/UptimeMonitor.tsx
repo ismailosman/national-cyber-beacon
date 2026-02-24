@@ -15,6 +15,7 @@ import {
   ExternalLink, ArrowUpDown, Timer, Lock, AlertTriangle, ShieldAlert, ShieldCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toETLocaleTimeString, toETLocaleDateString } from '@/lib/dateUtils';
 
 interface MonitoredOrg {
   id: string;
@@ -770,7 +771,7 @@ const UptimeMonitor: React.FC = () => {
                       {ssl?.issuer || '—'}
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">
-                      {org.lastChecked ? new Date(org.lastChecked).toLocaleTimeString() : '—'}
+                      {org.lastChecked ? toETLocaleTimeString(org.lastChecked) : '—'}
                     </td>
                     {isSuperAdmin && (
                       <td className="p-3">
@@ -955,7 +956,7 @@ const SslExpiryDisplay: React.FC<{ ssl: SslResult | undefined }> = ({ ssl }) => 
   if (!ssl || !ssl.validTo) return <span className="text-xs text-muted-foreground">—</span>;
 
   const expiryDate = new Date(ssl.validTo);
-  const formatted = expiryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatted = toETLocaleDateString(expiryDate, { month: 'short', day: 'numeric', year: 'numeric' });
   const days = ssl.daysUntilExpiry;
 
   if (days !== null && days < 0) {

@@ -17,6 +17,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toETLocaleTimeString } from '@/lib/dateUtils';
 
 /* ─── Types ─── */
 interface MonitoredOrg {
@@ -430,7 +431,7 @@ const EarlyWarning: React.FC = () => {
           <p className="text-sm text-muted-foreground mt-1">Proactive compromise detection and advance security alerting</p>
         </div>
         <div className="flex items-center gap-3">
-          {lastChecked && <span className="text-xs text-muted-foreground font-mono">Last: {new Date(lastChecked).toLocaleTimeString()}</span>}
+          {lastChecked && <span className="text-xs text-muted-foreground font-mono">Last: {toETLocaleTimeString(lastChecked)} ET</span>}
           <Button onClick={runAllChecks} disabled={checking} className="bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/30">
             <RefreshCw className={cn('w-4 h-4 mr-2', checking && 'animate-spin')} />
             {checking ? 'Scanning...' : 'Run All Checks Now'}

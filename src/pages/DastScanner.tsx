@@ -10,6 +10,7 @@ import CircularGauge from '@/components/dashboard/CircularGauge';
 import { Search, Play, Download, ChevronDown, ChevronRight, XCircle, CheckCircle, Info, Shield, Clock, Calendar, FileDown, Loader2, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { toETLocaleString, toETLocaleDateString } from '@/lib/dateUtils';
 
 const downloadPdfFromBase64 = (base64: string, filename: string) => {
   const byteChars = atob(base64);
@@ -305,7 +306,7 @@ const DastScanner: React.FC = () => {
     let report = 'DAST Security Scanner Report\n' + '='.repeat(50) + '\n\n';
     for (const scan of target) {
       const grade = getGrade(scan.dast_score);
-      report += `Organization: ${scan.organization_name}\nURL: ${scan.url}\nScan Date: ${new Date(scan.scanned_at).toLocaleString()}\n`;
+      report += `Organization: ${scan.organization_name}\nURL: ${scan.url}\nScan Date: ${toETLocaleString(scan.scanned_at)} ET\n`;
       report += `DAST Score: ${scan.dast_score}/100 (${grade.grade} — ${grade.label})\n`;
       report += `Summary: ${scan.summary?.critical || 0} Critical, ${scan.summary?.high || 0} High, ${scan.summary?.medium || 0} Medium, ${scan.summary?.low || 0} Low\n\n`;
       for (const test of (scan.results as TestResult[])) {
@@ -411,7 +412,7 @@ const DastScanner: React.FC = () => {
             <span className="text-muted-foreground">·</span>
             <Clock className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-mono text-muted-foreground">
-              Last scan: {new Date(summaryData.lastScan).toLocaleString()}
+              Last scan: {toETLocaleString(summaryData.lastScan)} ET
             </span>
           </>
         )}
@@ -454,7 +455,7 @@ const DastScanner: React.FC = () => {
         </Card>
         <Card className="p-3 text-center">
           <div className="text-xs text-muted-foreground font-mono">Last Scan</div>
-          <div className="text-sm font-mono">{summaryData.lastScan ? new Date(summaryData.lastScan).toLocaleDateString() : '—'}</div>
+          <div className="text-sm font-mono">{summaryData.lastScan ? toETLocaleDateString(summaryData.lastScan) : '—'}</div>
         </Card>
       </div>
 
@@ -584,7 +585,7 @@ const DastScanner: React.FC = () => {
                       <div className="text-xs text-muted-foreground truncate">{scan.url}</div>
                       <div className="flex items-center gap-2 mt-1">
                         <span className={`text-sm font-bold font-mono ${grade.color}`}>Grade {grade.grade}</span>
-                        <span className="text-xs text-muted-foreground">{new Date(scan.scanned_at).toLocaleDateString()}</span>
+                        <span className="text-xs text-muted-foreground">{toETLocaleDateString(scan.scanned_at)}</span>
                       </div>
                       <div className="flex gap-2 mt-1 text-xs font-mono">
                         {scan.summary?.critical > 0 && <span className="text-red-400">{scan.summary.critical}C</span>}
