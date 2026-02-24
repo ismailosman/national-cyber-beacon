@@ -1,67 +1,40 @@
 
-## Expand Target Countries Beyond Somalia
+
+## Add More African Cities & Shuffle All Targets
 
 ### Problem
-Currently, the "main focus" corridor (30%) only targets Somalia. The user wants Egypt, Saudi Arabia, Algeria, Pakistan, India, Qatar, and Angola added as primary targets alongside Somalia -- making it a broader "priority nations" corridor rather than a Somalia-only one.
+The `GLOBAL_SOUTH_TARGETS` array is visually grouped by country with comments, making the pattern obvious. It also lacks coverage across West, Central, and Southern Africa.
 
 ### Solution
-Replace the separate "Somalia" and "Africa" corridors with a single expanded **Priority Targets** corridor that includes all the requested countries mixed with Somalia, then keep USA and EU corridors unchanged.
+1. Add ~10 new African cities spanning West, Central, and Southern Africa
+2. Remove the country-group comments and shuffle all entries so no regional clustering is apparent
 
 ### Changes
 
 **File: `src/hooks/useLiveAttacks.ts`**
 
-1. **Expand `AFRICA_TARGETS`** to include the new countries:
-   - Egypt: Cairo, Alexandria
-   - Saudi Arabia: Riyadh, Jeddah
-   - Algeria: Algiers, Oran
-   - Pakistan: Islamabad, Karachi
-   - India: Mumbai, New Delhi
-   - Qatar: Doha
-   - Angola: Luanda
-   - Keep existing entries (Djibouti, Kenya, Ethiopia, Tanzania, Sudan, Uganda, Rwanda)
+Replace the `GLOBAL_SOUTH_TARGETS` array (lines 148-180) with a shuffled version that includes new cities and removes grouping comments.
 
-2. **Rename corridors for clarity** -- the "Africa" corridor becomes a "MENA & Global South" corridor since it now spans Africa, Middle East, and South Asia.
+**New cities to add:**
 
-3. **Update corridor weights** to spread attacks more evenly across the expanded target set:
-   - **Somalia (20%)** -- Somalia-specific targets (unchanged array)
-   - **MENA & Global South (30%)** -- Egypt, Saudi Arabia, Algeria, Pakistan, India, Qatar, Angola + existing African countries
-   - **USA (25%)** -- unchanged
-   - **EU (25%)** -- unchanged
+| Country | City | Lat | Lng |
+|---------|------|-----|-----|
+| Nigeria | Lagos | 6.52 | 3.38 |
+| Nigeria | Abuja | 9.06 | 7.49 |
+| Ghana | Accra | 5.60 | -0.19 |
+| Cameroon | Douala | 4.05 | 9.77 |
+| Senegal | Dakar | 14.72 | -17.47 |
+| Morocco | Casablanca | 33.57 | -7.59 |
+| Tunisia | Tunis | 36.81 | 10.17 |
+| South Africa | Johannesburg | -26.20 | 28.04 |
+| South Africa | Cape Town | -33.92 | 18.42 |
+| Mozambique | Maputo | -25.97 | 32.57 |
+| DR Congo | Kinshasa | -4.44 | 15.27 |
+| Libya | Tripoli | 32.90 | 13.18 |
 
-4. **Update `generateDayThreat` corridor logic:**
+**Shuffled order** -- all entries will be interleaved (African, MENA, South Asian cities mixed together) with no grouping comments, so the array reads like a random global list rather than a region-by-region catalog.
 
-```text
-const corridorRoll = rand();
-if (corridorRoll < 0.20) {
-  // Somalia corridor
-  source = WEIGHTED_SOURCES[...]
-  target = SOMALIA_TARGETS[...]
-} else if (corridorRoll < 0.50) {
-  // MENA & Global South corridor (expanded)
-  source = WEIGHTED_SOURCES[...]
-  target = GLOBAL_SOUTH_TARGETS[...]
-} else if (corridorRoll < 0.75) {
-  // USA corridor
-  source = USA_THREAT_SOURCES[...]
-  target = USA_TARGETS[...]
-} else {
-  // EU corridor
-  source = EU_THREAT_SOURCES[...]
-  target = EU_TARGETS[...]
-}
-```
+### Technical Detail
 
-### New target entries to add
+The array grows from 24 to ~36 entries. Since targets are picked randomly via `rand() * length`, the larger pool naturally spreads attacks across more countries without changing any corridor logic or weights.
 
-| Country | Cities | Coordinates |
-|---------|--------|-------------|
-| Egypt | Cairo, Alexandria | 30.04/31.23, 31.20/29.92 |
-| Saudi Arabia | Riyadh, Jeddah | 24.71/46.67, 21.49/39.19 |
-| Algeria | Algiers, Oran | 36.75/3.04, 35.70/-0.63 |
-| Pakistan | Islamabad, Karachi | 33.69/73.04, 24.86/67.01 |
-| India | Mumbai, New Delhi | 19.08/72.88, 28.61/77.21 |
-| Qatar | Doha | 25.29/51.53 |
-| Angola | Luanda | -8.84/13.23 |
-
-This gives Somalia 20% of attacks while spreading the remaining 30% across a much wider set of countries, making the overall map look more globally diverse and less focused on one region.
