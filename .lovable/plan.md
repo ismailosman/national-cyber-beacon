@@ -1,76 +1,33 @@
-## Add Global Attack Corridors: USA and EU Targets
 
-### Overview
 
-Expand the attack simulation to show three distinct threat corridors:
+## Change Attack Timing to 2s, 3s, 5s Cycle
 
-1. **East Africa corridor** (existing) -- global sources attacking Somalia and neighbours
-2. **USA corridor** -- Russia, Iran, North Korea, and China attacking US cities
-3. **EU corridor** -- South American and Asian sources attacking European countries
+### Current Behavior
+Attacks fire in bursts of 3 (200-500ms apart) followed by an 18-22 second pause.
 
-### Changes
+### New Behavior
+Attacks will fire in a repeating 3-step cycle:
+1. First attack: wait **2 seconds**
+2. Second attack: wait **3 seconds**
+3. Third attack: wait **5 seconds**
+4. Repeat from step 1
 
-**File: `src/hooks/useLiveAttacks.ts**`
+This creates a steady, rhythmic flow across the map instead of rapid bursts with long pauses.
 
-1. **Add USA target locations** -- US cities as attack destinations:
-  - Washington DC, New York, Los Angeles, Chicago, Houston, Atlanta, Seattle, Miami
-2. **Add EU target locations** -- Major European cities:
-  - London, Paris, Berlin, Amsterdam, Brussels, Madrid, Rome, Stockholm
-3. **Define attack corridors** with weighted source-target pairings:
-  - **East Africa** (~50% of attacks): Uses existing `WEIGHTED_SOURCES` -> `REGION_TARGETS`
-  - **USA** (~25%): Sources limited to Russia, Iran, North Korea, China -> US targets
-  - **EU** (~25%): Sources limited to Brazil, Argentina, Colombia, Venezuela, China, India, Vietnam, Indonesia, Pakistan -> EU targets
-4. **Update `generateDayThreat**` to first pick a corridor (using the seeded PRNG), then pick source and target from that corridor's pools. This ensures geopolitically coherent attack paths (no USA attacking itself, no EU attacking EU).
+### Technical Details
 
-### Technical details
+**File: `src/hooks/useLiveAttacks.ts`**
 
-The corridor selection will use the same seeded PRNG to stay deterministic:
+Update the `getDelay` function to cycle through 2s, 3s, 5s delays:
 
 ```text
-function generateDayThreat(index: number): LiveThreat {
-  const rand = createSeededRand(DAY_SEED + index * 7919);
-  const corridorRoll = rand();
-  let source, target;
-
-  if (corridorRoll < 0.50) {
-    // East Africa corridor (existing behavior)
-    source = pick from WEIGHTED_SOURCES
-    target = pick from REGION_TARGETS
-  } else if (corridorRoll < 0.75) {
-    // USA corridor
-    source = pick from USA_THREAT_SOURCES (Russia, Iran, NK, China)
-    target = pick from USA_TARGETS
-  } else {
-    // EU corridor
-    source = pick from EU_THREAT_SOURCES (South America, Asia)
-    target = pick from EU_TARGETS
-  }
-  // ... rest unchanged
+function getDelay(index: number): number {
+  const cycle = index % 3;
+  if (cycle === 0) return 2000;  // 2 seconds
+  if (cycle === 1) return 3000;  // 3 seconds
+  return 5000;                   // 5 seconds
 }
 ```
 
-New target arrays:
+The seeded randomness for delay is no longer needed since the pattern is fixed. The `getDelay` function is also used by `calculateCurrentIndex` to determine where we are in the day's sequence, so that will automatically stay consistent.
 
-```text
-USA_TARGETS = [
-  Washington DC, New York, Los Angeles, Chicago,
-  Houston, Atlanta, Seattle, Miami
-]
-
-EU_TARGETS = [
-  London, Paris, Berlin, Amsterdam,
-  Brussels, Madrid, Rome, Stockholm
-]
-
-USA_THREAT_SOURCES = [
-  Russia (x4), Iran (x3), North Korea (x2), China (x4)
-]
-
-EU_THREAT_SOURCES = [
-  Brazil (x2), Argentina, Colombia, Venezuela,
-  China (x3), India (x2), Vietnam, Indonesia, Pakistan
-]
-```
-
-No changes needed to the map rendering -- attack arcs already animate between any source/target coordinate pair globally. The `COUNTRY_ISO` map in `CyberMap.tsx` already includes USA and most EU countries, so panels will work when clicking those countries too.  
-Don't make the attacks happen at once, make it spread now that many other countries added. 
