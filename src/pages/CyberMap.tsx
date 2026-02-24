@@ -970,6 +970,7 @@ const CyberMap: React.FC = () => {
         map.addSource('country-boundaries', {
           type: 'vector',
           url: 'mapbox://mapbox.country-boundaries-v1',
+          promoteId: { 'country_boundaries': 'iso_3166_1' },
         });
 
         // All country boundary outlines (thin lines for visibility)
@@ -981,6 +982,18 @@ const CyberMap: React.FC = () => {
           paint: {
             'line-color': 'rgba(148,163,184,0.45)',
             'line-width': 0.8,
+          },
+        });
+
+        // Invisible interactive fill for ALL countries (catches mouse events everywhere)
+        map.addLayer({
+          id: 'country-hover-target',
+          type: 'fill',
+          source: 'country-boundaries',
+          'source-layer': 'country_boundaries',
+          paint: {
+            'fill-color': 'rgba(0,0,0,0.01)',
+            'fill-opacity': 1,
           },
         });
 
@@ -1251,7 +1264,7 @@ const CyberMap: React.FC = () => {
         });
 
         // ── Country hover tooltip ──────────────────────────────────────
-        const hoveredCountryIdRef = { current: null as number | null };
+        const hoveredCountryIdRef = { current: null as string | null };
         const hoverPopup = new mapboxgl.Popup({
           closeButton: false,
           closeOnClick: false,
@@ -1271,24 +1284,26 @@ const CyberMap: React.FC = () => {
           },
         });
 
-        map.on('mousemove', 'continent-fills', (e: any) => {
+        map.on('mousemove', 'country-hover-target', (e: any) => {
           if (!e.features || e.features.length === 0) return;
           map.getCanvas().style.cursor = 'pointer';
 
+          const feature = e.features[0];
+          const featureId = feature.properties?.iso_3166_1 || feature.id;
+
           // Clear previous hover
-          if (hoveredCountryIdRef.current !== null) {
+          if (hoveredCountryIdRef.current !== null && hoveredCountryIdRef.current !== featureId) {
             map.setFeatureState(
               { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: hoveredCountryIdRef.current },
               { hover: false }
             );
           }
 
-          const feature = e.features[0];
-          hoveredCountryIdRef.current = feature.id ?? null;
+          hoveredCountryIdRef.current = featureId ?? null;
 
-          if (feature.id !== undefined) {
+          if (featureId !== undefined) {
             map.setFeatureState(
-              { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: feature.id },
+              { source: 'country-boundaries', sourceLayer: 'country_boundaries', id: featureId },
               { hover: true }
             );
           }
@@ -1301,7 +1316,7 @@ const CyberMap: React.FC = () => {
           }
         });
 
-        map.on('mouseleave', 'continent-fills', () => {
+        map.on('mouseleave', 'country-hover-target', () => {
           map.getCanvas().style.cursor = '';
           if (hoveredCountryIdRef.current !== null) {
             map.setFeatureState(
