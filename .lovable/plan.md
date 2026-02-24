@@ -1,58 +1,36 @@
 
-Goal: make every attack line fully disappear the instant it reaches Somalia, with zero lingering arc visibility, while keeping only the arrival flash effect.
 
-What is happening now (root cause):
-1. There are two render paths for attack visuals in `src/pages/CyberMap.tsx`:
-   - Canvas overlay arcs (recently updated to use `impact` phase)
-   - Map-layer GeoJSON arcs (`attack-full-arcs`, `attack-arcs-glow`, `attack-arcs`)
-2. The map-layer path still keeps/outputs arc geometry after arrival (especially via `buildFullArcsGeoJSON`), so users still see lines even if canvas logic hides them.
-3. The map-layer animation clock currently mixes `Date.now()` and `performance.now()`, which can keep state timing wrong and allow stale visuals to persist.
+## Keep Attack Feed History in Sidebar
 
-Implementation plan (single file: `src/pages/CyberMap.tsx`):
+### Problem
+The sidebar feed currently clears all previous attacks when a new burst starts (every ~20 seconds). This means only the latest 1-3 attacks are visible at any time, making the feed look empty and unrealistic.
 
-1) Fix timing source consistency for arc lifecycle
-- In “sync new threats into arc state”, set `startTime` using `performance.now()` (and reduced-motion equivalent based on `performance.now()`), so elapsed/progress/fade calculations are accurate in the RAF loop.
-- Keep all arc-state lifecycle math on the same clock (`performance.now()`).
+### Solution
+Maintain a separate, persistent history of all attacks in the feed that never gets cleared on burst start. The feed will accumulate attacks over time like a real security operations log.
 
-2) Stop emitting any line geometry once an arc arrives
-- Update `buildArcsGeoJSON(states)`:
-  - Render only while `0 < progress < 1`.
-  - Remove the “after arrival show full arc” branch.
-- Update `buildFullArcsGeoJSON(states)`:
-  - Render guide rail only while `progress < 1`.
-  - Do not output full-arc features for impacted attacks.
-- Result: all mapbox line layers receive no post-impact line features.
+### Changes
 
-3) Remove arc state immediately at first impact (after triggering flash)
-- In the RAF tick loop (map-layer state update):
-  - When `newProgress >= 1`:
-    - Trigger flash once (existing `flashStatesRef` logic).
-    - Immediately delete the arc from `arcStatesRef`.
-    - `continue` so no lingering opacity/fade line lifecycle applies.
-- Keep flash/ring effects independent via `flashStatesRef`, so arrival still feels realistic without line clutter.
+**File: `src/hooks/useLiveAttacks.ts`**
 
-4) Clean up now-obsolete fade behavior for map-layer arcs
-- Since arcs are removed on impact, map-layer fade constants/branches should be simplified to avoid conflicting future behavior.
-- Preserve canvas behavior as-is (it already hides arc lines in `impact` phase).
+- Stop clearing old threats on burst start. Change the `addThreat` callback so it always prepends new threats to the existing list (never resets to `[threat]`).
+- Keep the `RING_BUFFER_SIZE` (100) cap so memory doesn't grow unbounded.
 
-5) Verification checklist (desktop + mobile `/cyber-map`)
-- Watch a line travel into Somalia:
-  - At arrival frame, line is gone immediately (no faint guide rail, no glow, no core trace).
-  - Only impact flash/ring remains briefly.
-- Let multiple bursts run:
-  - No historical line accumulation.
-  - Map remains visually clean between bursts.
-- Toggle Live off/on:
-  - No stale lines reappear.
-- Pan/zoom test:
-  - No ghost arc artifacts after camera movement.
+The key change is in the `addThreat` callback (line 228-233):
+```text
+// Before: clears old batch on burst start
+if (isBurstStart) return [threat];
+return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
 
-Acceptance criteria:
-- Zero visible attack line segments after impact.
-- Arrival flash still plays.
-- No persistent/stacked old lines over time.
-- Visual result matches “clean, realistic live-threat map” requirement.
+// After: always accumulate, never clear
+return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
+```
 
-Technical notes:
-- This is intentionally strict removal (impact = line death) rather than fade.
-- By fixing the clock mismatch and post-impact feature emission together, we eliminate both “intended linger” and “buggy stale” line persistence paths.
+This single change ensures:
+- The sidebar feed accumulates all attacks over time (up to 100 entries)
+- Attacks that have already reached Somalia and vanished from the map remain visible in the feed
+- The feed looks like a real-time security log with continuous history
+- Memory stays bounded at 100 entries maximum
+
+### Result
+The attack feed sidebar will show a continuous, scrollable log of all recent attacks -- including those whose map lines have already disappeared -- matching the reference image's dense, realistic feed appearance.
+
