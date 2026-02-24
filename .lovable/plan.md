@@ -1,37 +1,36 @@
 
 
-## Add Country Name Tooltip on Hover
+## Fix Country Hover Tooltip
 
-### What it does
-When hovering over any country on the cyber map, a tooltip will appear near the cursor showing the country's name -- similar to the reference image showing "South Africa."
+### Problem
+The country hover tooltip isn't appearing because of two issues:
+1. The `continent-fills` layer uses fully transparent fill (`rgba(0,0,0,0)`) for countries not in the hardcoded continent lists, so Mapbox doesn't fire mouse events on those invisible areas.
+2. The vector source has no `promoteId`, making `feature.id` unreliable for `setFeatureState` hover highlights.
 
-### How it works
+### Solution
 
 **File: `src/pages/CyberMap.tsx`**
 
-1. **Add a hover-highlight fill layer** (`country-hover-fill`) on top of the existing `continent-fills` layer. This layer uses a feature-state filter (`hover: true`) to subtly brighten the hovered country, giving visual feedback.
+1. **Add `promoteId`** to the `country-boundaries` source so each feature gets a stable ID based on `iso_3166_1`:
+```text
+map.addSource('country-boundaries', {
+  type: 'vector',
+  url: 'mapbox://mapbox.country-boundaries-v1',
+  promoteId: { 'country_boundaries': 'iso_3166_1' },
+});
+```
 
-2. **Add a symbol layer for the tooltip** (`country-hover-label`) that displays the `name_en` property from the Mapbox `country-boundaries-v1` tileset as a text label near the hovered country. This label will have:
-   - White text with a dark background halo for readability
-   - Small font size (~12px) matching the reference style
-   - Only visible when a country is hovered
+2. **Add an invisible interactive fill layer** (`country-hover-target`) that covers ALL countries (not just the continent-listed ones). This layer sits below `continent-fills` and catches mouse events everywhere:
+   - Fill color: `rgba(0,0,0,0.01)` (nearly invisible but interactive)
+   - Placed before `continent-fills` in the layer order
 
-3. **Add mouse event handlers** on the `continent-fills` layer:
-   - `mousemove`: Track the currently hovered feature, set its `feature-state` to `{ hover: true }`, and update a React ref tracking the hovered country ISO code
-   - `mouseleave`: Clear the feature state and hide the label
-   - Change cursor to `pointer` on hover
+3. **Switch mouse event handlers** from listening on `continent-fills` to listening on `country-hover-target` so every country triggers the tooltip.
 
-4. **Use a Mapbox Popup** (lightweight built-in tooltip) instead of a symbol layer for simpler implementation:
-   - Create a `mapboxgl.Popup` instance with `closeButton: false, closeOnClick: false` and custom CSS class
-   - On `mousemove` over `continent-fills`, set its content to the country's `name_en` and position it at the cursor
-   - On `mouseleave`, remove the popup
-   - Style the popup with a dark semi-transparent background, white text, and no arrow -- matching the SOC dark theme
+4. **Update `hoveredCountryIdRef`** to store a string (ISO code) instead of a number, matching the promoted ID type. Update all `setFeatureState` calls accordingly.
 
-5. **Add state ref** (`hoveredCountryIdRef`) to track the previously hovered feature for clearing feature-state on the next move.
+5. **Use `name_en`** from feature properties for the tooltip label (already in place, just needs the events to actually fire).
 
-### Technical details
-
-- The `country-boundaries-v1` tileset includes `name_en` (English country name) on every feature
-- Using Mapbox's built-in Popup is simpler and more performant than a custom HTML overlay since it auto-positions relative to the map
-- The popup will be styled via a CSS class injected in the component to match the dark theme (dark background, white text, no border arrow)
-- The popup is created once and reused (moved/updated on each mousemove) for performance
+### Result
+- Hovering over any country on the map will show a dark tooltip with the country name (matching the reference image style: "Ethiopia")
+- A subtle highlight will appear on the hovered country
+- Works for ALL countries, not just those in the continent color lists
