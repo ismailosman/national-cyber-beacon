@@ -22,7 +22,7 @@ import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
 import Compliance from "@/pages/Compliance";
-import CertAdvisories from "@/pages/CertAdvisories";
+
 
 import UptimeMonitor from "@/pages/UptimeMonitor";
 import DdosMonitor from "@/pages/DdosMonitor";
@@ -63,7 +63,7 @@ const ProtectedRoutes = () => {
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
-        <Route path="/cert" element={<CertAdvisories />} />
+        
             <Route path="/reports" element={<Reports />} />
         <Route path="/uptime" element={<UptimeMonitor />} />
         <Route path="/ddos-monitor" element={<DdosMonitor />} />

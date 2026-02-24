@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Radio, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield
 } from 'lucide-react';
 import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,7 +14,7 @@ const navItems = [
   { to: '/alerts', icon: Bell, label: 'Alert Center' },
   { to: '/incidents', icon: AlertOctagon, label: 'Incidents' },
   { to: '/compliance', icon: CheckSquare, label: 'Compliance' },
-  { to: '/cert', icon: Radio, label: 'CERT-SO' },
+  
   { to: '/cyber-map', icon: Map, label: 'Threat Map' },
   { to: '/uptime', icon: Activity, label: 'Uptime Monitor' },
   { to: '/ddos-monitor', icon: ShieldAlert, label: 'DDoS Monitor' },
