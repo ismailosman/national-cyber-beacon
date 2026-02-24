@@ -11,12 +11,12 @@ const HeroSection: React.FC = () => (
       playsInline
       className="absolute inset-0 w-full h-full object-cover"
     >
-      <source src="https://www.shutterstock.com/shutterstock/videos/3814669891/preview/stock-footage-fast-code-and-screen-with-software-cybersecurity-or-it-for-overload-or-digital-glitch-tech.webm" type="video/webm" />
+      <source src="https://www.shutterstock.com/shutterstock/videos/3980532735/preview/stock-footage-futuristic-digital-earth-globe-with-glowing-global-network-connection-lines-big-data-transfer-and.webm" type="video/webm" />
       <source src="/herosection.mp4" type="video/mp4" />
     </video>
 
     {/* Overlay */}
-    <div className="absolute inset-0 bg-black/70 dark:bg-black/65" />
+    <div className="absolute inset-0 bg-black/50 dark:bg-black/50" />
 
     {/* Content */}
     <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
