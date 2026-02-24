@@ -52,8 +52,8 @@ function genCountryDefaultPercentages(country: string): Record<AttackType, numbe
   return result;
 }
 
-const TRAVEL_DURATION  = 1.2;   // snappy, urgent travel
-const FLASH_DURATION   = 1.2;   // impact flash ring expansion (seconds)
+const TRAVEL_DURATION  = 3.0;   // slower, cinematic travel
+const FLASH_DURATION   = 2.0;   // impact flash ring expansion (seconds)
 const VISIBLE_DURATION = 15;   // long persistence → stacking effect
 const FADE_DURATION    = 3;
 const ARC_STEPS        = 50;
@@ -720,7 +720,7 @@ const CyberMap: React.FC = () => {
       return { x, y };
     };
 
-    const SPEED = 0.012; // progress per frame at 60fps (≈1.4s travel)
+    const SPEED = 0.005; // progress per frame at 60fps (≈3.3s travel)
     const FADE_FRAMES = 60;
 
     const draw = () => {
@@ -778,7 +778,7 @@ const CyberMap: React.FC = () => {
           ctx.save();
           ctx.globalAlpha = baseOpacity * (arc.phase === 'fading' ? 0.6 : 0.18);
           ctx.strokeStyle = arc.color;
-          ctx.lineWidth   = 1;
+          ctx.lineWidth   = 2;
           ctx.beginPath();
           for (let s = 0; s <= CANVAS_SEGMENTS; s++) {
             const t  = s / CANVAS_SEGMENTS;
@@ -803,7 +803,7 @@ const CyberMap: React.FC = () => {
             ctx.save();
             ctx.globalAlpha = segFrac * baseOpacity * 0.25;
             ctx.strokeStyle = arc.color;
-            ctx.lineWidth   = 8;
+            ctx.lineWidth   = 12;
             ctx.lineCap     = 'round';
             ctx.shadowBlur  = 12;
             ctx.shadowColor = arc.color;
@@ -817,7 +817,7 @@ const CyberMap: React.FC = () => {
             ctx.save();
             ctx.globalAlpha = segFrac * baseOpacity * 0.9;
             ctx.strokeStyle = arc.color;
-            ctx.lineWidth   = 1.8;
+            ctx.lineWidth   = 3;
             ctx.lineCap     = 'round';
             ctx.beginPath();
             ctx.moveTo(p0.x, p0.y);
