@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ScanResult, ScanSummary, ScanType } from "@/types/security";
 import { startScan, listScans, getScan, deleteScan, checkHealth, pollScan } from "@/services/securityApi";
 import { sendScanCompletedEmail, sendCriticalAlertEmail, hasCriticalFindings } from "@/services/emailService";
@@ -17,12 +17,60 @@ export default function SecurityDashboard() {
   const [clientEmail, setClientEmail] = useState<string | undefined>();
   const [clientName, setClientName] = useState<string | undefined>();
 
+  // Track scan IDs that have already had emails sent to prevent duplicates
+  const emailedScans = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     checkHealth()
       .then(() => setApiOnline(true))
       .catch(() => setApiOnline(false));
     fetchHistory();
   }, []);
+
+  // Resume polling for in-progress scans on mount (resilience to page reloads)
+  useEffect(() => {
+    if (history.length === 0) return;
+    const inProgress = history.find(s => s.status === "queued" || s.status === "running");
+    if (inProgress && !scanning) {
+      setScanning(true);
+      const stop = pollScan(inProgress.scan_id, (result) => {
+        setActiveScan(result);
+        if (result.status === "done" || result.status === "error") {
+          setScanning(false);
+          fetchHistory();
+        }
+      });
+      setStopPoll(() => stop);
+    }
+  }, [history.length]); // only run when history first loads
+
+  // Safety-net: send emails when activeScan becomes "done"
+  useEffect(() => {
+    if (!activeScan || activeScan.status !== "done") return;
+    if (emailedScans.current.has(activeScan.scan_id)) return;
+
+    emailedScans.current.add(activeScan.scan_id);
+
+    const email = clientEmail;
+    const name = clientName;
+
+    (async () => {
+      try {
+        await sendScanCompletedEmail(activeScan, email, name);
+        console.log("✅ Scan completed email sent");
+      } catch (err) {
+        console.error("Email error:", err);
+      }
+      if (hasCriticalFindings(activeScan)) {
+        try {
+          await sendCriticalAlertEmail(activeScan, email, name);
+          console.log("🚨 Critical alert email sent");
+        } catch (err) {
+          console.error("Critical alert email error:", err);
+        }
+      }
+    })();
+  }, [activeScan?.status, activeScan?.scan_id]);
 
   async function fetchHistory() {
     try {
@@ -41,25 +89,12 @@ export default function SecurityDashboard() {
 
     try {
       const { scan_id } = await startScan(type, repoUrl, targetUrl);
-      const stop = pollScan(scan_id, async (result) => {
+      const stop = pollScan(scan_id, (result) => {
         setActiveScan(result);
         if (result.status === "done") {
           setScanning(false);
           fetchHistory();
-          try {
-            await sendScanCompletedEmail(result, clientEmail, clientName);
-            console.log("✅ Scan completed email sent");
-          } catch (err) {
-            console.error("Email error:", err);
-          }
-          if (hasCriticalFindings(result)) {
-            try {
-              await sendCriticalAlertEmail(result, clientEmail, clientName);
-              console.log("🚨 Critical alert email sent");
-            } catch (err) {
-              console.error("Critical alert email error:", err);
-            }
-          }
+          // Emails are now handled by the useEffect above
         }
         if (result.status === "error") {
           setScanning(false);
