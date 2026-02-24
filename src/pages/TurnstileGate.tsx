@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
-import logo from "@/assets/logo.png";
+import logo from "@/assets/logo-circle.png";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACfqOh5kqOZCLMB6";
 
@@ -107,7 +107,7 @@ const TurnstileGate = ({ children, sessionKey = "turnstile_verified", domain = "
           <img
             src={logo}
             alt="Somalia Cyber Defence"
-            className="w-10 h-10"
+            className="w-12 h-12 rounded-full"
           />
           <span className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
             {domain}
