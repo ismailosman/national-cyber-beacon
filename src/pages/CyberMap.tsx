@@ -776,9 +776,9 @@ const CyberMap: React.FC = () => {
         // ── Full solid arc line (guide rail, dim) ───────────────────────
         {
           ctx.save();
-          ctx.globalAlpha = baseOpacity * (arc.phase === 'fading' ? 0.6 : 0.18);
+          ctx.globalAlpha = baseOpacity * (arc.phase === 'fading' ? 0.6 : 0.25);
           ctx.strokeStyle = arc.color;
-          ctx.lineWidth   = 1.2;
+          ctx.lineWidth   = 2.5;
           ctx.beginPath();
           for (let s = 0; s <= CANVAS_SEGMENTS; s++) {
             const t  = s / CANVAS_SEGMENTS;
@@ -801,11 +801,11 @@ const CyberMap: React.FC = () => {
 
             // Glow layer
             ctx.save();
-            ctx.globalAlpha = segFrac * baseOpacity * 0.25;
+            ctx.globalAlpha = segFrac * baseOpacity * 0.4;
             ctx.strokeStyle = arc.color;
-            ctx.lineWidth   = 6;
+            ctx.lineWidth   = 14;
             ctx.lineCap     = 'round';
-            ctx.shadowBlur  = 12;
+            ctx.shadowBlur  = 20;
             ctx.shadowColor = arc.color;
             ctx.beginPath();
             ctx.moveTo(p0.x, p0.y);
@@ -817,7 +817,7 @@ const CyberMap: React.FC = () => {
             ctx.save();
             ctx.globalAlpha = segFrac * baseOpacity * 0.9;
             ctx.strokeStyle = arc.color;
-            ctx.lineWidth   = 1.5;
+            ctx.lineWidth   = 3.5;
             ctx.lineCap     = 'round';
             ctx.beginPath();
             ctx.moveTo(p0.x, p0.y);
@@ -861,7 +861,7 @@ const CyberMap: React.FC = () => {
           ctx.save();
           ctx.globalAlpha    = ringOpacity;
           ctx.strokeStyle    = arc.color;
-          ctx.lineWidth      = 1.5;
+          ctx.lineWidth      = 2.5;
           ctx.shadowBlur     = 10;
           ctx.shadowColor    = arc.color;
           ctx.beginPath();
@@ -878,7 +878,7 @@ const CyberMap: React.FC = () => {
           ctx.save();
           ctx.globalAlpha = (1 - flashT) * 0.9;
           ctx.strokeStyle = arc.color;
-          ctx.lineWidth   = 2.5;
+          ctx.lineWidth   = 3.5;
           ctx.shadowBlur  = 20;
           ctx.shadowColor = arc.color;
           ctx.beginPath();
@@ -891,7 +891,7 @@ const CyberMap: React.FC = () => {
           ctx.save();
           ctx.globalAlpha = Math.max(0, 1 - flashT2) * 0.5;
           ctx.strokeStyle = arc.color;
-          ctx.lineWidth   = 1.5;
+          ctx.lineWidth   = 2.5;
           ctx.beginPath();
           ctx.arc(dst.x, dst.y, eased2 * 52, 0, Math.PI * 2);
           ctx.stroke();
