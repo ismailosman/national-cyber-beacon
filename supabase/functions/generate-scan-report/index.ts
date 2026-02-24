@@ -58,11 +58,24 @@ function computeStats(result: any) {
   const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
   const niktoVulns = result.dast_results?.nikto?.vulnerabilities || [];
 
+  // Map Semgrep's non-standard severities to standard ones
+  const sevAliases: Record<string, string[]> = {
+    critical: ['critical'],
+    high: ['high', 'error'],
+    medium: ['medium', 'warning'],
+    low: ['low'],
+    info: ['info', 'informational'],
+  };
+
   const countSev = (sev: string) => {
+    const aliases = sevAliases[sev] || [sev];
     let c = 0;
-    c += nuclei.filter((f: any) => (f.info?.severity || '').toLowerCase() === sev).length;
-    c += semgrep.filter((f: any) => (f.extra?.severity || '').toLowerCase() === sev).length;
-    c += zapAlerts.filter((a: any) => (a.riskdesc || '').toLowerCase().startsWith(sev)).length;
+    c += nuclei.filter((f: any) => aliases.includes((f.info?.severity || '').toLowerCase())).length;
+    c += semgrep.filter((f: any) => aliases.includes((f.extra?.severity || '').toLowerCase())).length;
+    c += zapAlerts.filter((a: any) => {
+      const riskLower = (a.riskdesc || '').toLowerCase();
+      return aliases.some(a => riskLower.startsWith(a));
+    }).length;
     return c;
   };
 
@@ -70,7 +83,7 @@ function computeStats(result: any) {
   const high = countSev('high');
   const medium = countSev('medium');
   const low = countSev('low');
-  const info = countSev('info') + countSev('informational');
+  const info = countSev('info');
   const total = critical + high + medium + low + info;
   const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1)));
 
@@ -89,10 +102,18 @@ function getGrade(score: number) {
 function normalizeFindings(result: any) {
   const findings: { tool: string; severity: string; name: string; description: string; location: string; remediation: string }[] = [];
 
+  // Normalize Semgrep severities: ERROR→HIGH, WARNING→MEDIUM
+  const normalizeSev = (sev: string): string => {
+    const upper = sev.toUpperCase();
+    if (upper === 'ERROR') return 'HIGH';
+    if (upper === 'WARNING') return 'MEDIUM';
+    return upper;
+  };
+
   for (const f of (result.sast_results?.semgrep?.findings || [])) {
     const entry = {
       tool: 'Semgrep',
-      severity: (f.extra?.severity || 'info').toUpperCase(),
+      severity: normalizeSev(f.extra?.severity || 'info'),
       name: s(f.check_id?.split('.')?.slice(-1)[0] || 'Finding'),
       description: s(f.extra?.message || '', 120),
       location: s(`${f.path}:${f.start?.line}`, 40),
