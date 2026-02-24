@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import { ScanResult, NucleiFinding, SemgrepFinding } from "@/types/security";
 import StatusBadge from "./StatusBadge";
 import ScanReportCharts from "./ScanReportCharts";
-import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield, Download } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield, Download, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { sendReportDeliveryEmail } from "@/services/emailService";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -141,9 +144,18 @@ function getTestStatus(findings: UnifiedFinding[]) {
   return fails.length > 0 ? 'warning' : 'clean';
 }
 
-export default function ScanResults({ result }: { result: ScanResult }) {
+interface ScanResultsProps {
+  result: ScanResult;
+  clientEmail?: string;
+  clientName?: string;
+}
+
+export default function ScanResults({ result, clientEmail, clientName }: ScanResultsProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [sendingReport, setSendingReport] = useState(false);
+  const [popoverEmail, setPopoverEmail] = useState("");
+  const [popoverOpen, setPopoverOpen] = useState(false);
 
   const toggleTool = (name: string) => {
     setExpandedTools(prev => {
@@ -182,6 +194,26 @@ export default function ScanResults({ result }: { result: ScanResult }) {
     }
   }
 
+  async function handleSendReport(email?: string) {
+    const targetEmail = email || clientEmail;
+    if (!targetEmail) {
+      setPopoverOpen(true);
+      return;
+    }
+    setSendingReport(true);
+    try {
+      const reportUrl = `https://cyberdefense.so/scan/${result.scan_id}`;
+      await sendReportDeliveryEmail(result, reportUrl, targetEmail, clientName);
+      toast.success(`Report sent to ${targetEmail}`);
+      setPopoverOpen(false);
+      setPopoverEmail("");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send report");
+    } finally {
+      setSendingReport(false);
+    }
+  }
+
   const { tools } = normalizeFindings(result);
 
   return (
@@ -195,16 +227,48 @@ export default function ScanResults({ result }: { result: ScanResult }) {
           </div>
           <div className="flex items-center gap-2">
             {result.status === "done" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportPDF}
-                disabled={exporting}
-                className="gap-1.5"
-              >
-                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                Export PDF
-              </Button>
+              <div className="flex items-center gap-2">
+                <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSendReport()}
+                      disabled={sendingReport}
+                      className="gap-1.5"
+                    >
+                      {sendingReport ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      Send Report
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-3" align="end">
+                    <p className="text-xs text-muted-foreground mb-2">Enter recipient email:</p>
+                    <form onSubmit={(e) => { e.preventDefault(); handleSendReport(popoverEmail); }} className="flex gap-2">
+                      <Input
+                        type="email"
+                        value={popoverEmail}
+                        onChange={(e) => setPopoverEmail(e.target.value)}
+                        placeholder="client@example.com"
+                        required
+                        className="h-8 text-sm"
+                      />
+                      <Button type="submit" size="sm" disabled={sendingReport} className="h-8 px-3">
+                        {sendingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : "Send"}
+                      </Button>
+                    </form>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportPDF}
+                  disabled={exporting}
+                  className="gap-1.5"
+                >
+                  {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  Export PDF
+                </Button>
+              </div>
             )}
             <StatusBadge status={result.status} />
           </div>

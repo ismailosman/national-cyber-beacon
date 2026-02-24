@@ -14,6 +14,8 @@ export default function SecurityDashboard() {
   const [history, setHistory] = useState<ScanSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [stopPoll, setStopPoll] = useState<(() => void) | null>(null);
+  const [clientEmail, setClientEmail] = useState<string | undefined>();
+  const [clientName, setClientName] = useState<string | undefined>();
 
   useEffect(() => {
     checkHealth()
@@ -29,10 +31,12 @@ export default function SecurityDashboard() {
     } catch {}
   }
 
-  async function handleStartScan(type: ScanType, repoUrl?: string, targetUrl?: string, clientEmail?: string, clientName?: string) {
+  async function handleStartScan(type: ScanType, repoUrl?: string, targetUrl?: string, email?: string, name?: string) {
     setError(null);
     setScanning(true);
     setActiveScan(null);
+    setClientEmail(email);
+    setClientName(name);
     stopPoll?.();
 
     try {
@@ -137,7 +141,7 @@ export default function SecurityDashboard() {
         {/* Right column */}
         <div className="lg:col-span-2">
           {activeScan ? (
-            <ScanResults result={activeScan} />
+            <ScanResults result={activeScan} clientEmail={clientEmail} clientName={clientName} />
           ) : (
             <div className="bg-gray-900/80 border border-gray-800 rounded-xl flex flex-col items-center justify-center py-20">
               <span className="text-4xl mb-4">🛡️</span>
