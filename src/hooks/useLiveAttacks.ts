@@ -35,12 +35,10 @@ const DAY_SEED = hashStr(DAY_STRING);
 
 // ── Deterministic delay for the Nth threat ──
 function getDelay(index: number): number {
-  const r = createSeededRand(DAY_SEED + index * 3571);
-  // Every 3 attacks = 1 burst. After a burst, wait 18-22 seconds.
-  if ((index + 1) % 3 === 0) {
-    return 18000 + r() * 4000; // 18-22s pause between bursts
-  }
-  return 200 + r() * 300; // 200-500ms between attacks within a burst
+  const cycle = index % 3;
+  if (cycle === 0) return 2000;  // 2 seconds
+  if (cycle === 1) return 3000;  // 3 seconds
+  return 5000;                   // 5 seconds
 }
 
 // ── Calculate current position in day's sequence ──
