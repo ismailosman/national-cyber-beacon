@@ -1,33 +1,46 @@
 
+## Separate Somalia from Other African Countries in Attack Corridors
 
-## Change Attack Timing to 2s, 3s, 5s Cycle
+### Problem
+Right now, the "East Africa" corridor lumps Somalia together with Kenya, Ethiopia, Tanzania, etc. in one `REGION_TARGETS` array. This makes the attack pattern too obvious -- half the attacks all cluster in the same region.
 
-### Current Behavior
-Attacks fire in bursts of 3 (200-500ms apart) followed by an 18-22 second pause.
+### Solution
+Split into **4 corridors** instead of 3, giving each a distinct identity:
 
-### New Behavior
-Attacks will fire in a repeating 3-step cycle:
-1. First attack: wait **2 seconds**
-2. Second attack: wait **3 seconds**
-3. Third attack: wait **5 seconds**
-4. Repeat from step 1
+1. **Somalia corridor (30%)** -- Somalia-only targets (Mogadishu, Hargeisa, etc.) attacked by global sources
+2. **Africa corridor (20%)** -- Kenya, Ethiopia, Djibouti, Tanzania, Sudan, Uganda, Rwanda attacked by different global sources  
+3. **USA corridor (25%)** -- Russia, Iran, North Korea, China attacking US cities
+4. **EU corridor (25%)** -- South America and Asia attacking European cities
 
-This creates a steady, rhythmic flow across the map instead of rapid bursts with long pauses.
-
-### Technical Details
+### Changes
 
 **File: `src/hooks/useLiveAttacks.ts`**
 
-Update the `getDelay` function to cycle through 2s, 3s, 5s delays:
+1. **Split `REGION_TARGETS` into two arrays:**
+   - `SOMALIA_TARGETS` -- the 12 Somalia entries (Mogadishu, Banaadir, Hodan, Hargeisa, etc.)
+   - `AFRICA_TARGETS` -- the remaining entries (Djibouti, Kenya, Ethiopia, Tanzania, Sudan, Uganda, Rwanda)
+
+2. **Update `generateDayThreat` corridor selection:**
 
 ```text
-function getDelay(index: number): number {
-  const cycle = index % 3;
-  if (cycle === 0) return 2000;  // 2 seconds
-  if (cycle === 1) return 3000;  // 3 seconds
-  return 5000;                   // 5 seconds
+const corridorRoll = rand();
+if (corridorRoll < 0.30) {
+  // Somalia corridor
+  source = WEIGHTED_SOURCES[...]
+  target = SOMALIA_TARGETS[...]
+} else if (corridorRoll < 0.50) {
+  // Africa corridor
+  source = WEIGHTED_SOURCES[...]
+  target = AFRICA_TARGETS[...]
+} else if (corridorRoll < 0.75) {
+  // USA corridor
+  source = USA_THREAT_SOURCES[...]
+  target = USA_TARGETS[...]
+} else {
+  // EU corridor
+  source = EU_THREAT_SOURCES[...]
+  target = EU_TARGETS[...]
 }
 ```
 
-The seeded randomness for delay is no longer needed since the pattern is fixed. The `getDelay` function is also used by `calculateCurrentIndex` to determine where we are in the day's sequence, so that will automatically stay consistent.
-
+This spreads attacks more naturally across the globe -- Somalia still gets the highest share but the other African countries appear as separate, distinct targets rather than part of one obvious block.
