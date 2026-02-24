@@ -198,6 +198,18 @@
 .mapboxgl-ctrl-attrib { background: hsl(216 28% 8% / 0.8) !important; color: hsl(215 20% 45%) !important; }
 .mapboxgl-ctrl-attrib a { color: hsl(186 100% 50% / 0.7) !important; }
 
+/* Country hover tooltip */
+.country-hover-popup .mapboxgl-popup-content {
+  background: rgba(15, 20, 30, 0.92) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+.country-hover-popup .mapboxgl-popup-tip {
+  display: none !important;
+}
+
 /* ── Critical alert pulse ring ───────────────────────────────────────── */
 @keyframes alert-pulse {
   0%   { transform: scale(1);   opacity: 0.9; }
