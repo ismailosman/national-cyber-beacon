@@ -36,7 +36,11 @@ const DAY_SEED = hashStr(DAY_STRING);
 // ── Deterministic delay for the Nth threat ──
 function getDelay(index: number): number {
   const r = createSeededRand(DAY_SEED + index * 3571);
-  return 2500 + r() * 2500; // 2.5–5s (1-2 attacks per 5 seconds)
+  // Every 3 attacks = 1 burst. After a burst, wait 18-22 seconds.
+  if ((index + 1) % 3 === 0) {
+    return 18000 + r() * 4000; // 18-22s pause between bursts
+  }
+  return 200 + r() * 300; // 200-500ms between attacks within a burst
 }
 
 // ── Calculate current position in day's sequence ──
@@ -221,8 +225,11 @@ export function useLiveAttacks(enabled: boolean) {
     return () => { todayListeners.delete(setTodayCount); };
   }, []);
 
-  const addThreat = useCallback((threat: LiveThreat) => {
-    setThreats(prev => [threat, ...prev].slice(0, RING_BUFFER_SIZE));
+  const addThreat = useCallback((threat: LiveThreat, isBurstStart: boolean) => {
+    setThreats(prev => {
+      if (isBurstStart) return [threat]; // clear old batch
+      return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
+    });
     incrementSharedCount();
   }, []);
 
@@ -238,7 +245,8 @@ export function useLiveAttacks(enabled: boolean) {
       return setTimeout(() => {
         const realRecently = Date.now() - lastRealEventRef.current < 5000;
         if (!realRecently) {
-          addThreat(generateDayThreat(sharedThreatIndex));
+          const isBurstStart = sharedThreatIndex % 3 === 0;
+          addThreat(generateDayThreat(sharedThreatIndex), isBurstStart);
           sharedThreatIndex += 1;
         }
         timerRef.current = scheduleNext();

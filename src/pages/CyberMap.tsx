@@ -54,8 +54,8 @@ function genCountryDefaultPercentages(country: string): Record<AttackType, numbe
 
 const TRAVEL_DURATION  = 3.0;   // slower, cinematic travel
 const FLASH_DURATION   = 2.0;   // impact flash ring expansion (seconds)
-const VISIBLE_DURATION = 15;   // long persistence → stacking effect
-const FADE_DURATION    = 3;
+const VISIBLE_DURATION = 12;   // arcs fade before next burst arrives
+const FADE_DURATION    = 2;
 const ARC_STEPS        = 50;
 const RING_PERIOD      = 2000; // ms per ring cycle
 
