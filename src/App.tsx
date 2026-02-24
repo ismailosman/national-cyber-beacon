@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
@@ -22,7 +23,6 @@ import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
 import Compliance from "@/pages/Compliance";
-
 
 import UptimeMonitor from "@/pages/UptimeMonitor";
 import DdosMonitor from "@/pages/DdosMonitor";
@@ -63,8 +63,7 @@ const ProtectedRoutes = () => {
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
-        
-            <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<Reports />} />
         <Route path="/uptime" element={<UptimeMonitor />} />
         <Route path="/ddos-monitor" element={<DdosMonitor />} />
         <Route path="/early-warning" element={<EarlyWarning />} />
@@ -81,28 +80,30 @@ const ProtectedRoutes = () => {
 };
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner theme="dark" />
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            <Route path="/mol" element={<Login />} />
-            <Route path="/" element={<Landing />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/cyber-map" element={<CyberMap />} />
-            
-            <Route path="/dashboard" element={<ProtectedRoutes />} />
-            <Route path="/*" element={<ProtectedRoutes />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner theme="dark" />
+        <BrowserRouter>
+          <AuthProvider>
+            <Routes>
+              <Route path="/mol" element={<Login />} />
+              <Route path="/" element={<Landing />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/cyber-map" element={<CyberMap />} />
+              
+              <Route path="/dashboard" element={<ProtectedRoutes />} />
+              <Route path="/*" element={<ProtectedRoutes />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;
