@@ -8,7 +8,7 @@ const corsHeaders = {
 
 /* ─── PDF text sanitizer ─── */
 function s(text: string | null | undefined, maxLen = 90): string {
-  return (text || '').replace(/[()\\]/g, ' ').substring(0, maxLen);
+  return (text || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/[()\\]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxLen);
 }
 
 /* ─── Remediation Knowledge Base ─── */
@@ -413,13 +413,14 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
       const isAlt = shownCount % 2 === 0;
       if (isAlt) p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 14 re f`);
 
+      const sevLabel = f.severity === 'INFORMATIONAL' ? 'INFO' : f.severity;
       const sevColor =
         f.severity === 'CRITICAL' ? '0.8 0.15 0.1' :
         f.severity === 'HIGH' ? '0.85 0.45 0' :
         f.severity === 'MEDIUM' ? '0.7 0.6 0' :
         f.severity === 'LOW' ? '0.15 0.4 0.8' : '0.5 0.5 0.5';
 
-      p1.push(`BT /F2 7 Tf ${sevColor} rg 50 ${sy + 1} Td (${f.severity}) Tj ET`);
+      p1.push(`BT /F2 7 Tf ${sevColor} rg 50 ${sy + 1} Td (${sevLabel}) Tj ET`);
       p1.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 115 ${sy + 1} Td (${f.tool}) Tj ET`);
       p1.push(`BT /F1 7 Tf 0.15 0.2 0.25 rg 170 ${sy + 1} Td (${s(f.name, 40)}) Tj ET`);
       p1.push(`BT /F1 6 Tf 0.4 0.45 0.5 rg 420 ${sy + 1} Td (${s(f.location, 25)}) Tj ET`);
@@ -549,7 +550,7 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
 
   // ── Page 3+: Detailed Findings with Remediation ──
   if (findings.length > 0) {
-    const findingsPerPage = 6;
+    const findingsPerPage = 8;
     for (let pageIdx = 0; pageIdx < findings.length; pageIdx += findingsPerPage) {
       const pageFindings = findings.slice(pageIdx, pageIdx + findingsPerPage);
       const pf: string[] = [];
@@ -561,7 +562,7 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
       for (const f of pageFindings) {
         if (fy < 100) break;
 
-        const cardH = 90;
+        const cardH = 72;
         pf.push(`0.97 0.97 0.98 rg`, `40 ${fy - cardH + 10} 515 ${cardH} re f`);
 
         const sevColor =
@@ -575,28 +576,31 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
           f.severity === 'MEDIUM' ? '1 0.98 0.9' :
           f.severity === 'LOW' ? '0.9 0.95 1' : '0.95 0.95 0.95';
 
+        // Abbreviate INFORMATIONAL to INFO for badge display
+        const sevLabel = f.severity === 'INFORMATIONAL' ? 'INFO' : f.severity;
+
         pf.push(`${sevBg} rg`, `50 ${fy - 2} 55 14 re f`);
-        pf.push(`BT /F2 7 Tf ${sevColor} rg 55 ${fy + 1} Td (${f.severity}) Tj ET`);
+        pf.push(`BT /F2 7 Tf ${sevColor} rg 55 ${fy + 1} Td (${sevLabel}) Tj ET`);
 
         pf.push(`0.93 0.94 0.96 rg`, `110 ${fy - 2} 42 14 re f`);
         pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 115 ${fy + 1} Td (${f.tool}) Tj ET`);
 
         pf.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 160 ${fy + 1} Td (${s(f.name, 55)}) Tj ET`);
 
+        fy -= 16;
+
+        pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 55 ${fy} Td (${s(f.description, 90)}) Tj ET`);
+        fy -= 12;
+
+        pf.push(`BT /F2 6 Tf 0.4 0.45 0.5 rg 55 ${fy} Td (Location:) Tj ET`);
+        pf.push(`BT /F1 6 Tf 0.3 0.35 0.4 rg 100 ${fy} Td (${s(f.location, 70)}) Tj ET`);
+        fy -= 12;
+
+        pf.push(`0.9 0.95 0.9 rg`, `50 ${fy - 3} 500 12 re f`);
+        pf.push(`0.1 0.6 0.3 rg`, `50 ${fy - 3} 3 12 re f`);
+        pf.push(`BT /F2 6 Tf 0.1 0.5 0.25 rg 58 ${fy} Td (Remediation:) Tj ET`);
+        pf.push(`BT /F1 6 Tf 0.15 0.4 0.2 rg 120 ${fy} Td (${s(f.remediation, 75)}) Tj ET`);
         fy -= 18;
-
-        pf.push(`BT /F1 8 Tf 0.3 0.35 0.4 rg 55 ${fy} Td (${s(f.description, 90)}) Tj ET`);
-        fy -= 14;
-
-        pf.push(`BT /F2 7 Tf 0.4 0.45 0.5 rg 55 ${fy} Td (Location:) Tj ET`);
-        pf.push(`BT /F1 7 Tf 0.3 0.35 0.4 rg 100 ${fy} Td (${s(f.location, 70)}) Tj ET`);
-        fy -= 14;
-
-        pf.push(`0.9 0.95 0.9 rg`, `50 ${fy - 3} 500 14 re f`);
-        pf.push(`0.1 0.6 0.3 rg`, `50 ${fy - 3} 3 14 re f`);
-        pf.push(`BT /F2 7 Tf 0.1 0.5 0.25 rg 58 ${fy} Td (Remediation:) Tj ET`);
-        pf.push(`BT /F1 7 Tf 0.15 0.4 0.2 rg 120 ${fy} Td (${s(f.remediation, 75)}) Tj ET`);
-        fy -= 22;
       }
 
       addFooter(pf, pages.length + 1);
