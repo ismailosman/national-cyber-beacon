@@ -1,31 +1,19 @@
-
-
-## Replace Hero Section Background Video
+## Slow Down Cyber Map Attack Lines
 
 ### Overview
-Replace the current hero section background video (`/herosection.mp4`) with the Shutterstock preview video URL, using it as a direct source in the video element.
+
+Reduce the speed of the attack arc animations on the `/cyber-map` page so the traveling lines move more gradually across the globe.
 
 ### Changes
 
-**File: `src/components/landing/HeroSection.tsx`**
+**File: `src/pages/CyberMap.tsx**`
 
-Update the video `<source>` element to point to the new Shutterstock URL and change the type from `video/mp4` to `video/webm`:
+Update three speed-related constants:
 
-```text
-Before:
-  <source src="/herosection.mp4" type="video/mp4" />
+1. `**TRAVEL_DURATION**` (line 55): Increase from `1.2` to `3.0` seconds -- this controls how long the Mapbox-layer arc takes to travel from source to Somalia.
+2. `**FLASH_DURATION**` (line 56): Increase from `1.2` to `2.0` seconds -- this controls the impact flash ring expansion at the destination.
+3. `**SPEED**` (line 723): Decrease from `0.012` to `0.005` per frame -- this controls the Canvas-overlay projectile dot speed (~3.3s travel at 60fps).
 
-After:
-  <source src="https://www.shutterstock.com/shutterstock/videos/3814669891/preview/stock-footage-fast-code-and-screen-with-software-cybersecurity-or-it-for-overload-or-digital-glitch-tech.webm" type="video/webm" />
-```
+### Result
 
-Keep the existing `<source src="/herosection.mp4" type="video/mp4" />` as a fallback in case the external URL fails to load (e.g., due to CORS or network issues).
-
-### Files Modified
-- `src/components/landing/HeroSection.tsx` -- update video source URL
-
-### Notes
-- The Shutterstock preview URL is a `.webm` file, so it needs the correct MIME type
-- The local `/herosection.mp4` is kept as a fallback source
-- No other files need changes
-
+Attack arcs will take roughly 3 seconds to travel instead of ~1.2 seconds, giving a calmer, more cinematic feel while still looking active. Also the lines are too thin, if you can make bit visible
