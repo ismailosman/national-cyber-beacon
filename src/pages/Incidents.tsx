@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertOctagon, Plus, Clock, User, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['phishing', 'fraud', 'malware', 'ddos', 'breach', 'defacement', 'other'];
@@ -217,7 +218,7 @@ const Incidents: React.FC = () => {
                     <div key={entry.id} className="text-xs p-2 rounded bg-muted/50">
                       <p className="font-medium">{entry.action}</p>
                       {entry.notes && <p className="text-muted-foreground mt-0.5">{entry.notes}</p>}
-                      <p className="text-muted-foreground mt-0.5 font-mono">{format(new Date(entry.created_at), 'MMM dd HH:mm')}</p>
+                      <p className="text-muted-foreground mt-0.5 font-mono">{formatET(entry.created_at, 'MMM dd HH:mm')} ET</p>
                     </div>
                   ))}
                   {timeline.length === 0 && <p className="text-muted-foreground text-xs">No timeline entries yet.</p>}

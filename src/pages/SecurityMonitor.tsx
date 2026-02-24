@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from '@/hooks/use-toast';
 import { format, subDays } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 
 const SecurityMonitor: React.FC = () => {
   const { userRole } = useAuth();
@@ -345,7 +346,7 @@ const SecurityMonitor: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-foreground">Threat Intelligence Feed</p>
                 <p className="text-xs text-muted-foreground">
-                  {tiHealth?.checked_at ? `Last check: ${format(new Date(tiHealth.checked_at), 'PPp')}` : 'No data available'}
+                  {tiHealth?.checked_at ? `Last check: ${formatET(tiHealth.checked_at, 'PPp')} ET` : 'No data available'}
                 </p>
               </div>
             </div>
@@ -354,7 +355,7 @@ const SecurityMonitor: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-foreground">DAST Scanner Runner</p>
                 <p className="text-xs text-muted-foreground">
-                  {dastHealth?.scanned_at ? `Last scan: ${format(new Date(dastHealth.scanned_at), 'PPp')}` : 'No scans recorded'}
+                  {dastHealth?.scanned_at ? `Last scan: ${formatET(dastHealth.scanned_at, 'PPp')} ET` : 'No scans recorded'}
                 </p>
               </div>
             </div>

@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Radio, Plus, AlertTriangle, Shield, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 
 const severityStyle: Record<string, string> = {
@@ -207,7 +208,7 @@ const CertAdvisories: React.FC = () => {
                 <div className="flex-1">
                   <p className="text-sm font-medium font-mono text-neon-red">{match.matched_ioc}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{match.organizations?.name} · {match.cert_advisories?.title}</p>
-                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{format(new Date(match.detected_at), 'MMM dd, HH:mm')}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{formatET(match.detected_at, 'MMM dd, HH:mm')} ET</p>
                 </div>
                 <button onClick={() => closeMatch(match.id)}
                   className="px-3 py-1.5 text-xs border border-border text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors">

@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 import {
   ArrowLeft, CheckCircle, XCircle, AlertTriangle, Clock, Building2,
   MapPin, Tag, Radio, Loader2, ExternalLink, Shield, CheckCircle2,
@@ -256,7 +257,7 @@ const AlertDetail: React.FC = () => {
               <div>
                 <p className="text-xs text-muted-foreground mb-0.5">Created</p>
                 <p className="text-sm font-medium text-foreground">
-                  {format(createdAt, 'MMM d, yyyy HH:mm')} UTC
+                  {formatET(createdAt, 'MMM d, yyyy HH:mm')} ET
                 </p>
                 <p className="text-xs text-muted-foreground font-mono mt-0.5">
                   {formatDistanceToNow(createdAt, { addSuffix: true })}

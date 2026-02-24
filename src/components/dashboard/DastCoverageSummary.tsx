@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Scan, ShieldAlert, ShieldCheck, Clock, AlertTriangle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 
 interface DastCoverageData {
   totalOrgs: number;
@@ -154,7 +154,7 @@ const DastCoverageSummary: React.FC<DastCoverageSummaryProps> = ({ data, activeD
           <div className="flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
             <p className="text-xs font-mono text-foreground">
-              {data.lastScanDate ? format(new Date(data.lastScanDate), 'MMM dd, HH:mm') : '—'}
+              {data.lastScanDate ? formatET(data.lastScanDate, 'MMM dd, HH:mm') : '—'}
             </p>
           </div>
           {notScannedCount > 0 && (

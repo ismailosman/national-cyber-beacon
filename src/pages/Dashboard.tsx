@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { format, subDays } from 'date-fns';
+import { subDays } from 'date-fns';
+import { formatET } from '@/lib/dateUtils';
 import { Activity, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculateSecurityScore, ScoreBreakdown } from '@/lib/dashboard/calculateScore';
@@ -184,7 +185,7 @@ const Dashboard: React.FC = () => {
   const trendData = useMemo(() => {
     const grouped: Record<string, { scores: number[]; sectors: Record<string, number[]> }> = {};
     (scoreHistory as any[]).forEach(r => {
-      const day = format(new Date(r.recorded_date), 'MMM dd');
+      const day = formatET(r.recorded_date, 'MMM dd');
       if (!grouped[day]) grouped[day] = { scores: [], sectors: {} };
       grouped[day].scores.push(r.security_score);
       if (!grouped[day].sectors[r.sector]) grouped[day].sectors[r.sector] = [];
@@ -205,11 +206,11 @@ const Dashboard: React.FC = () => {
   const threatTimeline = useMemo(() => {
     const days: Record<string, { critical: number; high: number; medium: number; low: number }> = {};
     for (let i = 29; i >= 0; i--) {
-      const d = format(subDays(new Date(), i), 'MMM dd');
+      const d = formatET(subDays(new Date(), i), 'MMM dd');
       days[d] = { critical: 0, high: 0, medium: 0, low: 0 };
     }
     earlyWarnings.forEach((w: any) => {
-      const day = format(new Date(w.checked_at), 'MMM dd');
+      const day = formatET(w.checked_at, 'MMM dd');
       if (days[day]) {
         const level = w.risk_level === 'critical' ? 'critical' : w.risk_level === 'high' ? 'high' :
           w.risk_level === 'medium' || w.risk_level === 'warning' ? 'medium' : 'low';
@@ -217,7 +218,7 @@ const Dashboard: React.FC = () => {
       }
     });
     alerts.forEach((a: any) => {
-      const day = format(new Date(a.created_at), 'MMM dd');
+      const day = formatET(a.created_at, 'MMM dd');
       if (days[day] && a.severity) days[day][a.severity as keyof typeof days[string]]++;
     });
     return Object.entries(days).map(([day, counts]) => ({ day, ...counts }));

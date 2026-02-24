@@ -15,6 +15,7 @@ import {
   ChevronDown, Search, Globe, Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toETLocaleTimeString } from '@/lib/dateUtils';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 /* ─── Types ─── */
@@ -193,7 +194,7 @@ const DdosMonitor: React.FC = () => {
 
       // Recent pings for sparkline (last 20)
       const recentPings = orgLogs.slice(0, 20).reverse().map(l => ({
-        time: new Date(l.checked_at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
+        time: toETLocaleTimeString(l.checked_at, { hour: '2-digit', minute: '2-digit' }),
         responseTime: l.response_time_ms,
         status: l.status,
       }));
