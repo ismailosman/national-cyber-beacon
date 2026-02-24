@@ -1,35 +1,87 @@
 
 
-## Add Colorful Animated Borders to Landing Page Sections
+## Set Application Timezone to US Eastern Time (New York)
 
 ### Overview
-Add vibrant, animated gradient borders to the Stats Trust Bar and About Us section cards to make the landing page more dynamic and visually engaging.
+Create a centralized timezone utility so all dates and times displayed throughout the application use the "America/New_York" timezone consistently, rather than the user's local browser timezone.
 
 ### Changes
 
-**1. Add animated gradient border CSS (`src/index.css`)**
-- Add a `@keyframes gradient-shift` animation that rotates a conic/linear gradient around elements
-- Create utility classes for the animated border effect using a pseudo-element technique (element with gradient background, inner content with solid background on top)
+**1. Create timezone utility (`src/lib/dateUtils.ts`)**
+- Export a constant `APP_TIMEZONE = 'America/New_York'`
+- Create helper functions that wrap common date operations with the Eastern timezone:
+  - `formatET(date, formatStr)` -- formats a date using `date-fns` `format()` but shifts the date to ET first using `Intl.DateTimeFormat` with `timeZone`
+  - `toETLocaleString(date)` -- replacement for `new Date().toLocaleString()` with ET timezone
+  - `toETLocaleTimeString(date, options?)` -- replacement for `toLocaleTimeString()`
+  - `toETLocaleDateString(date, options?)` -- replacement for `toLocaleDateString()`
+  - `formatDistanceET(date)` -- wraps `formatDistanceToNow` (relative times like "5 minutes ago" are timezone-agnostic, so this just re-exports)
+  - `nowET()` -- returns current time formatted in ET for display
 
-**2. Update Stats Trust Bar (`src/pages/Landing.tsx`)**
-- Wrap the stats section with an animated gradient top/bottom border
-- Use a multi-color gradient (red, blue, green, purple, cyan) that animates smoothly
-- The thin gradient line at the top and bottom of the stats section will shift colors continuously
+The approach uses the browser's built-in `Intl.DateTimeFormat` with `timeZone: 'America/New_York'` for `toLocale*` calls, and a manual offset conversion for `date-fns` `format()` calls.
 
-**3. Update About Us cards (`src/components/landing/AboutSection.tsx`)**
-- Replace the static `borderTopColor` with an animated gradient border around each card
-- Use the pseudo-element technique: outer wrapper has a rotating gradient background, inner card sits on top with a small gap (1-2px) revealing the gradient as a border
-- Each card gets a unique gradient accent that animates on hover
+**2. Update all pages and components that display dates**
+
+Replace raw `new Date().toLocaleString()`, `.toLocaleDateString()`, `.toLocaleTimeString()` and `date-fns` `format()` calls with the new ET-aware helpers. Files to update:
+
+- `src/pages/DdosMonitor.tsx` -- sparkline time labels
+- `src/pages/DastScanner.tsx` -- scan dates, last scan display
+- `src/pages/UptimeMonitor.tsx` -- last checked times, SSL expiry
+- `src/pages/EarlyWarning.tsx` -- last checked time
+- `src/pages/Incidents.tsx` -- incident timestamps
+- `src/pages/Reports.tsx` -- report dates
+- `src/pages/AlertDetail.tsx` -- alert timestamps
+- `src/pages/OrgDetail.tsx` -- scan history dates
+- `src/pages/Dashboard.tsx` -- dashboard dates
+- `src/pages/SecurityMonitor.tsx` -- chart dates
+- `src/pages/CertAdvisories.tsx` -- advisory dates
+- `src/components/scanner/ScanResults.tsx` -- scan start time
+- `src/components/scanner/ScanHistory.tsx` -- scan history timestamps
+- `src/components/dashboard/OrgCard.tsx` -- org card dates
+- `src/components/dashboard/DastCoverageSummary.tsx` -- coverage dates
+- `src/components/dashboard/AlertSidebar.tsx` -- alert timestamps
+
+**3. Edge functions (no change needed)**
+Edge functions generate ISO timestamps (`new Date().toISOString()`) which are UTC -- this is correct. The timezone conversion happens only on the frontend display layer.
 
 ### Technical Approach
 
-The animated border effect uses:
-- A wrapper `div` with `background: conic-gradient(...)` and `@keyframes gradient-shift` rotating the gradient colors
-- An inner `div` with matching `border-radius` and solid background, inset by 1-2px to reveal the gradient as a border
-- `background-size: 300% 300%` with `animation: gradient-shift 4s ease infinite` for the color shifting effect
+```text
+// src/lib/dateUtils.ts
+
+export const APP_TIMEZONE = 'America/New_York';
+
+// For toLocaleString/toLocaleDateString/toLocaleTimeString replacements:
+// Simply pass { timeZone: APP_TIMEZONE } in the options
+
+export function toETLocaleString(date: string | Date, options?: Intl.DateTimeFormatOptions) {
+  return new Date(date).toLocaleString('en-US', { timeZone: APP_TIMEZONE, ...options });
+}
+
+export function toETLocaleDateString(date: string | Date, options?: Intl.DateTimeFormatOptions) {
+  return new Date(date).toLocaleDateString('en-US', { timeZone: APP_TIMEZONE, ...options });
+}
+
+export function toETLocaleTimeString(date: string | Date, options?: Intl.DateTimeFormatOptions) {
+  return new Date(date).toLocaleTimeString('en-US', { timeZone: APP_TIMEZONE, ...options });
+}
+
+// For date-fns format(): convert the date to ET-adjusted Date object
+export function formatET(date: string | Date, formatStr: string) {
+  // Use Intl to get the ET offset, then adjust the Date
+  const d = new Date(date);
+  const etStr = d.toLocaleString('en-US', { timeZone: APP_TIMEZONE });
+  const etDate = new Date(etStr);
+  return format(etDate, formatStr);
+}
+```
 
 ### Files Modified
-- `src/index.css` -- Add `@keyframes gradient-shift` and `.animated-border` utility class
-- `src/pages/Landing.tsx` -- Apply animated gradient border to stats trust bar section
-- `src/components/landing/AboutSection.tsx` -- Apply animated gradient borders to highlight cards
+- `src/lib/dateUtils.ts` -- **new** centralized timezone utility
+- ~16 page/component files -- replace raw date formatting with ET-aware helpers
+
+### Notes
+- `formatDistanceToNow` (relative time like "3 minutes ago") is timezone-agnostic, so those calls need no change
+- All `new Date().toISOString()` calls for data storage remain unchanged (UTC is correct for storage)
+- Only display-layer formatting is affected
+- No new dependencies needed -- uses built-in `Intl.DateTimeFormat` API
 
