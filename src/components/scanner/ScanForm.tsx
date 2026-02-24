@@ -3,7 +3,7 @@ import { ScanType } from "@/types/security";
 import { Loader2 } from "lucide-react";
 
 interface Props {
-  onScan: (type: ScanType, repoUrl?: string) => void;
+  onScan: (type: ScanType, repoUrl?: string, targetUrl?: string) => void;
   scanning: boolean;
   apiOnline: boolean | null;
 }
@@ -13,7 +13,7 @@ const SCAN_TYPES = [
     value: "dast" as ScanType,
     label: "DAST Only",
     icon: "🌐",
-    desc: "ZAP + Nuclei + Nikto against cyberdefense.so",
+    desc: "ZAP + Nuclei + Nikto against your target",
   },
   {
     value: "sast" as ScanType,
@@ -32,13 +32,14 @@ const SCAN_TYPES = [
 export default function ScanForm({ onScan, scanning, apiOnline }: Props) {
   const [selectedType, setSelectedType] = useState<ScanType>("dast");
   const [repoUrl, setRepoUrl] = useState("");
+  const [targetUrl, setTargetUrl] = useState("https://cyberdefense.so");
 
   const needsRepo = selectedType === "sast" || selectedType === "full";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!apiOnline) return;
-    onScan(selectedType, needsRepo ? repoUrl : undefined);
+    onScan(selectedType, needsRepo ? repoUrl : undefined, targetUrl);
   }
 
   return (
@@ -85,12 +86,17 @@ export default function ScanForm({ onScan, scanning, apiOnline }: Props) {
           </div>
         )}
 
-        {/* Target (readonly) */}
+        {/* Target URL */}
         <div className="space-y-1">
-          <label className="text-xs text-gray-400 font-medium">Target</label>
-          <div className="text-sm text-gray-300 bg-gray-800/50 rounded-md px-3 py-2 border border-gray-700/50">
-            https://cyberdefense.so
-          </div>
+          <label className="text-xs text-gray-400 font-medium">Target URL *</label>
+          <input
+            type="url"
+            value={targetUrl}
+            onChange={(e) => setTargetUrl(e.target.value)}
+            placeholder="https://example.com"
+            required
+            className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+          />
         </div>
 
         {/* Submit */}

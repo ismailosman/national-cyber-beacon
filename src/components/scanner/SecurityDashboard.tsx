@@ -28,14 +28,14 @@ export default function SecurityDashboard() {
     } catch {}
   }
 
-  async function handleStartScan(type: ScanType, repoUrl?: string) {
+  async function handleStartScan(type: ScanType, repoUrl?: string, targetUrl?: string) {
     setError(null);
     setScanning(true);
     setActiveScan(null);
     stopPoll?.();
 
     try {
-      const { scan_id } = await startScan(type, repoUrl);
+      const { scan_id } = await startScan(type, repoUrl, targetUrl);
       const stop = pollScan(scan_id, (result) => {
         setActiveScan(result);
         if (result.status === "done" || result.status === "error") {
