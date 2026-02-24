@@ -260,20 +260,16 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
   ],
 };
 
-// Generate the Nth threat of the day deterministically (seeded PRNG per index)
-function generateDayThreat(index: number): LiveThreat {
-  const rand = createSeededRand(DAY_SEED + index * 7919);
-
-  // Pick corridor: 20% Somalia, 30% MENA & Global South, 25% USA, 25% EU
-  const corridorRoll = rand();
+// Generate a single threat for a specific corridor
+function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'usa' | 'eu', rand: () => number): LiveThreat {
   let source, target;
-  if (corridorRoll < 0.20) {
+  if (corridor === 'somalia') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
     target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
-  } else if (corridorRoll < 0.50) {
+  } else if (corridor === 'global_south') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
     target = GLOBAL_SOUTH_TARGETS[Math.floor(rand() * GLOBAL_SOUTH_TARGETS.length)];
-  } else if (corridorRoll < 0.75) {
+  } else if (corridor === 'usa') {
     source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
     target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
   } else {
@@ -285,7 +281,7 @@ function generateDayThreat(index: number): LiveThreat {
   const signatures = ATTACK_SIGNATURES[attack_type];
   const name = signatures[Math.floor(rand() * signatures.length)];
   return {
-    id: `${DAY_STRING}-${index}`,
+    id: `${DAY_STRING}-${index}-${corridor}`,
     name,
     source: { lat: source.lat, lng: source.lng, country: source.country, state: source.state },
     target: { lat: target.lat, lng: target.lng, country: target.country, state: target.state },
@@ -295,21 +291,39 @@ function generateDayThreat(index: number): LiveThreat {
   };
 }
 
+// Generate a burst of 2-3 simultaneous attacks across different corridors
+function generateBurst(index: number): LiveThreat[] {
+  const rand = createSeededRand(DAY_SEED + index * 7919);
+  const burstSize = rand() < 0.6 ? 3 : 2;
+
+  const firstCorridor = rand() < 0.5 ? 'somalia' : 'global_south';
+  const threats: LiveThreat[] = [
+    generateCorridorThreat(index, firstCorridor as 'somalia' | 'global_south', rand),
+  ];
+
+  if (burstSize === 3) {
+    threats.push(generateCorridorThreat(index, 'usa', rand));
+    threats.push(generateCorridorThreat(index, 'eu', rand));
+  } else {
+    threats.push(generateCorridorThreat(index, rand() < 0.5 ? 'usa' : 'eu', rand));
+  }
+
+  return threats;
+}
+
 const RING_BUFFER_SIZE = 100;
 
-// Module-level singleton — deterministic daily count + time-based initialization
 const countRand = createSeededRand(DAY_SEED + 42);
-const BASE_COUNT = Math.floor(3_000 + countRand() * 12_000);
+const BASE_COUNT = Math.floor(15_000 + countRand() * 30_000);
 
-// Calculate where we are in the day's sequence based on elapsed time since midnight
 const initialIndex = calculateCurrentIndex();
-let sharedTodayCount = BASE_COUNT + initialIndex;
+let sharedTodayCount = BASE_COUNT + initialIndex * 3;
 let sharedThreatIndex = initialIndex;
 
 const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
 
-function incrementSharedCount() {
-  sharedTodayCount += 1;
+function incrementSharedCountBy(n: number) {
+  sharedTodayCount += n;
   todayListeners.forEach(fn => fn(sharedTodayCount));
 }
 
@@ -318,18 +332,16 @@ export function useLiveAttacks(enabled: boolean) {
   const [todayCount, setTodayCount] = useState(sharedTodayCount);
   const lastRealEventRef = useRef<number>(0);
 
-  // Register/unregister this instance's setter so all hooks stay in sync
   useEffect(() => {
     todayListeners.add(setTodayCount);
     return () => { todayListeners.delete(setTodayCount); };
   }, []);
 
-  const addThreat = useCallback((threat: LiveThreat, _isBurstStart: boolean) => {
-    setThreats(prev => [threat, ...prev].slice(0, RING_BUFFER_SIZE));
-    incrementSharedCount();
+  const addThreats = useCallback((batch: LiveThreat[]) => {
+    setThreats(prev => [...batch, ...prev].slice(0, RING_BUFFER_SIZE));
+    incrementSharedCountBy(batch.length);
   }, []);
 
-  // Mock generator — runs when enabled, pauses automatically if real events flow
   useEffect(() => {
     if (!enabled) {
       setThreats([]);
@@ -341,8 +353,7 @@ export function useLiveAttacks(enabled: boolean) {
       return setTimeout(() => {
         const realRecently = Date.now() - lastRealEventRef.current < 5000;
         if (!realRecently) {
-          const isBurstStart = sharedThreatIndex % 3 === 0;
-          addThreat(generateDayThreat(sharedThreatIndex), isBurstStart);
+          addThreats(generateBurst(sharedThreatIndex));
           sharedThreatIndex += 1;
         }
         timerRef.current = scheduleNext();
@@ -351,7 +362,7 @@ export function useLiveAttacks(enabled: boolean) {
 
     const timerRef = { current: scheduleNext() };
     return () => clearTimeout(timerRef.current);
-  }, [enabled, addThreat]);
+  }, [enabled, addThreats]);
 
   return { threats, todayCount };
 }
