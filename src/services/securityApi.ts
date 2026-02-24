@@ -1,28 +1,30 @@
 import { ScanResult, ScanSummary, ScanType } from "@/types/security";
+import { supabase } from "@/integrations/supabase/client";
 
-const API_BASE = import.meta.env.VITE_SECURITY_API_URL;
-const API_KEY = import.meta.env.VITE_SECURITY_API_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!API_BASE || !API_KEY) {
-  console.error("Missing VITE_SECURITY_API_URL or VITE_SECURITY_API_KEY");
-}
+async function proxyRequest<T>(path: string, method = "GET", body?: any): Promise<T> {
+  const url = `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+  
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
-const headers = () => ({
-  "Content-Type": "application/json",
-  "x-api-key": API_KEY,
-});
-
-async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "API Error");
+    throw new Error(err.detail || err.error || "API Error");
   }
   return res.json();
 }
 
 export async function checkHealth(): Promise<{ status: string; version: string }> {
-  const res = await fetch(`${API_BASE}/health`);
-  return handleResponse(res);
+  return proxyRequest("/health");
 }
 
 export async function startScan(
@@ -30,38 +32,23 @@ export async function startScan(
   repoUrl?: string,
   targetUrl = "https://cyberdefense.so"
 ): Promise<{ scan_id: string; status: string; message: string }> {
-  const res = await fetch(`${API_BASE}/scan`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      scan_type: type,
-      repo_url: repoUrl || null,
-      target_url: targetUrl,
-    }),
+  return proxyRequest("/scan", "POST", {
+    scan_type: type,
+    repo_url: repoUrl || null,
+    target_url: targetUrl,
   });
-  return handleResponse(res);
 }
 
 export async function getScan(scanId: string): Promise<ScanResult> {
-  const res = await fetch(`${API_BASE}/scan/${scanId}`, {
-    headers: headers(),
-  });
-  return handleResponse(res);
+  return proxyRequest(`/scan/${scanId}`);
 }
 
 export async function listScans(): Promise<{ scans: ScanSummary[] }> {
-  const res = await fetch(`${API_BASE}/scans`, {
-    headers: headers(),
-  });
-  return handleResponse(res);
+  return proxyRequest("/scans");
 }
 
 export async function deleteScan(scanId: string): Promise<{ deleted: string }> {
-  const res = await fetch(`${API_BASE}/scan/${scanId}`, {
-    method: "DELETE",
-    headers: headers(),
-  });
-  return handleResponse(res);
+  return proxyRequest(`/scan/${scanId}`, "DELETE");
 }
 
 export function pollScan(
