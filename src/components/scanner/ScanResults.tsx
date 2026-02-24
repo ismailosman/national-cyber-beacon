@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScanResult, NucleiFinding, SemgrepFinding } from "@/types/security";
 import StatusBadge from "./StatusBadge";
 import ScanReportCharts from "./ScanReportCharts";
-import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield, Download, Send } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, CheckCircle, XCircle, Info, Shield, Download, Send, FileDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -258,6 +258,21 @@ export default function ScanResults({ result, clientEmail, clientName }: ScanRes
                     </form>
                   </PopoverContent>
                 </Popover>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  asChild
+                  className="gap-1.5"
+                >
+                  <a
+                    href={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/scan-reports/${result.scan_id}/report.pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    Download PDF
+                  </a>
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

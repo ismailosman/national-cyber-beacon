@@ -355,23 +355,24 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
   sy -= 18;
 
   for (const sc of scanners) {
+    if (sy < 80) break;
     const isAlt = scanners.indexOf(sc) % 2 === 0;
     if (isAlt) p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 16 re f`);
     p1.push(`BT /F1 9 Tf 0.2 0.25 0.3 rg 50 ${sy + 2} Td (${sc.name}) Tj ET`);
     p1.push(`BT /F2 9 Tf 0.08 0.12 0.2 rg 250 ${sy + 2} Td (${sc.count}) Tj ET`);
     const statusText = sc.count === 0 ? 'Clean' : `${sc.count} issue${sc.count > 1 ? 's' : ''}`;
     const statusColor = sc.count === 0 ? '0.1 0.6 0.3' : '0.85 0.45 0';
-    p1.push(`BT /F2 8 Tf ${statusColor} rg 350 ${sy + 2} Td (${statusText}) Tj ET`);
+    p1.push(`BT /F2 8 Tf ${statusColor} rg 340 ${sy + 2} Td (${statusText}) Tj ET`);
     if (sc.count > 0) {
-      const barW = Math.min(sc.count * 8, 120);
-      p1.push(`0.85 0.15 0.1 rg`, `420 ${sy} ${barW} 8 re f`);
+      const barW = Math.min(sc.count * 8, 80);
+      p1.push(`0.85 0.15 0.1 rg`, `430 ${sy} ${barW} 8 re f`);
     }
     sy -= 18;
   }
 
   // Server Info from Nikto
   const niktoData = stats.resolved.nikto;
-  if (niktoData) {
+  if (niktoData && sy > 120) {
     sy -= 8;
     p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (SERVER INFORMATION) Tj ET`);
     p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 120 2 re f`);
@@ -392,9 +393,8 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
     }
   }
 
-  // Top Findings preview
-  const topFindings = findings.slice(0, 8);
-  if (topFindings.length > 0) {
+  // Top Findings preview - show as many as fit on page
+  if (findings.length > 0 && sy > 100) {
     sy -= 8;
     p1.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${sy} Td (TOP FINDINGS) Tj ET`);
     p1.push(`0.85 0.15 0.1 rg`, `40 ${sy - 4} 80 2 re f`);
@@ -407,9 +407,10 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
     p1.push(`BT /F2 7 Tf 1 1 1 rg 420 ${sy + 2} Td (LOCATION) Tj ET`);
     sy -= 16;
 
-    for (const f of topFindings) {
-      if (sy < 60) break;
-      const isAlt = topFindings.indexOf(f) % 2 === 0;
+    let shownCount = 0;
+    for (const f of findings) {
+      if (sy < 70) break;
+      const isAlt = shownCount % 2 === 0;
       if (isAlt) p1.push(`0.97 0.97 0.98 rg`, `40 ${sy - 2} 515 14 re f`);
 
       const sevColor =
@@ -423,12 +424,13 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
       p1.push(`BT /F1 7 Tf 0.15 0.2 0.25 rg 170 ${sy + 1} Td (${s(f.name, 40)}) Tj ET`);
       p1.push(`BT /F1 6 Tf 0.4 0.45 0.5 rg 420 ${sy + 1} Td (${s(f.location, 25)}) Tj ET`);
       sy -= 14;
+      shownCount++;
     }
 
-    if (findings.length > 8) {
-      p1.push(`BT /F1 8 Tf 0.4 0.45 0.5 rg 50 ${sy + 1} Td (... and ${findings.length - 8} more findings - see detailed report) Tj ET`);
+    if (shownCount < findings.length) {
+      p1.push(`BT /F1 8 Tf 0.4 0.45 0.5 rg 50 ${sy + 1} Td (... and ${findings.length - shownCount} more findings - see detailed report) Tj ET`);
     }
-  } else {
+  } else if (findings.length === 0) {
     // No findings -- show a clean bill of health
     sy -= 12;
     p1.push(`0.9 0.97 0.9 rg`, `40 ${sy - 20} 515 40 re f`);
