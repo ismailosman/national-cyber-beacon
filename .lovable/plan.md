@@ -1,47 +1,76 @@
-## Fix Country Click to Open Panel for All Countries
+## Add Global Attack Corridors: USA and EU Targets
 
-### Problem
+### Overview
 
-Clicking on the map only works for Somalia because it uses a hardcoded bounding box check (lat 0-12, lng 41-51). Other countries like Kenya, Ethiopia, Djibouti, etc. have no click handler on the map fill layer, so nothing happens when you click them.
+Expand the attack simulation to show three distinct threat corridors:
 
-### Solution
+1. **East Africa corridor** (existing) -- global sources attacking Somalia and neighbours
+2. **USA corridor** -- Russia, Iran, North Korea, and China attacking US cities
+3. **EU corridor** -- South American and Asian sources attacking European countries
 
-**File: `src/pages/CyberMap.tsx**`
+### Changes
 
-1. **Replace the Somalia bounding-box click handler** (lines 1257-1264) with a click handler on the `country-hover-target` layer that works for ALL countries:
-  - On click, read the `name_en` property from the clicked feature
-  - If the country is "Somalia", open the `SomaliaPanel` (existing behavior)
-  - For any other country, set `selectedCountry` to the country name, opening the `CountryPanel`
-2. **Add missing ISO codes** to `COUNTRY_ISO` for the new target countries so the flag icon displays correctly:
-  - `'Djibouti': 'dj'`
-  - `'Tanzania': 'tz'`
-  - `'South Sudan': 'ss'`
-  - `'Sudan': 'sd'`
-  - `'Uganda': 'ug'`
-  - `'Rwanda': 'rw'`
-3. **Add cursor pointer** on hover over the `country-hover-target` layer (if not already present) so users see a clickable affordance everywhere.
+**File: `src/hooks/useLiveAttacks.ts**`
+
+1. **Add USA target locations** -- US cities as attack destinations:
+  - Washington DC, New York, Los Angeles, Chicago, Houston, Atlanta, Seattle, Miami
+2. **Add EU target locations** -- Major European cities:
+  - London, Paris, Berlin, Amsterdam, Brussels, Madrid, Rome, Stockholm
+3. **Define attack corridors** with weighted source-target pairings:
+  - **East Africa** (~50% of attacks): Uses existing `WEIGHTED_SOURCES` -> `REGION_TARGETS`
+  - **USA** (~25%): Sources limited to Russia, Iran, North Korea, China -> US targets
+  - **EU** (~25%): Sources limited to Brazil, Argentina, Colombia, Venezuela, China, India, Vietnam, Indonesia, Pakistan -> EU targets
+4. **Update `generateDayThreat**` to first pick a corridor (using the seeded PRNG), then pick source and target from that corridor's pools. This ensures geopolitically coherent attack paths (no USA attacking itself, no EU attacking EU).
 
 ### Technical details
 
-The key change is switching from:
+The corridor selection will use the same seeded PRNG to stay deterministic:
 
 ```text
-map.on('click', (e) => {
-  // hardcoded Somalia bounding box only
-});
+function generateDayThreat(index: number): LiveThreat {
+  const rand = createSeededRand(DAY_SEED + index * 7919);
+  const corridorRoll = rand();
+  let source, target;
+
+  if (corridorRoll < 0.50) {
+    // East Africa corridor (existing behavior)
+    source = pick from WEIGHTED_SOURCES
+    target = pick from REGION_TARGETS
+  } else if (corridorRoll < 0.75) {
+    // USA corridor
+    source = pick from USA_THREAT_SOURCES (Russia, Iran, NK, China)
+    target = pick from USA_TARGETS
+  } else {
+    // EU corridor
+    source = pick from EU_THREAT_SOURCES (South America, Asia)
+    target = pick from EU_TARGETS
+  }
+  // ... rest unchanged
+}
 ```
 
-To:
+New target arrays:
 
 ```text
-map.on('click', 'country-hover-target', (e) => {
-  const name = e.features?.[0]?.properties?.name_en;
-  if (name === 'Somalia') { setSomaliaPanel(true); }
-  else if (name) { setSelectedCountry(name); }
-});
+USA_TARGETS = [
+  Washington DC, New York, Los Angeles, Chicago,
+  Houston, Atlanta, Seattle, Miami
+]
+
+EU_TARGETS = [
+  London, Paris, Berlin, Amsterdam,
+  Brussels, Madrid, Rome, Stockholm
+]
+
+USA_THREAT_SOURCES = [
+  Russia (x4), Iran (x3), North Korea (x2), China (x4)
+]
+
+EU_THREAT_SOURCES = [
+  Brazil (x2), Argentina, Colombia, Venezuela,
+  China (x3), India (x2), Vietnam, Indonesia, Pakistan
+]
 ```
 
-This reuses the existing `country-hover-target` interactive layer (added in a previous fix) that already covers all countries. The `CountryPanel` component already accepts any country name and generates seeded data for it, so no changes needed there.  
-
-
-Add a legend or stats panel showing attack distribution by target country
+No changes needed to the map rendering -- attack arcs already animate between any source/target coordinate pair globally. The `COUNTRY_ISO` map in `CyberMap.tsx` already includes USA and most EU countries, so panels will work when clicking those countries too.  
+Don't make the attacks happen at once, make it spread now that many other countries added. 
