@@ -1,50 +1,71 @@
 
 
-## Comprehensive PDF Security Report
+## Store PDF Reports in Cloud Storage and Link in Emails
 
-### Problem
-The current PDF report generator (`generate-scan-report/index.ts`) only renders vulnerability scanner findings. When a scan returns zero vulnerabilities (score 100/A), the entire report is blank -- no scanner breakdown, no findings, nothing useful. Meanwhile, the scan data contains valuable recon information (Nmap, SSL, DNS, WHOIS, WhatWeb) that is completely ignored by the PDF.
+### Overview
+Instead of only attaching PDFs to emails (which can be large and sometimes blocked), the system will also upload the generated PDF to cloud file storage. The email will include a direct download link to the stored PDF, making reports always accessible.
 
-### What Will Change
+### Changes
 
-**`supabase/functions/generate-scan-report/index.ts`** -- Major enhancement to include all scan data:
+**1. Create a `scan-reports` storage bucket (database migration)**
 
-**Page 1 -- Executive Summary (enhanced)**
-- Keep existing: header, target info, score gauge, vulnerability summary boxes
-- Add: Recon Status Summary showing pass/fail indicators for each check performed
-- Add: Scanner Breakdown now always shows scanners even if they returned 0 findings (shows "0 - Clean" instead of hiding them)
+A new public-read storage bucket called `scan-reports` will store the PDF files. The path convention will be `{scan_id}/report.pdf`, so a report is accessible at:
 
-**Page 2 -- Infrastructure & Recon Report (NEW)**
-- SSL/TLS Assessment: Extract from `recon_results.sslscan` -- protocol versions enabled/disabled, certificate details, cipher suites, heartbleed status. Show pass/fail badges.
-- Open Ports: Parse `recon_results.nmap` -- list open ports with services, show risk assessment
-- DNS Configuration: Parse `recon_results.dns` -- nameservers, DNSSEC status, record types
-- Technology Stack: Parse `recon_results.whatweb` -- detected technologies (server, frameworks, cookies)
-- Domain Registration: Parse `recon_results.whois` -- registrar, creation/expiry dates, nameservers
-
-**Page 3+ -- Detailed Findings (existing, unchanged)**
-- Vulnerability details with remediation (only rendered if findings exist)
-
-**Page N -- Remediation Action Plan (existing, unchanged)**
-- Prioritized remediation steps (only rendered if findings exist)
-
-### Technical Approach
-
-The recon data parsing will extract structured information from raw tool outputs:
-
-```text
-sslscan output  ->  Extract: TLS versions, cipher suites, cert validity, heartbleed status
-nmap output     ->  Extract: Open ports, services, OS detection
-whatweb output  ->  Extract: Server type, frameworks, cookies, headers
-whois output    ->  Extract: Registrar, dates, nameservers, DNSSEC
-dns output      ->  Extract: Nameservers, record types
+```
+https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/scan-reports/{scan_id}/report.pdf
 ```
 
-Each section will use pass/fail indicators:
-- Green checkmark for secure configurations (TLS 1.2+, no heartbleed, etc.)
-- Red X for issues (old TLS versions, exposed ports, missing DNSSEC)
+Policies:
+- Public read access (anyone with the link can download)
+- Service role can upload (edge functions use the service role key)
 
-### Email Attachment
-The PDF attachment in `send-pentest-email` is already implemented from the previous change. Once the PDF content is comprehensive, the attachment will automatically contain the full report. No changes needed to the email function.
+**2. Update `supabase/functions/send-pentest-email/index.ts`**
+
+Modify `generatePdfAttachment()` to also upload the PDF to storage before returning:
+
+- After generating the PDF bytes from `generate-scan-report`, upload to `scan-reports/{scan_id}/report.pdf` using the Supabase Storage REST API with the service role key
+- Store the public URL and pass it to the email templates
+- The PDF is still attached to the email AND the link points to the stored file
+- If upload fails, fall back to the dashboard URL (graceful degradation)
+
+The `dashboardUrl` in all email templates will be updated to point to the stored PDF download link:
+```
+https://cyberdefense.so/scan/{scan_id}
+```
+This remains the same dashboard link, but the email will now also include a "Download PDF" button linking directly to the storage file.
+
+**3. Update email templates**
+
+- `scanCompletedEmail`: Add a second button "Download PDF Report" linking to the storage URL, keep existing "View Full Report" button
+- `reportDeliveryEmail`: Change the "Download Report (PDF)" button to link to the actual storage PDF URL instead of the dashboard
+- `criticalAlertEmail`: No changes (quick alert, no report)
+
+**4. Update `src/components/scanner/ScanResults.tsx`**
+
+Update the `reportUrl` passed to `sendReportDeliveryEmail` to use the storage-based URL pattern so the email function knows the scan ID for upload.
+
+### Technical Details
+
+Storage upload from the edge function:
+```text
+PUT /storage/v1/object/scan-reports/{scan_id}/report.pdf
+Authorization: Bearer {SERVICE_ROLE_KEY}
+Content-Type: application/pdf
+Body: <raw PDF bytes>
+```
+
+Public download URL:
+```text
+{SUPABASE_URL}/storage/v1/object/public/scan-reports/{scan_id}/report.pdf
+```
+
+The email will contain both:
+1. A link to `https://cyberdefense.so/scan/{scan_id}` (interactive dashboard)
+2. A direct PDF download link from storage
+3. The PDF as an email attachment (kept for offline access)
 
 ### Files Modified
-- `supabase/functions/generate-scan-report/index.ts` -- Add recon data parsing and rendering (Infrastructure & Recon page)
+- New database migration: Create `scan-reports` storage bucket with public read policy
+- `supabase/functions/send-pentest-email/index.ts`: Upload PDF to storage, update email templates with download links
+- `src/components/scanner/ScanResults.tsx`: Minor URL update (optional, existing flow already works)
+
