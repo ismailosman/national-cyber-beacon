@@ -25,17 +25,18 @@ const AboutSection: React.FC = () => (
         {highlights.map(({ icon: Icon, title, desc, accent }) => (
           <div
             key={title}
-            className="group rounded-2xl border border-[hsl(var(--landing-card-border))] bg-[hsl(var(--landing-card))] p-6 hover:-translate-y-1 transition-all duration-300"
-            style={{ borderTopColor: accent, borderTopWidth: '2px' }}
+            className="animated-border-wrapper group hover:-translate-y-1 transition-all duration-300"
           >
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
-              style={{ background: `${accent}15` }}
-            >
-              <Icon className="w-6 h-6" style={{ color: accent }} />
+            <div className="animated-border-inner p-6 h-full">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
+                style={{ background: `${accent}15` }}
+              >
+                <Icon className="w-6 h-6" style={{ color: accent }} />
+              </div>
+              <h3 className="font-bold text-[hsl(var(--landing-fg))] text-lg">{title}</h3>
+              <p className="mt-2 text-sm text-[hsl(var(--landing-muted))] leading-relaxed">{desc}</p>
             </div>
-            <h3 className="font-bold text-[hsl(var(--landing-fg))] text-lg">{title}</h3>
-            <p className="mt-2 text-sm text-[hsl(var(--landing-muted))] leading-relaxed">{desc}</p>
           </div>
         ))}
       </div>
