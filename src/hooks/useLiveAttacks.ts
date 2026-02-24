@@ -129,8 +129,8 @@ const WEIGHTED_SOURCES: { country: string; state: string; lat: number; lng: numb
   ...THREAT_SOURCES,
 ];
 
-// Regional target locations (Somalia weighted ~50%)
-const REGION_TARGETS = [
+// Somalia-only targets
+const SOMALIA_TARGETS = [
   { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
   { lat: 2.039, lng: 45.358, country: 'Somalia', state: 'Mogadishu' },
@@ -143,6 +143,10 @@ const REGION_TARGETS = [
   { lat: 9.553, lng: 44.075, country: 'Somalia', state: 'Mohamed Mooge' },
   { lat: 2.046, lng: 45.342, country: 'Somalia', state: 'Mogadishu' },
   { lat: 2.059, lng: 45.321, country: 'Somalia', state: 'Banaadir' },
+];
+
+// Other African targets
+const AFRICA_TARGETS = [
   { lat: 11.588, lng: 43.145, country: 'Djibouti', state: 'Djibouti City' },
   { lat: -1.286, lng: 36.817, country: 'Kenya', state: 'Nairobi' },
   { lat: -4.043, lng: 39.668, country: 'Kenya', state: 'Mombasa' },
@@ -237,12 +241,15 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 function generateDayThreat(index: number): LiveThreat {
   const rand = createSeededRand(DAY_SEED + index * 7919);
 
-  // Pick corridor: 50% East Africa, 25% USA, 25% EU
+  // Pick corridor: 30% Somalia, 20% Africa, 25% USA, 25% EU
   const corridorRoll = rand();
   let source, target;
-  if (corridorRoll < 0.50) {
+  if (corridorRoll < 0.30) {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
-    target = REGION_TARGETS[Math.floor(rand() * REGION_TARGETS.length)];
+    target = SOMALIA_TARGETS[Math.floor(rand() * SOMALIA_TARGETS.length)];
+  } else if (corridorRoll < 0.50) {
+    source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
+    target = AFRICA_TARGETS[Math.floor(rand() * AFRICA_TARGETS.length)];
   } else if (corridorRoll < 0.75) {
     source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
     target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
