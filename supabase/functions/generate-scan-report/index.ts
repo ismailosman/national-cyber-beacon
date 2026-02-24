@@ -503,6 +503,7 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
     const sqlmapOutput = stats.resolved.sqlmap?.output;
     if (sqlmapOutput !== undefined) {
       if (iy > 150) {
+        iy -= 12; // gap before section
         p2.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${iy} Td (SQL INJECTION TEST) Tj ET`);
         p2.push(`0.85 0.15 0.1 rg`, `40 ${iy - 4} 120 2 re f`);
         iy -= 22;
@@ -517,12 +518,13 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
         p2.push(`${sqlColor} rg`, `40 ${iy - 8} 3 24 re f`);
         p2.push(`BT /F2 8 Tf ${sqlColor} rg 55 ${iy - 1} Td (${sqlStatus}) Tj ET`);
         p2.push(`BT /F1 8 Tf 0.15 0.2 0.25 rg 92 ${iy - 1} Td (${sqlMsg}) Tj ET`);
-        iy -= 36;
+        iy -= 28;
       }
     }
 
     // Scan Methodology section
     if (iy > 200) {
+      iy -= 12; // gap before section
       p2.push(`BT /F2 11 Tf 0.08 0.12 0.2 rg 40 ${iy} Td (SCAN METHODOLOGY) Tj ET`);
       p2.push(`0.85 0.15 0.1 rg`, `40 ${iy - 4} 120 2 re f`);
       iy -= 20;
@@ -535,7 +537,8 @@ function generatePDF(result: any, logoData: { width: number; height: number; rgb
         { tool: 'SQLMap', desc: 'Automated SQL injection detection and exploitation testing' },
       ];
 
-      p2.push(`0.95 0.96 0.97 rg`, `40 ${iy - 4} 515 ${methodology.length * 16 + 8} re f`);
+      const methHeight = methodology.length * 16 + 8;
+      p2.push(`0.95 0.96 0.97 rg`, `40 ${iy - methHeight + 12} 515 ${methHeight} re f`);
       for (const m of methodology) {
         if (iy < 80) break;
         p2.push(`BT /F2 8 Tf 0.08 0.12 0.2 rg 50 ${iy} Td (${m.tool}) Tj ET`);
