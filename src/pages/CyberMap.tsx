@@ -19,6 +19,8 @@ const COUNTRY_ISO: Record<string, string> = {
   'Indonesia': 'id', 'France': 'fr', 'UK': 'gb', 'Saudi Arabia': 'sa',
   'Egypt': 'eg', 'Singapore': 'sg', 'Canada': 'ca', 'Japan': 'jp',
   'Israel': 'il', 'Somalia': 'so', 'Kenya': 'ke', 'Ethiopia': 'et',
+  'Djibouti': 'dj', 'Tanzania': 'tz', 'South Sudan': 'ss',
+  'Sudan': 'sd', 'Uganda': 'ug', 'Rwanda': 'rw',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1254,12 +1256,16 @@ const CyberMap: React.FC = () => {
           map.getCanvas().style.cursor = '';
         });
 
-        // Somalia click detection (bounding box: Lat 0–12°N, Lng 41–51°E)
-        map.on('click', (e: any) => {
-          const { lat, lng } = e.lngLat;
-          if (lat >= 0 && lat <= 12 && lng >= 41 && lng <= 51) {
+        // Country click detection on the hover-target layer (all countries)
+        map.on('click', 'country-hover-target', (e: any) => {
+          const name = e.features?.[0]?.properties?.name_en;
+          if (!name) return;
+          if (name === 'Somalia') {
             setSelectedCountry(null);
             setSomaliaPanel(true);
+          } else {
+            setSomaliaPanel(false);
+            setSelectedCountry(name);
           }
         });
 
