@@ -1,27 +1,66 @@
 
 
-## Adjust Cyber Map Line Thickness and Attack Frequency
+## Make Attacks Feel Like Real Threats: Burst Pattern with Auto-Clear
 
 ### Overview
-Two changes: make the attack arc lines thinner (matching the reference images which show thin, clean lines) and space out attacks so only 1-2 appear every 5 seconds instead of the current rapid-fire pace.
+Change the attack pattern from individual trickles to realistic **bursts of 3 attacks every 20 seconds**, where each batch disappears when the next one arrives. This creates a dramatic, intelligence-dashboard feel.
 
 ### Changes
 
-**File: `src/hooks/useLiveAttacks.ts`** -- Slow down attack spawn rate
+**File: `src/hooks/useLiveAttacks.ts`** -- Burst spawning pattern
 
-Update the `getDelay` function (line 37-39) to produce delays of 2500-5000ms instead of 300-1000ms:
+1. **Update `getDelay`** (line 37-39): Change to produce a 20-second cycle delay. Each cycle spawns 3 threats in rapid succession (~300ms apart), then waits ~20 seconds for the next burst.
 
 ```text
-Before:  return 300 + r() * 700;   // 0.3-1s
-After:   return 2500 + r() * 2500; // 2.5-5s (1-2 attacks per 5 seconds)
+// New logic: every 3rd index triggers a ~20s pause, others fire 300ms apart
+function getDelay(index: number): number {
+  const r = createSeededRand(DAY_SEED + index * 3571);
+  // Every 3 attacks = 1 burst. After a burst, wait 18-22 seconds.
+  if ((index + 1) % 3 === 0) {
+    return 18000 + r() * 4000; // 18-22s pause between bursts
+  }
+  return 200 + r() * 300; // 200-500ms between attacks within a burst
+}
 ```
 
-**File: `src/pages/CyberMap.tsx`** -- Make lines thinner to match reference
+2. **Update `addThreat` callback** (line 224-227): Clear previous threats when a new burst starts (every 3rd attack is the first of a new burst).
 
-1. **Guide rail line** (line 781): Reduce `lineWidth` from `2` to `1.2`
-2. **Glow trail** (line 806): Reduce `lineWidth` from `12` to `6`
-3. **Core bright line** (line 820): Reduce `lineWidth` from `3` to `1.5`
+```text
+const addThreat = useCallback((threat: LiveThreat, isBurstStart: boolean) => {
+  setThreats(prev => {
+    if (isBurstStart) return [threat]; // clear old batch
+    return [threat, ...prev].slice(0, RING_BUFFER_SIZE);
+  });
+  incrementSharedCount();
+}, []);
+```
+
+3. **Update the scheduler** (lines 236-249): Pass `isBurstStart` flag when the current index is the start of a new group of 3.
+
+```text
+const scheduleNext = () => {
+  const delay = getDelay(sharedThreatIndex);
+  return setTimeout(() => {
+    const realRecently = Date.now() - lastRealEventRef.current < 5000;
+    if (!realRecently) {
+      const isBurstStart = sharedThreatIndex % 3 === 0;
+      addThreat(generateDayThreat(sharedThreatIndex), isBurstStart);
+      sharedThreatIndex += 1;
+    }
+    timerRef.current = scheduleNext();
+  }, delay);
+};
+```
+
+**File: `src/pages/CyberMap.tsx`** -- Adjust arc lifecycle for burst visibility
+
+1. **`VISIBLE_DURATION`** (line 57): Reduce from `15` to `12` seconds so arcs from the previous burst fully fade before the next burst arrives at ~20s.
+
+2. **`FADE_DURATION`** (line 58): Reduce from `3` to `2` seconds for a crisper disappearance.
 
 ### Result
-- Attack lines will look thin and clean, similar to the reference screenshots
-- Attacks will be well-spaced with 1-2 new arcs appearing every 5 seconds, creating a calmer, more readable visualization
+- 3 attacks fire in quick succession (200-500ms apart), creating a dramatic burst
+- Then a calm 18-22 second pause follows
+- When the next burst starts, the previous 3 arcs are cleared from the feed, keeping the display clean
+- The visual rhythm mimics real threat intelligence dashboards where attacks come in waves
+
