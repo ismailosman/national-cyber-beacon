@@ -299,6 +299,40 @@ const EU_THREAT_SOURCES = [
   { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
 ];
 
+// ── South/Southeast Asia corridor targets ───────────────────────────────────
+const SEA_TARGETS = [
+  { lat: 1.35, lng: 103.82, country: 'Singapore', state: 'Singapore' },
+  { lat: 13.76, lng: 100.50, country: 'Thailand', state: 'Bangkok' },
+  { lat: -6.21, lng: 106.85, country: 'Indonesia', state: 'Jakarta' },
+  { lat: 14.60, lng: 120.98, country: 'Philippines', state: 'Manila' },
+  { lat: 10.82, lng: 106.63, country: 'Vietnam', state: 'Ho Chi Minh City' },
+  { lat: 21.03, lng: 105.85, country: 'Vietnam', state: 'Hanoi' },
+  { lat: 3.14, lng: 101.69, country: 'Malaysia', state: 'Kuala Lumpur' },
+  { lat: 11.56, lng: 104.92, country: 'Cambodia', state: 'Phnom Penh' },
+  { lat: 16.87, lng: 96.20, country: 'Myanmar', state: 'Yangon' },
+  { lat: 14.07, lng: 100.60, country: 'Thailand', state: 'Ayutthaya' },
+  { lat: 7.88, lng: 98.39, country: 'Thailand', state: 'Phuket' },
+  { lat: 10.31, lng: 123.89, country: 'Philippines', state: 'Cebu' },
+  { lat: 7.07, lng: 125.61, country: 'Philippines', state: 'Davao' },
+  { lat: -7.80, lng: 110.36, country: 'Indonesia', state: 'Yogyakarta' },
+  { lat: -8.65, lng: 115.22, country: 'Indonesia', state: 'Bali' },
+  { lat: 22.32, lng: 114.17, country: 'Hong Kong', state: 'Hong Kong' },
+  { lat: 25.03, lng: 121.57, country: 'Taiwan', state: 'Taipei' },
+  { lat: 37.57, lng: 126.98, country: 'South Korea', state: 'Seoul' },
+];
+
+// ── South/Southeast Asia corridor sources ───────────────────────────────────
+const SEA_THREAT_SOURCES = [
+  ...Array(4).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+  ...Array(3).fill({ country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 }),
+  ...Array(2).fill({ country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 }),
+  ...Array(2).fill({ country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 }),
+  { country: 'USA', state: 'VA', lat: 37.43, lng: -78.65 },
+  { country: 'India', state: 'Mumbai', lat: 20.59, lng: 78.96 },
+  { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
+  { country: 'Nigeria', state: 'Lagos', lat: 9.08, lng: 8.67 },
+];
+
 const ATTACK_TYPES: AttackType[] = ['malware', 'phishing', 'exploit', 'ddos', 'intrusion'];
 const SEVERITIES: Severity[] = ['critical', 'high', 'high', 'medium', 'medium', 'low'];
 
@@ -332,7 +366,7 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 };
 
 // Generate a single threat for a specific corridor
-function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'north_america' | 'eu' | 'russia', rand: () => number): LiveThreat {
+function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'north_america' | 'eu' | 'russia' | 'sea', rand: () => number): LiveThreat {
   let source, target;
   if (corridor === 'somalia') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
@@ -346,6 +380,9 @@ function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_sou
   } else if (corridor === 'russia') {
     source = RUSSIA_THREAT_SOURCES[Math.floor(rand() * RUSSIA_THREAT_SOURCES.length)];
     target = RUSSIA_TARGETS[Math.floor(rand() * RUSSIA_TARGETS.length)];
+  } else if (corridor === 'sea') {
+    source = SEA_THREAT_SOURCES[Math.floor(rand() * SEA_THREAT_SOURCES.length)];
+    target = SEA_TARGETS[Math.floor(rand() * SEA_TARGETS.length)];
   } else {
     source = EU_THREAT_SOURCES[Math.floor(rand() * EU_THREAT_SOURCES.length)];
     target = EU_TARGETS[Math.floor(rand() * EU_TARGETS.length)];
@@ -371,17 +408,18 @@ function generateBurst(index: number): LiveThreat[] {
   const burstSize = rand() < 0.6 ? 3 : 2;
 
   const r1 = rand();
-  const firstCorridor: 'somalia' | 'global_south' | 'russia' = r1 < 0.4 ? 'somalia' : r1 < 0.75 ? 'global_south' : 'russia';
+  const firstCorridor: 'somalia' | 'global_south' | 'russia' | 'sea' = r1 < 0.3 ? 'somalia' : r1 < 0.55 ? 'global_south' : r1 < 0.75 ? 'sea' : 'russia';
   const threats: LiveThreat[] = [
     generateCorridorThreat(index, firstCorridor, rand),
   ];
 
   if (burstSize === 3) {
     threats.push(generateCorridorThreat(index, 'north_america', rand));
-    threats.push(generateCorridorThreat(index, 'eu', rand));
+    const r3 = rand();
+    threats.push(generateCorridorThreat(index, r3 < 0.5 ? 'eu' : 'sea', rand));
   } else {
     const r2 = rand();
-    const secondCorridor: 'north_america' | 'eu' | 'russia' = r2 < 0.4 ? 'north_america' : r2 < 0.8 ? 'eu' : 'russia';
+    const secondCorridor: 'north_america' | 'eu' | 'russia' | 'sea' = r2 < 0.3 ? 'north_america' : r2 < 0.55 ? 'eu' : r2 < 0.8 ? 'sea' : 'russia';
     threats.push(generateCorridorThreat(index, secondCorridor, rand));
   }
 
