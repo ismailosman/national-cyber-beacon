@@ -1,42 +1,69 @@
 
 
-## Fix: Grade Consistency Between Email and PDF
+## Fix Security Scan Errors and Clear Warnings
 
-### Problem
-There are **3 different scoring formulas** across the codebase, causing grades to mismatch:
+### Overview
+The security scan has identified 4 errors and several warnings. This plan addresses each one through database migrations and finding management.
 
-| Location | Formula | Example Score |
-|---|---|---|
-| DastScanner.tsx (email source) | critical x 15 + high x 8 | Higher scores |
-| ScanReportCharts.tsx (report page) | critical x 25 + high x 10 + nikto x 2 | Lower scores |
-| generate-scan-report (PDF) | critical x 25 + high x 10 + nikto x 2 | Lower scores |
+### Errors to Fix (Database Changes)
 
-When the DAST scanner sends its score to the email function, it uses lighter weights (15/8), producing a higher score than what the report page and PDF compute (25/10). This means the email says "Grade B" while the report page might say "Grade C".
+**1. Remove Auditor access from `breach_check_results`**
+The Auditor role can still read breached emails. Drop the "Auditor read breach_check_results" policy since Auditors don't need access to raw breach data.
 
-### Solution
-Align all scoring to one formula: **critical x 25, high x 10, medium x 3, low x 1, nikto x 2** (the standard model already used by the report page and PDF generator).
+**2. Restrict `incident_reports` public insert**
+Replace the wide-open `WITH CHECK (true)` insert policy with a more restrictive one that still allows public submissions but limits insertable columns by ensuring only expected fields are populated (or mark as intentional and ignore).
 
-### Changes
+**3. Protect `organizations.contact_email` from Analysts/Auditors**
+Create a safe view `organizations_safe` that redacts `contact_email` for non-SuperAdmin users, and update frontend queries to use the view.
 
-**File 1: `src/pages/DastScanner.tsx`** (line 177)
+**4. Protect `incident_reports` reporter_email from OrgAdmins/Auditors**
+The `incident_reports_safe` view already exists and redacts this data. Add RLS policies to the view so it's accessible, and ensure the base table blocks direct SELECT for OrgAdmins and Auditors (they should use the view).
 
-Change the DAST score formula from:
+**5. Add RLS policies to `incident_reports_safe` view**
+The view currently has RLS enabled but no policies. Add read policies matching the base table roles.
+
+### Warnings to Ignore (Acceptable Risk)
+
+The following will be marked as ignored with justification:
+- **RLS Policy Always True**: The public incident insert is intentional for anonymous reporting
+- **Leaked Password Protection**: Requires manual dashboard toggle, cannot be fixed via code
+- **Phishing domains readable by all auth users**: Intentional for SOC analyst awareness
+- **Tech stack details for OrgAdmins**: Acceptable -- OrgAdmins need to see their own tech stack
+- **DAST results for OrgAdmins**: Acceptable -- organizations need their own scan results
+- **Security check details for OrgAdmins**: Acceptable -- transparency requirement
+- **Baselines nullable org_id**: Low risk, existing data pattern
+- **SSL/DDoS/Uptime info-level findings**: Acceptable operational data
+
+### Technical Steps
+
+**Migration SQL:**
+```sql
+-- 1. Drop Auditor read from breach_check_results
+DROP POLICY IF EXISTS "Auditor read breach_check_results" ON public.breach_check_results;
+
+-- 2. Add RLS policies to incident_reports_safe view
+ALTER VIEW public.incident_reports_safe SET (security_invoker = on);
+-- (Add SELECT policies for SuperAdmin, Analyst, Auditor, OrgAdmin)
+
+-- 3. Create organizations_safe view hiding contact_email
+CREATE OR REPLACE VIEW public.organizations_safe
+WITH (security_invoker = on) AS
+SELECT id, name, domain, sector, region, status, risk_score,
+       last_scan, lat, lng, created_at, updated_at,
+       CASE WHEN public.has_role(auth.uid(), 'SuperAdmin') 
+            THEN contact_email ELSE NULL END AS contact_email
+FROM public.organizations;
 ```
-100 - (critical * 15 + high * 8 + medium * 3 + low * 1)
-```
-to:
-```
-100 - (critical * 25 + high * 10 + medium * 3 + low * 1)
-```
 
-This ensures the score sent to `send-dast-report` for email and PDF matches the score shown on the report page and in the main PDF generator.
+**Frontend changes:**
+- Update organization queries to use `organizations_safe` view where contact_email is displayed
 
-**File 2: `supabase/functions/send-dast-report/index.ts`**
+**Finding management:**
+- Ignore warnings that represent acceptable, intentional design decisions
+- Delete/update findings resolved by the migration
 
-Fix the grade box in the PDF to properly fit the "Grade" text. The current Risk Level box at coordinates (470, 726) with size 90x40 clips the text. Widen it slightly and adjust text placement so "RISK LEVEL" and the label (e.g., "Medium") render cleanly without overlap.
-
-### Result
-- DAST email body grade = PDF attachment grade = Report page grade
-- All three use the same 25/10/3/1 deduction model
-- Grade box in PDF renders cleanly
+### Files to Modify
+- New database migration (SQL)
+- `src/pages/Organizations.tsx` (use safe view if it queries contact_email)
+- `src/pages/OrgDetail.tsx` (use safe view if it queries contact_email)
 
