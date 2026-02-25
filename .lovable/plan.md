@@ -1,79 +1,33 @@
 
 
-## Fix All FAIL Findings for Cloudflare-Hosted Sites
+## Add Scan Queue Panel Page
 
-### Problem
-
-The DAST scanner marks several Cloudflare infrastructure artifacts and Cloudflare-manageable headers as "FAIL" in both the PDF report and the dashboard UI. These are not actionable vulnerabilities for a site behind Cloudflare's proxy.
-
-**Current FAIL findings from screenshots:**
-
-| Finding | Source | Root Cause |
-|---------|--------|------------|
-| IP address in set-cookie (1.0.1.1) | Nikto | Cloudflare edge IP injected into cookies |
-| IP address in __cf_bm cookie | Nikto | Cloudflare bot management cookie |
-| Missing X-Frame-Options | Nikto + ZAP | Cannot set via meta tag; requires Cloudflare Transform Rule |
-| Missing X-Content-Type-Options | Nikto | Meta tag exists but Nikto checks HTTP response headers |
-| Content-Encoding: deflate | Nikto | Cloudflare default compression |
-| robots.txt 16 entries | Nikto | Informational, not a vulnerability |
-| CSP Header Not Set | ZAP | Cannot set full CSP via meta for all directives |
-| Missing Anti-clickjacking Header | ZAP | Same as X-Frame-Options |
-| Sub Resource Integrity Missing | ZAP | External CDN scripts (Cloudflare Turnstile) |
-
-### Solution
-
-Expand the Cloudflare artifact detection and apply it consistently across both the PDF report generator and the frontend dashboard.
-
----
+### Overview
+Create a new protected page at `/scan-queue` that displays a real-time scan queue panel connected to your Kali VPS via WebSocket (socket.io).
 
 ### Changes
 
-**1. `supabase/functions/generate-scan-report/index.ts`**
+**1. Install dependency**
+- Add `socket.io-client` to the project
 
-Expand `isCloudflareArtifact()` to catch all Cloudflare-related findings:
-- IP address in any set-cookie header (Cloudflare edge IPs like 1.0.1.1)
-- Missing X-Frame-Options (requires server-level header, not controllable from app)
-- Missing X-Content-Type-Options when meta tag is present (Nikto only checks HTTP headers)
-- Content-Encoding deflate (without needing "breach" keyword)
-- robots.txt entries (already handled, keep as-is)
+**2. Create `src/pages/ScanQueuePanel.tsx`**
+- Adapt the provided code to TypeScript (.tsx) with proper type definitions for Job, status types, etc.
+- Replace the hardcoded `API_BASE` with a constant you can easily update (or read from environment)
+- Use the project's existing UI patterns (e.g., existing `Input`, `Button` components from shadcn/ui) where appropriate, while keeping the custom styling from the provided code
+- Add TypeScript interfaces for `Job` type with fields: `id`, `status`, `scan_type`, `target`, `progress`, `log`, `started_at`, `created_at`
 
-Add a new `isCloudflareZapArtifact()` for ZAP alerts:
-- CSP Header Not Set (Cloudflare WAF provides equivalent protection)
-- Missing Anti-clickjacking / X-Frame-Options (same as Nikto)
-- Sub Resource Integrity missing for external CDN scripts
+**3. Register route in `src/App.tsx`**
+- Add `/scan-queue` as a protected route inside the `ProtectedRoutes` component (within the `AppLayout`)
 
-Update `normalizeFindings()` to apply artifact detection to both Nikto and ZAP findings, reclassifying them as INFO severity with "[Cloudflare]" annotation and "pass"/"info" status instead of "fail".
+**4. Add sidebar nav entry in `src/components/layout/Sidebar.tsx`**
+- Add a "Scan Queue" item pointing to `/scan-queue` with an appropriate icon (e.g., `ListOrdered` from lucide-react)
 
-Update `computeStats()` to exclude reclassified artifacts from score deductions so the score accurately reflects actionable vulnerabilities only.
+### API Base URL
+Since you mentioned you have the VPS address ready, the code will use a constant `API_BASE` at the top of the file that you can update. Please share the URL after implementation so we can set it.
 
-**2. `src/components/scanner/ScanResults.tsx`**
-
-Add the same `isCloudflareArtifact()` and `isCloudflareZapArtifact()` detection logic to the frontend's `normalizeFindings()` function. For matched findings:
-- Change `status` from `'fail'` to `'info'`
-- Change `severity` to `'info'`
-- Append `' [Cloudflare]'` to the finding name
-- Add recommendation: "Cloudflare infrastructure artifact - no action required"
-
-**3. `src/components/scanner/ScanReportCharts.tsx`**
-
-Update `computeStats()` to exclude Cloudflare artifacts from score deductions. Add the same artifact detection to filter out Nikto vulns and ZAP alerts that match Cloudflare patterns before counting them toward severity totals.
-
-**4. `public/robots.txt`**
-
-Simplify to a minimal secure version to eliminate the "16 entries" finding:
-```
-User-agent: *
-Allow: /
-Disallow: /admin/
-Disallow: /api/
-Disallow: /settings/
-
-Sitemap: https://cyberdefense.so/sitemap.xml
-```
-
-This keeps essential disallow rules for sensitive paths while reducing the entry count and removing paths that don't exist (like /tmp/, /private/, /config/).
-
-### Impact
-
-After these changes, a rescan of cyberdefense.so should show all Cloudflare-related findings as INFO/Pass instead of FAIL, resulting in a significantly higher security score (likely A or B grade instead of the current lower grade).
+### Technical Notes
+- The `socket.io-client` library will be installed as a new dependency
+- The page connects via WebSocket and listens for `jobs_snapshot` and `job_update` events
+- New scans are submitted via POST to `{API_BASE}/api/scan/start`
+- The page is only accessible to authenticated users (behind the existing auth guard)
 
