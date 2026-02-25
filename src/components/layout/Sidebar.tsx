@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield, ListOrdered
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield, ListOrdered, Eye
 } from 'lucide-react';
 import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +20,7 @@ const navItems = [
   { to: '/ddos-monitor', icon: ShieldAlert, label: 'DDoS Monitor' },
   { to: '/early-warning', icon: Radar, label: 'Early Warning' },
   { to: '/threat-intelligence', icon: Crosshair, label: 'Threat Intel' },
+  { to: '/dark-web', icon: Eye, label: 'Dark Web Monitor' },
   { to: '/dast-scanner', icon: Search, label: 'DAST Scanner' },
   { to: '/reports', icon: FileText, label: 'Reports' },
   
