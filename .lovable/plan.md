@@ -1,14 +1,29 @@
 
-Goal: eliminate the recurring 502 runtime error on `/scan-queue` and restore queue listing/start-scan behavior.
 
-## Status: ✅ COMPLETED
+## Fix: 405 Method Not Allowed on `/scan/jobs`
 
-### Changes Made
+### Problem
+The upstream scan queue API at `cybersomalia.com/scan/jobs` returns **405 Method Not Allowed** because the proxy sends a **GET** request, but the API expects **POST**.
 
-1. **`supabase/functions/scan-queue-proxy/index.ts`** — Fixed upstream paths from `/api/scan/*` to `/scan/*`, added `SECURITY_API_KEY` and `SECURITY_API_URL` env vars (matching `security-scanner-proxy`), and changed list action to always return HTTP 200 with `{ ok, jobs, error? }` structure so polling never causes runtime errors.
+### Solution
+Change the `fetch` call for listing jobs from GET to POST in the edge function.
 
-2. **`src/pages/ScanQueuePanel.tsx`** — Updated `fetchJobs` to consume the new structured response, added `errorMsg` state, and added a visible error banner when the scanner API is unavailable. The connected/disconnected badge is now driven by `data.ok`.
+### Change
+**File: `supabase/functions/scan-queue-proxy/index.ts`** (line 87-91)
 
-### Verified
-- Edge function returns `200 { ok: true, jobs: [] }` when scanner is healthy with no jobs.
-- When upstream is down, returns `200 { ok: false, jobs: [], error: "..." }` — no more 502 loop.
+Update the list jobs fetch to use POST method:
+
+```typescript
+const upstream = await fetch(`${API_BASE}/scan/jobs`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "x-api-key": API_KEY,
+  },
+  body: JSON.stringify({}),
+});
+```
+
+This is a one-line-scope fix -- just adding `method: "POST"`, `Content-Type` header, and an empty JSON body to the existing fetch call for listing jobs.
+
