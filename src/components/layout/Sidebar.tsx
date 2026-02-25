@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, Bell, FileText, Settings,
-  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield
+  LogOut, ChevronRight, Wifi, AlertOctagon, CheckSquare, Map, Activity, ShieldAlert, Radar, Crosshair, Search, Shield, ListOrdered
 } from 'lucide-react';
 import logoImg from '@/assets/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,6 +25,7 @@ const navItems = [
   { to: '/playbooks', icon: FileText, label: 'Playbooks' },
   { to: '/admin/security-monitor', icon: Shield, label: 'Security Monitor' },
   { to: '/security-scanner', icon: Search, label: 'Security Scanner' },
+  { to: '/scan-queue', icon: ListOrdered, label: 'Scan Queue' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
