@@ -45,6 +45,7 @@ import SecurityMonitor from "@/pages/SecurityMonitor";
 import SecurityScanner from "@/pages/SecurityScanner";
 import ScanReport from "@/pages/ScanReport";
 import ScanQueuePanel from "@/pages/ScanQueuePanel";
+import DarkWebMonitor from "@/pages/DarkWebMonitor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -83,6 +84,7 @@ const ProtectedRoutes = () => {
         <Route path="/threat-intelligence" element={<ThreatIntelligence />} />
         <Route path="/playbooks" element={<Playbooks />} />
         <Route path="/dast-scanner" element={<DastScanner />} />
+        <Route path="/dark-web" element={<DarkWebMonitor />} />
         <Route path="/admin/security-monitor" element={<SecurityMonitor />} />
         <Route path="/security-scanner" element={<SecurityScanner />} />
         <Route path="/scan-queue" element={<ScanQueuePanel />} />
