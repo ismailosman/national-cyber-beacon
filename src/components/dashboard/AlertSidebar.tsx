@@ -18,15 +18,15 @@ const AlertSidebar: React.FC = () => {
   const { data: alerts = [] } = useQuery({
     queryKey: ['alerts-sidebar'],
     queryFn: async () => {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from('alerts')
         .select('*, organizations(name)')
         .eq('status', 'open')
         .not('organization_id', 'is', null)
-        .gte('created_at', oneHourAgo)
+        .gte('created_at', oneDayAgo)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(20);
       return data || [];
     },
     refetchInterval: 30000,
