@@ -90,9 +90,9 @@ function generateDastPDF(data: {
   p1.push(`BT /F2 9 Tf 0.3 0.3 0.35 rg 350 736 Td (Grade: ${grade.grade} - ${grade.label}) Tj ET`);
 
   // Risk Level box
-  p1.push(`${risk.color} rg`, `470 726 90 40 re f`);
-  p1.push(`BT /F2 10 Tf 1 1 1 rg 480 750 Td (RISK LEVEL) Tj ET`);
-  p1.push(`BT /F2 14 Tf 1 1 1 rg 485 732 Td (${risk.label}) Tj ET`);
+  p1.push(`${risk.color} rg`, `455 726 105 40 re f`);
+  p1.push(`BT /F2 9 Tf 1 1 1 rg 470 750 Td (RISK LEVEL) Tj ET`);
+  p1.push(`BT /F2 13 Tf 1 1 1 rg 475 732 Td (${risk.label}) Tj ET`);
 
   // Score section
   p1.push(`BT /F2 12 Tf 0.15 0.15 0.2 rg 30 700 Td (Security Score) Tj ET`);
