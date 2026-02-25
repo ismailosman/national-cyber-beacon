@@ -1,7 +1,5 @@
-import { useEffect, useState, useRef } from "react";
-import { io, Socket } from "socket.io-client";
-
-const API_BASE = "http://187.77.222.249:5000";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 type JobStatus = "queued" | "running" | "completed" | "failed";
 
@@ -89,40 +87,42 @@ export default function ScanQueuePanel() {
   const [connected, setConnected] = useState(false);
   const [target, setTarget] = useState("");
   const [scanType, setScanType] = useState("DAST");
-  const socketRef = useRef<Socket | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("scan-queue-proxy", {
+        method: "GET",
+      });
+      if (error) throw error;
+      const jobList = Array.isArray(data) ? data : [];
+      setJobs(jobList);
+      setConnected(true);
+    } catch {
+      setConnected(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const socket = io(API_BASE, { transports: ["websocket"] });
-    socketRef.current = socket;
-
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
-
-    socket.on("jobs_snapshot", (data: Job[]) => {
-      setJobs(data);
-    });
-
-    socket.on("job_update", (updatedJob: Job) => {
-      setJobs((prev) => {
-        const exists = prev.find((j) => j.id === updatedJob.id);
-        if (exists) {
-          return prev.map((j) => (j.id === updatedJob.id ? updatedJob : j));
-        }
-        return [updatedJob, ...prev];
-      });
-    });
-
-    return () => { socket.disconnect(); };
-  }, []);
+    fetchJobs();
+    intervalRef.current = setInterval(fetchJobs, 3000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchJobs]);
 
   const startScan = async () => {
     if (!target.trim()) return;
-    await fetch(`${API_BASE}/api/scan/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scan_type: scanType, target }),
-    });
-    setTarget("");
+    try {
+      await supabase.functions.invoke("scan-queue-proxy", {
+        method: "POST",
+        body: { scan_type: scanType, target },
+      });
+      setTarget("");
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to start scan:", err);
+    }
   };
 
   const queued    = jobs.filter((j) => j.status === "queued");
