@@ -12,7 +12,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     if (req.method === "GET") {
-      const response = await fetch(`${API_BASE}/api/jobs`);
+      const response = await fetch(`${API_BASE}/api/scan/jobs`);
       const data = await response.json();
       return new Response(JSON.stringify(data), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
