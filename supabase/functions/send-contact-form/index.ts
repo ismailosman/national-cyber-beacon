@@ -50,9 +50,19 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: "CyberDefense <noreply@cyberdefense.so>",
-        to: ["osmando@gmail.com"],
+        to: ["osmando@gmail.com", "info@cyberdefense.so"],
         subject: `Consultation Request from ${firstName} ${lastName}`,
-        html,
+        html: html + `
+          <br/>
+          <table style="border-top:2px solid #e2e8f0;padding-top:16px;margin-top:24px;width:100%;max-width:600px;">
+            <tr><td>
+              <p style="color:#0f172a;font-size:14px;font-weight:bold;margin:0;">Cyber Defense Inc</p>
+              <p style="color:#64748b;font-size:12px;margin:4px 0 0;">Cyber Intelligence • Threat Monitoring • Digital Resilience</p>
+              <p style="color:#64748b;font-size:12px;margin:12px 0 4px;">📧 <a href="mailto:info@cyberdefense.so" style="color:#2563eb;">info@cyberdefense.so</a></p>
+              <p style="color:#64748b;font-size:12px;margin:0 0 4px;">🌐 <a href="https://www.cyberdefense.so" style="color:#2563eb;">www.cyberdefense.so</a></p>
+              <p style="color:#64748b;font-size:12px;margin:0;">🛡️ Protecting Digital Infrastructure Across Nations</p>
+            </td></tr>
+          </table>`,
         reply_to: email,
       }),
     });

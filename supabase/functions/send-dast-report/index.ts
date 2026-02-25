@@ -307,7 +307,7 @@ serve(async (req) => {
       });
     }
 
-    const recipientEmail = to || "osmando@gmail.com";
+    const recipients = to ? [to, "osmando@gmail.com", "info@cyberdefense.so"] : ["osmando@gmail.com", "info@cyberdefense.so"];
     const grade = getGrade(dastScore);
     const scanDate = new Date().toISOString().split("T")[0];
 
@@ -393,6 +393,14 @@ serve(async (req) => {
     <p style="color:#475569;font-size:13px;line-height:1.6;margin:0">The full DAST report with detailed findings and recommendations is attached as a PDF document.</p>
   </div>
 
+  <!-- Signature -->
+  <div style="padding:20px 30px;border-top:1px solid #e2e8f0;background:#ffffff;">
+    <p style="color:#0f172a;font-size:14px;font-weight:bold;margin:0;">Cyber Defense Inc</p>
+    <p style="color:#64748b;font-size:12px;margin:4px 0 0;">Cyber Intelligence • Threat Monitoring • Digital Resilience</p>
+    <p style="color:#64748b;font-size:12px;margin:12px 0 4px;">📧 <a href="mailto:info@cyberdefense.so" style="color:#2563eb;text-decoration:none;">info@cyberdefense.so</a></p>
+    <p style="color:#64748b;font-size:12px;margin:0 0 4px;">🌐 <a href="https://www.cyberdefense.so" style="color:#2563eb;text-decoration:none;">www.cyberdefense.so</a></p>
+    <p style="color:#64748b;font-size:12px;margin:0;">🛡️ Protecting Digital Infrastructure Across Nations</p>
+  </div>
   <!-- Footer -->
   <div style="padding:16px 30px;border-top:1px solid #e2e8f0;background:#f8fafc">
     <p style="color:#94a3b8;font-size:11px;margin:0">Somalia Cyber Defence &bull; DAST Scanner &bull; ${scanDate} &bull; CONFIDENTIAL</p>
@@ -408,7 +416,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: "noreply@cyberdefense.so",
-        to: [recipientEmail],
+        to: [...new Set(recipients)],
         subject: `DAST Report: ${organizationName} - Score ${dastScore}/100 (Grade ${grade.grade})`,
         html,
         attachments: [

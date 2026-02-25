@@ -233,9 +233,16 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               from: "noreply@cyberdefense.so",
-              to: ["osmando@gmail.com"],
+              to: ["osmando@gmail.com", "info@cyberdefense.so"],
               subject: `DAST Alert: ${totalNewAlerts} new critical/high finding(s) detected`,
-              html,
+              html: html + `
+<div style="border-top:2px solid #334155;padding-top:16px;margin-top:24px;font-family:Arial,sans-serif;">
+  <p style="color:#e2e8f0;font-size:14px;font-weight:bold;margin:0;">Cyber Defense Inc</p>
+  <p style="color:#94a3b8;font-size:12px;margin:4px 0 0;">Cyber Intelligence • Threat Monitoring • Digital Resilience</p>
+  <p style="color:#94a3b8;font-size:12px;margin:12px 0 4px;">📧 info@cyberdefense.so</p>
+  <p style="color:#94a3b8;font-size:12px;margin:0 0 4px;">🌐 www.cyberdefense.so</p>
+  <p style="color:#94a3b8;font-size:12px;margin:0;">🛡️ Protecting Digital Infrastructure Across Nations</p>
+</div>`,
             }),
           });
           const emailResult = await emailRes.json();
