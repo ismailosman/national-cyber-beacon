@@ -129,12 +129,25 @@ export default function ScanQueuePanel() {
   const startScan = async () => {
     if (!target.trim()) return;
     try {
-      await supabase.functions.invoke("scan-queue-proxy", {
+      const { data, error } = await supabase.functions.invoke("scan-queue-proxy", {
         body: { action: "start", scan_type: scanType, target },
       });
+
+      if (error) {
+        setErrorMsg(error.message || "Failed to start scan");
+        return;
+      }
+
+      if (data && typeof data === "object" && "ok" in data && data.ok === false) {
+        setErrorMsg(typeof data.error === "string" ? data.error : "Failed to start scan");
+        return;
+      }
+
+      setErrorMsg(null);
       setTarget("");
       fetchJobs();
     } catch (err) {
+      setErrorMsg("Failed to start scan");
       console.error("Failed to start scan:", err);
     }
   };
