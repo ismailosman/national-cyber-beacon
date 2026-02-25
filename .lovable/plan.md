@@ -1,56 +1,40 @@
-Goal: stop CAPTCHA from blocking the Preview environment while keeping CAPTCHA enabled only on the real production domain (`cyberdefense.so`), exactly as you requested.
 
-What I found:
 
-- The gate currently bypasses only:
-  - `localhost`
-  - hostnames containing `lovable.app`
-- Your current preview host is `*.lovableproject.com`, so it is not bypassed.
-- Because of that, Turnstile renders in preview and fails with Cloudflare error `110200` (“Unable to connect to website”), which blocks `/` and `/cyber-map`.
-- The same hostname logic is also used on `/contact`, so it can fail there too in preview.
+## Redesign Portfolio Page with Cyber-Themed Service Cards
 
-Implementation plan:
+### Overview
+Replace the current simple card layout with a dark, cyber-themed design featuring animated scan lines, corner brackets, metric displays, and color-coded service cards.
 
-1. Make domain check explicit: protect only production host
+### Changes
 
-- In `src/pages/TurnstileGate.tsx`, replace current `bypassed` logic with an allowlist check:
-  - CAPTCHA enabled only when hostname is:
-    - `cyberdefense.so`
-    - `www.cyberdefense.so`
-  - Otherwise (preview/dev/any non-production host), immediately render children without Turnstile.
-- This is safer than matching preview domains because preview domains can change over time.
+**File: `src/components/landing/PortfolioSection.tsx`** — Full rewrite
 
-2. Apply the same production-only rule on Contact page
+The new component will include:
 
-- In `src/pages/Contact.tsx`, replace `isDev` logic with the same production-host check.
-- Result:
-  - Turnstile widget is hidden in preview/dev.
-  - form submit won’t require Turnstile token in preview/dev.
-  - Turnstile verification still required in production domain only.
+- **Enhanced service data**: Each service now has `id`, `subtitle`, `metric`, `metricLabel`, `tag`, and unique `color` fields
+- **ServiceCard sub-component** with:
+  - Hover-triggered animated scan line effect using `requestAnimationFrame`
+  - SVG corner bracket decorations on all four corners
+  - Octagon-shaped icon container with colored border
+  - Status tag badges (ACTIVE, LIVE, HARDENED, CRITICAL) with per-card colors
+  - Metric display bar showing key stats (e.g., "99.7% Detection Rate")
+  - Glow border and box-shadow on hover using each card's accent color
+  - Staggered fade-up entrance animation via inline `animationDelay`
+- **Section wrapper** with:
+  - Dark background (`#060e1a`) with subtle grid overlay pattern
+  - Radial gradient glow accent
+  - Section heading styled with Orbitron/Rajdhani fonts via inline styles
+  - Responsive 2-column grid layout
+- **Inline `<style>` tag** for:
+  - Google Fonts import (Share Tech Mono, Rajdhani, Orbitron)
+  - `@keyframes cyberFadeUp` animation
 
-3. Keep all other behavior unchanged
+**File: `src/pages/Portfolio.tsx`** — Minor update
 
-- Do not change routing, UI copy, styling, token/session behavior, or verification endpoint.
-- `/` and `/cyber-map` remain protected in production.
-- `/contact` remains protected in production.
+- Remove `bg-[hsl(var(--landing-bg))]` from the wrapper since PortfolioSection now controls its own dark background, or keep it and let the section's own background override visually.
 
-4. Validation checklist after implementation
-
-- Preview (`*.lovableproject.com` / `*.lovable.app`):
-  - `/` opens directly (no security verification screen).
-  - `/cyber-map` opens directly.
-  - `/contact` submits without CAPTCHA requirement.
-- Production domain (`cyberdefense.so` and `www.cyberdefense.so`):
-  - `/` and `/cyber-map` show Turnstile gate.
-  - `/contact` requires successful verification before submit.
-- Confirm no regression in existing session-based pass behavior on production.
-
-Technical notes:
-
-- Files to update:
-  - `src/pages/TurnstileGate.tsx`
-  - `src/pages/Contact.tsx`
-- Suggested shared condition (same in both files):
-  - `const isProductionCaptchaHost = hostname === "cyberdefense.so" || hostname === "www.cyberdefense.so";`
-  - Gate/widget logic should run only when `isProductionCaptchaHost` is true.  
-  Also change the the background color of the landing page in the hero section "View Live threat" to red color
+### Technical Notes
+- The user's pasted JSX had stripped/broken tags — I will reconstruct the complete working JSX from the intent and structure provided
+- Uses only existing dependencies (React, lucide-react) — no new packages needed
+- Fonts loaded via `@import` in an inline `<style>` tag within the component
+- All animations are CSS-based or lightweight `requestAnimationFrame` for the scan line
