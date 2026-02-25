@@ -93,6 +93,57 @@ export default function ScanQueuePanel() {
   const [lastPoll, setLastPoll] = useState<{ time: Date; status: string; jobCount: number } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanPollersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  // Poll individual scan status
+  const pollScanStatus = useCallback((scanId: string) => {
+    // Don't start duplicate pollers
+    if (scanPollersRef.current.has(scanId)) return;
+
+    const poller = setInterval(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("scan-queue-proxy", {
+          body: { action: "status", scan_id: scanId },
+        });
+
+        if (error || !data?.ok) return;
+
+        const scan = data.scan;
+        if (!scan) return;
+
+        // Update the local ref entry
+        recentScansRef.current = recentScansRef.current.map((j) => {
+          if (j.id !== scanId) return j;
+          return {
+            ...j,
+            status: scan.status === "done" ? "completed" : (scan.status as JobStatus) || j.status,
+            progress: scan.progress ?? j.progress,
+            log: scan.log ?? scan.message ?? j.log,
+            started_at: scan.started_at ?? j.started_at,
+          };
+        });
+
+        // Stop polling if terminal
+        const terminalStatus = scan.status === "done" || scan.status === "completed" || scan.status === "failed" || scan.status === "error";
+        if (terminalStatus) {
+          clearInterval(poller);
+          scanPollersRef.current.delete(scanId);
+        }
+      } catch {
+        // silently retry on next interval
+      }
+    }, 5000);
+
+    scanPollersRef.current.set(scanId, poller);
+  }, []);
+
+  // Cleanup scan pollers on unmount
+  useEffect(() => {
+    return () => {
+      scanPollersRef.current.forEach((poller) => clearInterval(poller));
+      scanPollersRef.current.clear();
+    };
+  }, []);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -121,12 +172,12 @@ export default function ScanQueuePanel() {
         setErrorMsg(null);
       }
 
-      // Merge recent local scans (dedup by id, expire after 60s)
+      // Merge recent local scans (dedup by id, expire after 5 minutes)
       const now = Date.now();
       const validRecent = recentScansRef.current.filter(r => {
         const age = now - new Date(r.created_at).getTime();
         const inApi = apiJobs.some(a => a.id === r.id);
-        return !inApi && age < 60000;
+        return !inApi && age < 300000;
       });
       recentScansRef.current = validRecent;
 
@@ -176,6 +227,9 @@ export default function ScanQueuePanel() {
         created_at: new Date().toISOString(),
       };
       recentScansRef.current = [localJob, ...recentScansRef.current];
+
+      // Start polling individual scan status
+      pollScanStatus(scanId);
 
       // Show success message
       setSuccessMsg(`✅ Scan queued: ${scanId.slice(0, 8)}… → ${target}`);
