@@ -49,6 +49,29 @@ interface UnifiedFinding {
   evidence?: any;
 }
 
+/* ─── Cloudflare artifact detection (must match backend logic) ─── */
+function isCloudflareArtifact(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  if (lower.includes('__cf_bm')) return true;
+  if (lower.includes('ip address') && lower.includes('set-cookie')) return true;
+  if (lower.includes('ip address') && lower.includes('cookie')) return true;
+  if (lower.includes('1.0.1.1')) return true;
+  if (lower.includes('x-frame-options')) return true;
+  if (lower.includes('x-content-type-options')) return true;
+  if (lower.includes('deflate') || (lower.includes('breach') && lower.includes('compress'))) return true;
+  if (lower.includes('robots.txt') && !lower.includes('sensitive')) return true;
+  return false;
+}
+
+function isCloudflareZapArtifact(alertName: string, desc: string): boolean {
+  const lower = (alertName + ' ' + desc).toLowerCase();
+  if (lower.includes('content security policy') || lower.includes('csp')) return true;
+  if (lower.includes('anti-clickjacking') || lower.includes('x-frame-options')) return true;
+  if (lower.includes('sub resource integrity') || lower.includes('subresource integrity') || lower.includes('missing-integrity')) return true;
+  if (lower.includes('x-content-type-options')) return true;
+  return false;
+}
+
 function normalizeFindings(result: ScanResult): { tools: { name: string; icon: string; findings: UnifiedFinding[] }[] } {
   const tools: { name: string; icon: string; findings: UnifiedFinding[] }[] = [];
 
@@ -86,7 +109,7 @@ function normalizeFindings(result: ScanResult): { tools: { name: string; icon: s
     });
   }
 
-  // ZAP (DAST)
+  // ZAP (DAST) — with Cloudflare artifact detection
   const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
   if (zapAlerts.length > 0 || result.dast_results?.zap) {
     tools.push({
@@ -94,11 +117,24 @@ function normalizeFindings(result: ScanResult): { tools: { name: string; icon: s
       icon: '⚡',
       findings: zapAlerts.map((a: any) => {
         const risk = (a.riskdesc || '').split(' ')[0]?.toLowerCase() || 'info';
+        const alertName = a.alert || 'Unknown';
+        const alertDesc = a.desc || '';
+        if (isCloudflareZapArtifact(alertName, alertDesc)) {
+          return {
+            tool: 'ZAP',
+            severity: 'info',
+            name: alertName + ' [Cloudflare]',
+            description: alertDesc,
+            location: a.url || '',
+            status: 'info',
+            recommendation: 'Cloudflare infrastructure artifact - no action required',
+          };
+        }
         return {
           tool: 'ZAP',
           severity: risk,
-          name: a.alert || 'Unknown',
-          description: a.desc || '',
+          name: alertName,
+          description: alertDesc,
           location: a.url || '',
           status: risk === 'informational' ? 'info' : 'fail',
           recommendation: a.solution || undefined,
@@ -108,21 +144,35 @@ function normalizeFindings(result: ScanResult): { tools: { name: string; icon: s
     });
   }
 
-  // Nikto (DAST)
+  // Nikto (DAST) — with Cloudflare artifact detection
   if (result.dast_results?.nikto) {
     const niktoData = result.dast_results.nikto;
     const vulns = niktoData.vulnerabilities || [];
     tools.push({
       name: 'Nikto (DAST)',
       icon: '🛡️',
-      findings: vulns.length > 0 ? vulns.map((v: any, i: number) => ({
-        tool: 'Nikto',
-        severity: v.severity || 'medium',
-        name: v.id || `Finding ${i + 1}`,
-        description: v.msg || v.message || JSON.stringify(v),
-        location: v.url || result.target,
-        status: 'fail',
-      })) : niktoData.raw ? [{
+      findings: vulns.length > 0 ? vulns.map((v: any, i: number) => {
+        const msg = v.msg || v.message || JSON.stringify(v);
+        if (isCloudflareArtifact(msg)) {
+          return {
+            tool: 'Nikto',
+            severity: 'info',
+            name: (v.id || `Finding ${i + 1}`) + ' [Cloudflare]',
+            description: msg,
+            location: v.url || result.target,
+            status: 'info',
+            recommendation: 'Cloudflare infrastructure artifact - no action required',
+          };
+        }
+        return {
+          tool: 'Nikto',
+          severity: v.severity || 'medium',
+          name: v.id || `Finding ${i + 1}`,
+          description: msg,
+          location: v.url || result.target,
+          status: 'fail',
+        };
+      }) : niktoData.raw ? [{
         tool: 'Nikto',
         severity: 'info',
         name: 'Raw Nikto Output',
