@@ -1,23 +1,36 @@
-## Fix: Scroll to Top on Page Navigation
 
-### Problem
 
-When navigating between pages (e.g., clicking Security dropdown links), React Router preserves the scroll position from the previous page, causing new pages to appear scrolled to the bottom.
+## Expand North America Threat Targets for Realistic Coverage
 
-### Solution
-
-Create a small `ScrollToTop` component that listens for route changes and scrolls the window to the top. Place it inside the `BrowserRouter` in `App.tsx`.
+### Overview
+The current USA_TARGETS array only has 8 cities, heavily weighted to the East Coast. This update expands coverage across all US regions and adds Canada (nationwide), Mexico, and Caribbean nations to create a realistic North American threat corridor.
 
 ### Changes
 
-**New file: `src/components/ScrollToTop.tsx**`
+**File: `src/hooks/useLiveAttacks.ts`**
 
-- A simple component that uses `useEffect` + `useLocation` from react-router-dom
-- Calls `window.scrollTo(0, 0)` on every pathname change
-- Renders nothing (returns `null`)
+1. **Rename corridor from `'usa'` to `'north_america'`** throughout the file (type unions, generateCorridorThreat, generateBurst) for accuracy.
 
-**Modified file: `src/App.tsx**`
+2. **Replace `USA_TARGETS` with expanded `NORTH_AMERICA_TARGETS`** containing ~40 targets:
 
-- Import and add `<ScrollToTop />` as the first child inside `<BrowserRouter>`, before `<Routes>`
+   - **USA - East Coast** (keep existing): Washington DC, New York, Miami, Atlanta
+   - **USA - Midwest** (new): Chicago, Detroit, Minneapolis, St. Louis, Kansas City, Columbus, Indianapolis, Milwaukee
+   - **USA - West Coast** (new): Los Angeles, San Francisco, San Diego, Portland, Denver, Phoenix, Las Vegas, Salt Lake City, Honolulu
+   - **USA - South** (new): Dallas, Houston, Austin, Nashville, Charlotte, New Orleans, San Antonio
+   - **Canada** (new): Toronto, Montreal, Vancouver, Calgary, Ottawa, Edmonton, Winnipeg, Halifax
+   - **Mexico** (new): Mexico City, Guadalajara, Monterrey, Cancun, Tijuana
+   - **Caribbean** (new): Kingston (Jamaica), Santo Domingo (Dominican Republic), San Juan (Puerto Rico), Nassau (Bahamas), Port-au-Prince (Haiti), Havana (Cuba), Port of Spain (Trinidad)
 
-This is a standard React Router pattern and requires no new dependencies. This happens only when using mobile devices.  Desktop is good. 
+3. **Rename `USA_THREAT_SOURCES` to `NORTH_AMERICA_THREAT_SOURCES`** and add more source diversity:
+   - Keep existing: Russia, Iran, North Korea, China (weighted)
+   - Add: Brazil, Nigeria, Vietnam, Romania for variety
+
+4. **Update type union** from `'usa'` to `'north_america'` in:
+   - `generateCorridorThreat` function parameter type
+   - `generateBurst` function corridor selection logic
+
+5. **Update `generateBurst`** to reference `'north_america'` instead of `'usa'` in the burst logic (lines 326 and 330).
+
+### No other files change
+The corridor type is internal to this hook -- no external consumers reference the corridor string.
+
