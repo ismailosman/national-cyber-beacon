@@ -183,24 +183,78 @@ const GLOBAL_SOUTH_TARGETS = [
   { lat: -6.163, lng: 35.752, country: 'Tanzania', state: 'Dodoma' },
 ];
 
-// ── USA corridor targets ─────────────────────────────────────────────────────
-const USA_TARGETS = [
+// ── North America corridor targets ───────────────────────────────────────────
+const NORTH_AMERICA_TARGETS = [
+  // USA - East Coast
   { lat: 38.90, lng: -77.04, country: 'USA', state: 'Washington DC' },
   { lat: 40.71, lng: -74.00, country: 'USA', state: 'New York' },
-  { lat: 34.05, lng: -118.24, country: 'USA', state: 'Los Angeles' },
-  { lat: 41.88, lng: -87.63, country: 'USA', state: 'Chicago' },
-  { lat: 29.76, lng: -95.37, country: 'USA', state: 'Houston' },
   { lat: 33.75, lng: -84.39, country: 'USA', state: 'Atlanta' },
-  { lat: 47.61, lng: -122.33, country: 'USA', state: 'Seattle' },
   { lat: 25.76, lng: -80.19, country: 'USA', state: 'Miami' },
+  { lat: 42.36, lng: -71.06, country: 'USA', state: 'Boston' },
+  { lat: 39.95, lng: -75.17, country: 'USA', state: 'Philadelphia' },
+  // USA - Midwest
+  { lat: 41.88, lng: -87.63, country: 'USA', state: 'Chicago' },
+  { lat: 42.33, lng: -83.05, country: 'USA', state: 'Detroit' },
+  { lat: 44.98, lng: -93.27, country: 'USA', state: 'Minneapolis' },
+  { lat: 38.63, lng: -90.20, country: 'USA', state: 'St. Louis' },
+  { lat: 39.10, lng: -94.58, country: 'USA', state: 'Kansas City' },
+  { lat: 39.96, lng: -82.99, country: 'USA', state: 'Columbus' },
+  { lat: 39.77, lng: -86.16, country: 'USA', state: 'Indianapolis' },
+  { lat: 43.04, lng: -87.91, country: 'USA', state: 'Milwaukee' },
+  // USA - West Coast
+  { lat: 34.05, lng: -118.24, country: 'USA', state: 'Los Angeles' },
+  { lat: 37.77, lng: -122.42, country: 'USA', state: 'San Francisco' },
+  { lat: 32.72, lng: -117.16, country: 'USA', state: 'San Diego' },
+  { lat: 47.61, lng: -122.33, country: 'USA', state: 'Seattle' },
+  { lat: 45.52, lng: -122.68, country: 'USA', state: 'Portland' },
+  { lat: 39.74, lng: -104.99, country: 'USA', state: 'Denver' },
+  { lat: 33.45, lng: -112.07, country: 'USA', state: 'Phoenix' },
+  { lat: 36.17, lng: -115.14, country: 'USA', state: 'Las Vegas' },
+  { lat: 40.76, lng: -111.89, country: 'USA', state: 'Salt Lake City' },
+  { lat: 21.31, lng: -157.86, country: 'USA', state: 'Honolulu' },
+  // USA - South
+  { lat: 32.78, lng: -96.80, country: 'USA', state: 'Dallas' },
+  { lat: 29.76, lng: -95.37, country: 'USA', state: 'Houston' },
+  { lat: 30.27, lng: -97.74, country: 'USA', state: 'Austin' },
+  { lat: 36.16, lng: -86.78, country: 'USA', state: 'Nashville' },
+  { lat: 35.23, lng: -80.84, country: 'USA', state: 'Charlotte' },
+  { lat: 29.95, lng: -90.07, country: 'USA', state: 'New Orleans' },
+  { lat: 29.42, lng: -98.49, country: 'USA', state: 'San Antonio' },
+  // Canada
+  { lat: 43.65, lng: -79.38, country: 'Canada', state: 'Toronto' },
+  { lat: 45.50, lng: -73.57, country: 'Canada', state: 'Montreal' },
+  { lat: 49.28, lng: -123.12, country: 'Canada', state: 'Vancouver' },
+  { lat: 51.04, lng: -114.07, country: 'Canada', state: 'Calgary' },
+  { lat: 45.42, lng: -75.70, country: 'Canada', state: 'Ottawa' },
+  { lat: 53.55, lng: -113.49, country: 'Canada', state: 'Edmonton' },
+  { lat: 49.90, lng: -97.14, country: 'Canada', state: 'Winnipeg' },
+  { lat: 44.65, lng: -63.57, country: 'Canada', state: 'Halifax' },
+  // Mexico
+  { lat: 19.43, lng: -99.13, country: 'Mexico', state: 'Mexico City' },
+  { lat: 20.67, lng: -103.35, country: 'Mexico', state: 'Guadalajara' },
+  { lat: 25.69, lng: -100.32, country: 'Mexico', state: 'Monterrey' },
+  { lat: 21.16, lng: -86.85, country: 'Mexico', state: 'Cancun' },
+  { lat: 32.53, lng: -117.02, country: 'Mexico', state: 'Tijuana' },
+  // Caribbean
+  { lat: 18.00, lng: -76.79, country: 'Jamaica', state: 'Kingston' },
+  { lat: 18.49, lng: -69.93, country: 'Dominican Republic', state: 'Santo Domingo' },
+  { lat: 18.47, lng: -66.11, country: 'Puerto Rico', state: 'San Juan' },
+  { lat: 25.05, lng: -77.34, country: 'Bahamas', state: 'Nassau' },
+  { lat: 18.54, lng: -72.34, country: 'Haiti', state: 'Port-au-Prince' },
+  { lat: 23.11, lng: -82.37, country: 'Cuba', state: 'Havana' },
+  { lat: 10.66, lng: -61.51, country: 'Trinidad', state: 'Port of Spain' },
 ];
 
-// ── USA corridor sources (state-level threat actors) ─────────────────────────
-const USA_THREAT_SOURCES = [
+// ── North America corridor sources ───────────────────────────────────────────
+const NORTH_AMERICA_THREAT_SOURCES = [
   ...Array(4).fill({ country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 }),
   ...Array(3).fill({ country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 }),
   ...Array(2).fill({ country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 }),
   ...Array(4).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+  ...Array(2).fill({ country: 'Brazil', state: 'São Paulo', lat: -14.23, lng: -51.92 }),
+  { country: 'Nigeria', state: 'Lagos', lat: 9.08, lng: 8.67 },
+  { country: 'Vietnam', state: 'Hanoi', lat: 14.05, lng: 108.27 },
+  { country: 'Romania', state: 'Bucharest', lat: 45.94, lng: 24.96 },
 ];
 
 // ── Russia corridor targets ─────────────────────────────────────────────────
@@ -278,7 +332,7 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 };
 
 // Generate a single threat for a specific corridor
-function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'usa' | 'eu' | 'russia', rand: () => number): LiveThreat {
+function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'north_america' | 'eu' | 'russia', rand: () => number): LiveThreat {
   let source, target;
   if (corridor === 'somalia') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
@@ -286,9 +340,9 @@ function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_sou
   } else if (corridor === 'global_south') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
     target = GLOBAL_SOUTH_TARGETS[Math.floor(rand() * GLOBAL_SOUTH_TARGETS.length)];
-  } else if (corridor === 'usa') {
-    source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
-    target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
+  } else if (corridor === 'north_america') {
+    source = NORTH_AMERICA_THREAT_SOURCES[Math.floor(rand() * NORTH_AMERICA_THREAT_SOURCES.length)];
+    target = NORTH_AMERICA_TARGETS[Math.floor(rand() * NORTH_AMERICA_TARGETS.length)];
   } else if (corridor === 'russia') {
     source = RUSSIA_THREAT_SOURCES[Math.floor(rand() * RUSSIA_THREAT_SOURCES.length)];
     target = RUSSIA_TARGETS[Math.floor(rand() * RUSSIA_TARGETS.length)];
@@ -323,11 +377,11 @@ function generateBurst(index: number): LiveThreat[] {
   ];
 
   if (burstSize === 3) {
-    threats.push(generateCorridorThreat(index, 'usa', rand));
+    threats.push(generateCorridorThreat(index, 'north_america', rand));
     threats.push(generateCorridorThreat(index, 'eu', rand));
   } else {
     const r2 = rand();
-    const secondCorridor: 'usa' | 'eu' | 'russia' = r2 < 0.4 ? 'usa' : r2 < 0.8 ? 'eu' : 'russia';
+    const secondCorridor: 'north_america' | 'eu' | 'russia' = r2 < 0.4 ? 'north_america' : r2 < 0.8 ? 'eu' : 'russia';
     threats.push(generateCorridorThreat(index, secondCorridor, rand));
   }
 
