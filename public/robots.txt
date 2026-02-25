@@ -1,32 +1,7 @@
-# Secure robots.txt for cyberdefense.so
-
 User-agent: *
-
-# Prevent indexing of administrative and sensitive UI components
+Allow: /
 Disallow: /admin/
-Disallow: /dashboard/
 Disallow: /api/
 Disallow: /settings/
-Disallow: /profile/
-
-# Prevent indexing of scan results and threat data
-Disallow: /reports/
-Disallow: /scans/
-Disallow: /threat-feed/data/
-Disallow: /vulnerabilities/
-
-# Prevent crawling of temporary or private files
-Disallow: /tmp/
-Disallow: /private/
-Disallow: /config/
-
-# Crawl-delay to prevent resource exhaustion from aggressive bots
-Crawl-delay: 5
-
-# Allow general landing pages and public documentation
-Allow: /
-Allow: /about
-Allow: /contact
-Allow: /docs/public
 
 Sitemap: https://cyberdefense.so/sitemap.xml

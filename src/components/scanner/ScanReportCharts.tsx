@@ -19,16 +19,44 @@ export const getGrade = (score: number) => {
   return { grade: 'F', label: 'Critical', color: 'text-red-400' };
 };
 
+/* ─── Cloudflare artifact detection for scoring ─── */
+function isCloudflareZapArtifact(alertName: string, desc: string): boolean {
+  const lower = (alertName + ' ' + desc).toLowerCase();
+  if (lower.includes('content security policy') || lower.includes('csp')) return true;
+  if (lower.includes('anti-clickjacking') || lower.includes('x-frame-options')) return true;
+  if (lower.includes('sub resource integrity') || lower.includes('subresource integrity') || lower.includes('missing-integrity')) return true;
+  if (lower.includes('x-content-type-options')) return true;
+  return false;
+}
+
+function isCloudflareNiktoArtifact(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  if (lower.includes('__cf_bm')) return true;
+  if (lower.includes('ip address') && lower.includes('set-cookie')) return true;
+  if (lower.includes('ip address') && lower.includes('cookie')) return true;
+  if (lower.includes('1.0.1.1')) return true;
+  if (lower.includes('x-frame-options')) return true;
+  if (lower.includes('x-content-type-options')) return true;
+  if (lower.includes('deflate') || (lower.includes('breach') && lower.includes('compress'))) return true;
+  if (lower.includes('robots.txt') && !lower.includes('sensitive')) return true;
+  return false;
+}
+
 export function computeStats(result: ScanResult) {
   const nuclei = result.dast_results?.nuclei?.findings || [];
   const semgrep = result.sast_results?.semgrep?.findings || [];
   const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
+  const niktoVulns = result.dast_results?.nikto?.vulnerabilities || [];
+
+  // Filter out Cloudflare artifacts before counting
+  const filteredZap = zapAlerts.filter((a: any) => !isCloudflareZapArtifact(a.alert || '', a.desc || ''));
+  const filteredNikto = niktoVulns.filter((v: any) => !isCloudflareNiktoArtifact(v.msg || v.message || ''));
 
   const countSev = (sev: string) => {
     let c = 0;
     c += nuclei.filter(f => f.info.severity?.toLowerCase() === sev).length;
     c += semgrep.filter(f => f.extra.severity?.toLowerCase() === sev).length;
-    c += zapAlerts.filter((a: any) => {
+    c += filteredZap.filter((a: any) => {
       const rd = (a.riskdesc || '').toLowerCase();
       return rd.startsWith(sev);
     }).length;
@@ -42,7 +70,7 @@ export function computeStats(result: ScanResult) {
   const info = countSev('info') + countSev('informational');
   const total = critical + high + medium + low + info;
 
-  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1)));
+  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1 + filteredNikto.length * 2)));
 
   return {
     critical, high, medium, low, info, total, score,

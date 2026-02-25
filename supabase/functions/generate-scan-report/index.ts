@@ -92,13 +92,30 @@ function computeStats(result: any) {
     return c;
   };
 
-  const critical = countSev('critical');
-  const high = countSev('high');
-  const medium = countSev('medium');
-  const low = countSev('low');
+  // Filter out Cloudflare artifacts from ZAP before counting
+  const filteredZapAlerts = zapAlerts.filter((a: any) => !isCloudflareZapArtifact(a.alert || '', a.desc || ''));
+  // Filter out Cloudflare artifacts from Nikto before counting
+  const filteredNiktoVulns = niktoVulns.filter((v: any) => !isCloudflareArtifact(v.msg || v.message || ''));
+
+  const countSevFiltered = (sev: string) => {
+    const aliases = sevAliases[sev] || [sev];
+    let c = 0;
+    c += nuclei.filter((f: any) => aliases.includes((f.info?.severity || '').toLowerCase())).length;
+    c += semgrep.filter((f: any) => aliases.includes((f.extra?.severity || '').toLowerCase())).length;
+    c += filteredZapAlerts.filter((a: any) => {
+      const riskLower = (a.riskdesc || '').toLowerCase();
+      return aliases.some(a => riskLower.startsWith(a));
+    }).length;
+    return c;
+  };
+
+  const critical = countSevFiltered('critical');
+  const high = countSevFiltered('high');
+  const medium = countSevFiltered('medium');
+  const low = countSevFiltered('low');
   const info = countSev('info');
   const total = critical + high + medium + low + info + niktoVulns.length;
-  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1 + niktoVulns.length * 2)));
+  const score = Math.max(0, Math.min(100, 100 - (critical * 25 + high * 10 + medium * 3 + low * 1 + filteredNiktoVulns.length * 2)));
 
   return { critical, high, medium, low, info, total, score, nuclei, semgrep, zapAlerts, niktoVulns, resolved };
 }
@@ -151,11 +168,24 @@ function normalizeFindings(result: any) {
 
   for (const a of (resolved.zap?.site?.[0]?.alerts || [])) {
     const risk = (a.riskdesc || '').split(' ')[0] || 'Info';
+    const alertName = a.alert || 'Finding';
+    const alertDesc = a.desc || '';
+    if (isCloudflareZapArtifact(alertName, alertDesc)) {
+      findings.push({
+        tool: 'ZAP',
+        severity: 'INFO',
+        name: s(alertName) + ' [Cloudflare]',
+        description: s(alertDesc, 120),
+        location: s(a.url || '', 40),
+        remediation: 'Cloudflare infrastructure artifact - no action required',
+      });
+      continue;
+    }
     const entry = {
       tool: 'ZAP',
       severity: risk.toUpperCase(),
-      name: s(a.alert || 'Finding'),
-      description: s(a.desc || '', 120),
+      name: s(alertName),
+      description: s(alertDesc, 120),
       location: s(a.url || '', 40),
       remediation: '',
     };
@@ -184,13 +214,24 @@ function normalizeFindings(result: any) {
 /* ─── Check if a Nikto finding is a Cloudflare infrastructure artifact ─── */
 function isCloudflareArtifact(msg: string): boolean {
   const lower = msg.toLowerCase();
-  // __cf_bm cookie with IP address — Cloudflare bot management, not controllable
-  if (lower.includes('__cf_bm') && lower.includes('ip address')) return true;
-  if (lower.includes('__cf_bm') && lower.includes('cookie')) return true;
-  // BREACH attack via Cloudflare compression
-  if (lower.includes('breach') && (lower.includes('deflate') || lower.includes('compress'))) return true;
-  // robots.txt entries — informational, not a vulnerability
+  if (lower.includes('__cf_bm')) return true;
+  if (lower.includes('ip address') && lower.includes('set-cookie')) return true;
+  if (lower.includes('ip address') && lower.includes('cookie')) return true;
+  if (lower.includes('1.0.1.1')) return true;
+  if (lower.includes('x-frame-options')) return true;
+  if (lower.includes('x-content-type-options')) return true;
+  if (lower.includes('deflate') || (lower.includes('breach') && lower.includes('compress'))) return true;
   if (lower.includes('robots.txt') && !lower.includes('sensitive')) return true;
+  return false;
+}
+
+/* ─── Check if a ZAP alert is a Cloudflare infrastructure artifact ─── */
+function isCloudflareZapArtifact(alertName: string, desc: string): boolean {
+  const lower = (alertName + ' ' + desc).toLowerCase();
+  if (lower.includes('content security policy') || lower.includes('csp')) return true;
+  if (lower.includes('anti-clickjacking') || lower.includes('x-frame-options')) return true;
+  if (lower.includes('sub resource integrity') || lower.includes('subresource integrity') || lower.includes('missing-integrity')) return true;
+  if (lower.includes('x-content-type-options')) return true;
   return false;
 }
 
