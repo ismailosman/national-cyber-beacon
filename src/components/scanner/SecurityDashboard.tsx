@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ScanResult, ScanSummary, ScanType } from "@/types/security";
 import { startScan, listScans, getScan, deleteScan, checkHealth, pollScan } from "@/services/securityApi";
+import { computeStats, getGrade } from "./ScanReportCharts";
 import { sendScanCompletedEmail, sendCriticalAlertEmail, hasCriticalFindings } from "@/services/emailService";
 import ScanForm from "./ScanForm";
 import ScanResults from "./ScanResults";
@@ -16,6 +17,7 @@ export default function SecurityDashboard() {
   const [stopPoll, setStopPoll] = useState<(() => void) | null>(null);
   const [clientEmail, setClientEmail] = useState<string | undefined>();
   const [clientName, setClientName] = useState<string | undefined>();
+  const [grades, setGrades] = useState<Record<string, { grade: string; score: number }>>({});
 
   // Track scan IDs that have already had emails sent to prevent duplicates
   const emailedScans = useRef<Set<string>>(new Set());
@@ -94,7 +96,7 @@ export default function SecurityDashboard() {
         if (result.status === "done") {
           setScanning(false);
           fetchHistory();
-          // Emails are now handled by the useEffect above
+          cacheGrade(result);
         }
         if (result.status === "error") {
           setScanning(false);
@@ -108,10 +110,19 @@ export default function SecurityDashboard() {
     }
   }
 
+  function cacheGrade(result: ScanResult) {
+    if (result.status === "done") {
+      const stats = computeStats(result);
+      const g = getGrade(stats.score);
+      setGrades(prev => ({ ...prev, [result.scan_id]: { grade: g.grade, score: stats.score } }));
+    }
+  }
+
   async function handleViewScan(scanId: string) {
     try {
       const result = await getScan(scanId);
       setActiveScan(result);
+      cacheGrade(result);
     } catch (err: any) {
       setError(err.message);
     }
@@ -170,6 +181,7 @@ export default function SecurityDashboard() {
             onDelete={handleDeleteScan}
             onClearAll={handleClearAll}
             activeScanId={activeScan?.scan_id}
+            grades={grades}
           />
         </div>
 

@@ -16,15 +16,24 @@ import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { toETLocaleString } from "@/lib/dateUtils";
 
+const GRADE_COLORS: Record<string, string> = {
+  A: 'bg-green-500/20 text-green-400 border-green-500/30',
+  B: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  C: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  D: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  F: 'bg-red-500/20 text-red-400 border-red-500/30',
+};
+
 interface Props {
   scans: ScanSummary[];
   onView: (id: string) => void;
   onDelete: (id: string) => void;
   onClearAll?: () => Promise<void>;
   activeScanId?: string;
+  grades?: Record<string, { grade: string; score: number }>;
 }
 
-export default function ScanHistory({ scans, onView, onDelete, onClearAll, activeScanId }: Props) {
+export default function ScanHistory({ scans, onView, onDelete, onClearAll, activeScanId, grades }: Props) {
   const [clearing, setClearing] = useState(false);
   if (scans.length === 0) return null;
 
@@ -66,7 +75,7 @@ export default function ScanHistory({ scans, onView, onDelete, onClearAll, activ
         )}
       </div>
       <div className="space-y-2 max-h-64 overflow-y-auto">
-        {scans.map((s) => (
+        {[...scans].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((s) => (
           <div
             key={s.scan_id}
             className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
@@ -80,6 +89,11 @@ export default function ScanHistory({ scans, onView, onDelete, onClearAll, activ
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="text-xs font-mono text-gray-300 uppercase">{s.type}</span>
                 <StatusBadge status={s.status} small />
+                {s.status === "done" && grades?.[s.scan_id] && (
+                  <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded border ${GRADE_COLORS[grades[s.scan_id].grade] || GRADE_COLORS.F}`}>
+                    {grades[s.scan_id].grade}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-gray-500 truncate">
                 {toETLocaleString(s.created_at)}
