@@ -89,7 +89,7 @@ export default function ScanQueuePanel() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [scanType, setScanType] = useState("DAST");
-  const [recentScans, setRecentScans] = useState<Job[]>([]);
+  const recentScansRef = useRef<Job[]>([]);
   const [lastPoll, setLastPoll] = useState<{ time: Date; status: string; jobCount: number } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,12 +123,12 @@ export default function ScanQueuePanel() {
 
       // Merge recent local scans (dedup by id, expire after 60s)
       const now = Date.now();
-      const validRecent = recentScans.filter(r => {
+      const validRecent = recentScansRef.current.filter(r => {
         const age = now - new Date(r.created_at).getTime();
         const inApi = apiJobs.some(a => a.id === r.id);
         return !inApi && age < 60000;
       });
-      setRecentScans(validRecent);
+      recentScansRef.current = validRecent;
 
       const mergedJobs = [...apiJobs, ...validRecent];
       setJobs(mergedJobs);
@@ -138,7 +138,7 @@ export default function ScanQueuePanel() {
       setErrorMsg("Network error");
       setLastPoll({ time: new Date(), status: "Network Error", jobCount: 0 });
     }
-  }, [recentScans]);
+  }, []);
 
   useEffect(() => {
     fetchJobs();
@@ -175,7 +175,7 @@ export default function ScanQueuePanel() {
         progress: 0,
         created_at: new Date().toISOString(),
       };
-      setRecentScans(prev => [localJob, ...prev]);
+      recentScansRef.current = [localJob, ...recentScansRef.current];
 
       // Show success message
       setSuccessMsg(`✅ Scan queued: ${scanId.slice(0, 8)}… → ${target}`);
