@@ -40,7 +40,7 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 const OrgScoresBarChart: React.FC<OrgScoresBarChartProps> = ({ data }) => {
-  const [sectorFilter, setSectorFilter] = useState('All');
+  const [sectorFilter, setSectorFilter] = useState('Telecom');
   const navigate = useNavigate();
 
   const filtered = sectorFilter === 'All' ? data : data.filter(d => d.sector.toLowerCase() === sectorFilter.toLowerCase());
