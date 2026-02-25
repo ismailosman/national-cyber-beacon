@@ -1,37 +1,50 @@
 
 
-## Fix: Scan Queue Flickering
+## Fix: Scan Queue - Match Exact API Format and Persist Scans
 
 ### Problem
-The queued scan item flickers between showing and disappearing because of a circular React dependency:
-- `fetchJobs` lists `recentScans` as a `useCallback` dependency
-- Inside `fetchJobs`, it updates `recentScans` via `setRecentScans`
-- This causes `fetchJobs` to be recreated, restarting the polling interval
-- The rapid re-polling clears the local scan entry, creating a flicker loop
-
-### Solution
-Use a **ref** (`useRef`) to track recent scans instead of reactive state, breaking the circular dependency. The ref lets `fetchJobs` read and write recent scans without triggering re-renders or recreating itself.
+1. The scan payload doesn't match the exact API spec -- it sends either `target_url` OR `repo_url`, but the API expects **both** fields
+2. Scans disappear after 60 seconds because `/scan/jobs` returns empty and the local tracking expires too quickly
+3. No individual scan status polling -- we start scans but never check their progress
 
 ### Changes
 
-**File: `src/pages/ScanQueuePanel.tsx`**
+**File 1: `supabase/functions/scan-queue-proxy/index.ts`**
 
-1. Replace `recentScans` state with a ref:
-   - Change `const [recentScans, setRecentScans] = useState<Job[]>([])` to `const recentScansRef = useRef<Job[]>([])`
+Update the `start` action payload to always include both fields per the user's confirmed API format:
+```json
+{
+  "scan_type": "vuln",
+  "target_url": "<user URL>",
+  "repo_url": ""
+}
+```
+- For DAST: `scan_type: "vuln"`, `target_url: target`, `repo_url: ""`
+- For SAST: `scan_type: "sast"`, `target_url: ""`, `repo_url: target`
 
-2. Update `fetchJobs` to use the ref:
-   - Read from `recentScansRef.current` instead of `recentScans`
-   - Write to `recentScansRef.current = validRecent` instead of `setRecentScans`
-   - Remove `recentScans` from the `useCallback` dependency array (back to `[]`)
+Add a new `status` action that proxies `GET /scan/{scan_id}` to check individual scan progress.
 
-3. Update `startScan` to use the ref:
-   - Change `setRecentScans(prev => [localJob, ...prev])` to `recentScansRef.current = [localJob, ...recentScansRef.current]`
+**File 2: `src/pages/ScanQueuePanel.tsx`**
 
-This is a surgical fix -- only changing how `recentScans` is stored (ref vs state). The merge logic, dedup, and 60-second expiry all stay the same.
+- Extend local scan tracking from 60 seconds to **5 minutes** (300,000ms)
+- After starting a scan, poll its individual status via the new `status` action every 5 seconds
+- Update the local job's status/progress when the individual poll returns data
+- Keep the scan visible in the queue even after the success banner disappears
 
-### Result
-- Scans will appear immediately and stay visible for 60 seconds (or until they appear in the API response)
-- No more flickering
-- Polling interval remains stable at 3 seconds
-- Debug footer continues to work
+### Technical Details
 
+Edge function new `status` action:
+```typescript
+if (action === "status") {
+  const { scan_id } = body;
+  const upstream = await fetch(`${API_BASE}/scan/${scan_id}`, {
+    headers: { "x-api-key": API_KEY }
+  });
+  // return parsed result
+}
+```
+
+Frontend scan tracking update:
+- Change expiry from `age < 60000` to `age < 300000`
+- After successful start, begin a per-scan poller that calls `action: "status"` and updates the ref entry's status/progress
+- Stop polling when status is `completed` or `failed`
