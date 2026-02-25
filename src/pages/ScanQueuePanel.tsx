@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 
-const API_BASE = "http://YOUR_KALI_VPS_IP:5000"; // ← change this
+const API_BASE = "http://187.77.222.249:5000";
 
 type JobStatus = "queued" | "running" | "completed" | "failed";
 
