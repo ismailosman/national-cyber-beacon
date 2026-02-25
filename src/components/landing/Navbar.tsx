@@ -1,8 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, Zap } from 'lucide-react';
+import { Menu, X, Zap, ChevronDown } from 'lucide-react';
 import logoSrc from '@/assets/logo.png';
 import ThemeToggle from '@/components/ThemeToggle';
+
+const SECURITY_ITEMS = [
+  { label: 'Cybersecurity Compliance', href: '/security/cybersecurity-compliance' },
+  { label: 'Ransomware Protection', href: '/security/ransomware-protection' },
+  { label: 'Secure Apps & APIs', href: '/security/secure-apps-apis' },
+  { label: 'DNS Delivery & Security', href: '/security/dns-security' },
+  { label: 'Zero Trust', href: '/security/zero-trust' },
+  { label: 'DDoS Protection', href: '/security/ddos-protection' },
+  { label: 'Bot & Abuse Protection', href: '/security/bot-protection' },
+  { label: 'Identity & Access Management', href: '/security/identity-access' },
+];
 
 const NAV_ITEMS = [
   { label: 'Home', href: '/', type: 'scroll', anchor: '#hero' },
@@ -14,15 +25,24 @@ const NAV_ITEMS = [
 const Navbar: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [mobileSecurityOpen, setMobileSecurityOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const isLanding = location.pathname === '/';
+  const dropdownRef = useRef<HTMLLIElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  useEffect(() => {
+    setMobileOpen(false);
+    setMobileSecurityOpen(false);
+  }, [location.pathname]);
 
   const handleNav = (item: typeof NAV_ITEMS[0]) => {
     setMobileOpen(false);
@@ -33,6 +53,15 @@ const Navbar: React.FC = () => {
     } else {
       navigate(item.href + (item.anchor || ''));
     }
+  };
+
+  const handleDropdownEnter = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setSecurityOpen(true);
+  };
+
+  const handleDropdownLeave = () => {
+    timeoutRef.current = setTimeout(() => setSecurityOpen(false), 150);
   };
 
   return (
@@ -57,6 +86,36 @@ const Navbar: React.FC = () => {
               </button>
             </li>
           ))}
+
+          {/* Security Dropdown */}
+          <li
+            ref={dropdownRef}
+            className="relative"
+            onMouseEnter={handleDropdownEnter}
+            onMouseLeave={handleDropdownLeave}
+          >
+            <button className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors">
+              Security
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${securityOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {securityOpen && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 pt-2 z-50">
+                <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-xl py-2 w-64">
+                  {SECURITY_ITEMS.map((s) => (
+                    <Link
+                      key={s.href}
+                      to={s.href}
+                      onClick={() => setSecurityOpen(false)}
+                      className="block px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                    >
+                      {s.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </li>
+
           <li>
             <Link
               to="/cyber-map"
@@ -104,6 +163,33 @@ const Navbar: React.FC = () => {
                 </button>
               </li>
             ))}
+
+            {/* Mobile Security Accordion */}
+            <li>
+              <button
+                onClick={() => setMobileSecurityOpen(!mobileSecurityOpen)}
+                className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors w-full text-left"
+              >
+                Security
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${mobileSecurityOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {mobileSecurityOpen && (
+                <ul className="mt-2 ml-4 flex flex-col gap-2">
+                  {SECURITY_ITEMS.map((s) => (
+                    <li key={s.href}>
+                      <Link
+                        to={s.href}
+                        onClick={() => setMobileOpen(false)}
+                        className="block text-sm text-gray-500 hover:text-white transition-colors"
+                      >
+                        {s.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+
             <li>
               <Link
                 to="/cyber-map"
