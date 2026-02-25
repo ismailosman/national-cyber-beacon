@@ -52,7 +52,12 @@ export async function startScan(
 }
 
 export async function getScan(scanId: string): Promise<ScanResult> {
-  return proxyRequest(`/scan/${scanId}`);
+  const raw: any = await proxyRequest(`/scan/${scanId}`);
+  // Backend uses "vuln_results" but frontend expects "dast_results"
+  if (raw.vuln_results && !raw.dast_results) {
+    raw.dast_results = raw.vuln_results;
+  }
+  return raw as ScanResult;
 }
 
 export async function listScans(): Promise<{ scans: ScanSummary[] }> {
