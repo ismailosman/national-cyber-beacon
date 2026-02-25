@@ -54,8 +54,9 @@ const Contact: React.FC = () => {
   const turnstileRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
 
-  const isDev = typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname.includes('lovable.app'));
+  const isProduction = typeof window !== 'undefined' &&
+    (window.location.hostname === 'cyberdefense.so' || window.location.hostname === 'www.cyberdefense.so');
+  const isDev = !isProduction;
 
   const renderTurnstile = useCallback(() => {
     if (isDev || !turnstileRef.current || !(window as any).turnstile) return;

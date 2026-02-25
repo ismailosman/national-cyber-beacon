@@ -95,9 +95,9 @@ const TurnstileGate = ({ children, sessionKey = "turnstile_verified", domain = "
 
   // Bypass on dev/preview domains
   const hostname = window.location.hostname;
-  const bypassed = hostname === "localhost" || hostname.includes("lovable.app");
+  const isProduction = hostname === "cyberdefense.so" || hostname === "www.cyberdefense.so";
 
-  if (bypassed) return <>{children}</>;
+  if (!isProduction) return <>{children}</>;
 
   if (verified) return (
     <div className="animate-fade-in">
