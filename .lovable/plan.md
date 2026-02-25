@@ -1,36 +1,44 @@
 
 
-## Expand North America Threat Targets for Realistic Coverage
+## Fix Missing Country Flags on Cyber Map
 
-### Overview
-The current USA_TARGETS array only has 8 cities, heavily weighted to the East Coast. This update expands coverage across all US regions and adds Canada (nationwide), Mexico, and Caribbean nations to create a realistic North American threat corridor.
+### Problem
+When clicking countries on the map, the country name comes from Mapbox's `name_en` property, which often differs from the names in the `COUNTRY_ISO` lookup. If there's no match, the flag falls back to the UN flag (`'un'`). Known mismatches include:
+- **Republic of the Congo** -- Mapbox uses "Republic of the Congo", but `COUNTRY_ISO` only has "Congo"
+- **Democratic Republic of the Congo** -- Mapbox uses this full name, but `COUNTRY_ISO` only has "DR Congo"
+- **Suriname** -- completely missing from `COUNTRY_ISO`
+- **Trinidad and Tobago** -- exists in `COUNTRY_ISO` but the attack data uses "Trinidad" (a separate mismatch)
+- **Puerto Rico**, **Bahamas**, **Hong Kong**, **Cambodia** -- missing from `COUNTRY_ISO` but used in attack corridors
 
 ### Changes
 
-**File: `src/hooks/useLiveAttacks.ts`**
+**File: `src/pages/CyberMap.tsx`** -- Add missing entries to `COUNTRY_ISO`:
 
-1. **Rename corridor from `'usa'` to `'north_america'`** throughout the file (type unions, generateCorridorThreat, generateBurst) for accuracy.
+Add these new entries to cover Mapbox `name_en` variants and missing countries:
 
-2. **Replace `USA_TARGETS` with expanded `NORTH_AMERICA_TARGETS`** containing ~40 targets:
+| Key | ISO | Reason |
+|-----|-----|--------|
+| `Republic of the Congo` | `cg` | Mapbox name variant for Congo |
+| `Democratic Republic of the Congo` | `cd` | Mapbox name variant for DR Congo |
+| `Suriname` | `sr` | Missing entirely |
+| `Puerto Rico` | `pr` | Used in attack data, missing |
+| `Bahamas` | `bs` | Used in attack data, missing |
+| `Hong Kong` | `hk` | Used in attack data, missing |
+| `Cambodia` | `kh` | Used in attack data, missing |
+| `Trinidad` | `tt` | Attack data uses short name |
+| `Côte d'Ivoire` | `ci` | Mapbox name variant for Ivory Coast |
+| `United States of America` | `us` | Mapbox full name |
+| `United Kingdom` | `gb` | Mapbox full name |
+| `United Arab Emirates` | `ae` | Mapbox full name |
+| `Czechia` | `cz` | Mapbox modern name for Czech Republic |
+| `Eswatini` | `sz` | Already exists but verifying |
+| Additional ~20 countries commonly shown on world maps that could be clicked (e.g., Guyana, Belize, Laos, Brunei, Timor-Leste, etc.) |
 
-   - **USA - East Coast** (keep existing): Washington DC, New York, Miami, Atlanta
-   - **USA - Midwest** (new): Chicago, Detroit, Minneapolis, St. Louis, Kansas City, Columbus, Indianapolis, Milwaukee
-   - **USA - West Coast** (new): Los Angeles, San Francisco, San Diego, Portland, Denver, Phoenix, Las Vegas, Salt Lake City, Honolulu
-   - **USA - South** (new): Dallas, Houston, Austin, Nashville, Charlotte, New Orleans, San Antonio
-   - **Canada** (new): Toronto, Montreal, Vancouver, Calgary, Ottawa, Edmonton, Winnipeg, Halifax
-   - **Mexico** (new): Mexico City, Guadalajara, Monterrey, Cancun, Tijuana
-   - **Caribbean** (new): Kingston (Jamaica), Santo Domingo (Dominican Republic), San Juan (Puerto Rico), Nassau (Bahamas), Port-au-Prince (Haiti), Havana (Cuba), Port of Spain (Trinidad)
+This is a single-file change adding approximately 30 new entries to the existing `COUNTRY_ISO` dictionary.
 
-3. **Rename `USA_THREAT_SOURCES` to `NORTH_AMERICA_THREAT_SOURCES`** and add more source diversity:
-   - Keep existing: Russia, Iran, North Korea, China (weighted)
-   - Add: Brazil, Nigeria, Vietnam, Romania for variety
+**File: `src/hooks/useLiveAttacks.ts`** -- No changes needed. The `country` field in attack data is used for display in the attack feed sidebar, and those names already have ISO mappings or will be covered by the new entries above.
 
-4. **Update type union** from `'usa'` to `'north_america'` in:
-   - `generateCorridorThreat` function parameter type
-   - `generateBurst` function corridor selection logic
-
-5. **Update `generateBurst`** to reference `'north_america'` instead of `'usa'` in the burst logic (lines 326 and 330).
-
-### No other files change
-The corridor type is internal to this hook -- no external consumers reference the corridor string.
-
+### Technical Notes
+- The `flagcdn.com` CDN uses ISO 3166-1 alpha-2 codes, so all we need are correct two-letter codes
+- The fallback `'un'` (UN flag) will still apply for any truly unmapped territory
+- No new dependencies or database changes required
