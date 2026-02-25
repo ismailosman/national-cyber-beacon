@@ -1,59 +1,38 @@
 
 
-## Fix Security Scanner: Score, PDF Link, and Security Headers
+## Show Grades in Scan History and Sort by Latest First
 
-### Problem Analysis
-
-**Issue 1: Score shows 0/100 in email**
-The email template uses `scanData.risk_score` which is never computed before sending. It defaults to `{ score: 0, rating: "LOW" }`. The scoring logic exists in `computeStats` (in both `generate-scan-report` and `ScanReportCharts`) but is never applied to the scan data before the email is sent.
-
-**Fix:** Compute the risk score in `send-pentest-email` before building the email, using the same deduction formula: `100 - (critical * 25 + high * 10 + medium * 3 + low * 1 + niktoVulns * 2)`.
-
-**Issue 2: PDF report link returns 404**
-The email's "View Full Report" button links to `https://cyberdefense.so/scan/{id}`, but no `/scan/:id` route exists in the app router. Two fixes needed:
-- Add a `/scan/:id` route that loads the scan result and displays it
-- Ensure the "Download PDF" storage link works (the PDF is uploaded to storage but the public URL may not resolve if the bucket config is wrong)
-
-**Fix:** Add a public `/scan/:id` page that fetches the scan result from the API and displays it, plus redirects to the stored PDF if available.
-
-**Issue 3: Security header failures on cyberdefense.so**
-The scan report shows 6 FAIL findings from Nikto and 3 medium ZAP findings. These are real security header gaps:
-
-| Finding | Fix |
-|---------|-----|
-| IP address in `set-cookie` / `__cf_bm` cookie | Cloudflare infrastructure cookie -- cannot fix directly, reclassify as informational |
-| Missing X-Frame-Options | Already intentionally removed for iframe preview; add for production via Cloudflare headers |
-| Missing X-Content-Type-Options | Add `X-Content-Type-Options: nosniff` meta tag in `index.html` |
-| BREACH (Content-Encoding: deflate) | Cloudflare compression -- reclassify as informational for Cloudflare-hosted sites |
-| robots.txt entries | Informational, not a vulnerability -- reclassify |
-| Missing CSP header | Add a Content-Security-Policy meta tag in `index.html` |
-| Missing Anti-clickjacking | Same as X-Frame-Options above |
-| SRI attribute missing | Already filtered for same-origin scripts; reclassify external CDN scripts |
-
-Many of these are Cloudflare infrastructure artifacts. The fix is two-fold:
-1. Add security meta tags where possible (`X-Content-Type-Options`, basic CSP)
-2. Update the scan report's Nikto classifier to reclassify Cloudflare-specific findings (IP in `__cf_bm`, BREACH via Cloudflare compression) as informational rather than FAIL
-
----
+### Problem
+1. The scan history sidebar shows scan type and status but not the report grade (A/B/C/D/F), so users can't quickly see how each scan performed.
+2. History items are not sorted by date -- the latest scan should appear at the top.
 
 ### Changes
 
-**1. `supabase/functions/send-pentest-email/index.ts`**
-- Add a `computeRiskScore(scanData)` function that calculates the score from `vuln_results`/`dast_results` (nuclei, ZAP, nikto, semgrep)
-- Use the computed score instead of the default `{ score: 0, rating: "LOW" }` in `scan_completed` and `report_delivery` handlers
+**1. `src/components/scanner/ScanHistory.tsx`**
+- Sort the `scans` array by `created_at` descending (newest first) before rendering.
+- Accept a new `grades` prop: `Record<string, { grade: string; score: number }>` mapping scan IDs to their computed grades.
+- For completed scans with a grade available, display a small colored grade badge (e.g., "A" in green, "F" in red) next to the status badge.
 
-**2. `src/App.tsx`**
-- Add a new route `/scan/:id` pointing to a new `ScanReport` page
+**2. `src/components/scanner/SecurityDashboard.tsx`**
+- Add a `grades` state: `Record<string, { grade: string; score: number }>`.
+- Whenever a scan result is loaded (via polling completion or `handleViewScan`), compute the grade using the same `computeStats` logic from `ScanReportCharts` and cache it in the `grades` map.
+- Pass `grades` to `ScanHistory`.
 
-**3. `src/pages/ScanReport.tsx` (new file)**
-- Public page that fetches scan result by ID via the security scanner proxy
-- Displays the scan results using the existing `ScanResults` component
-- Includes a direct download link to the stored PDF
+**3. `src/components/scanner/ScanReportCharts.tsx`**
+- Export the `computeStats` and `getGrade` functions so they can be reused by `SecurityDashboard` for grade caching.
 
-**4. `index.html`**
-- Add `<meta http-equiv="X-Content-Type-Options" content="nosniff">` (if not already present)
+### Sorting Logic
+```text
+scans sorted by created_at descending
+  -> newest scan appears at top of history list
+```
 
-**5. `supabase/functions/generate-scan-report/index.ts`**
-- Update `classifyNiktoFindings` to reclassify Cloudflare-specific findings (`__cf_bm` cookie IP, BREACH via deflate on Cloudflare) as informational/pass instead of fail
-- Reclassify `robots.txt` entries finding as informational
+### Grade Display in History
+Each history item will show:
+```text
+[VULN] [Done badge] [Grade A badge]
+2025-02-25 4:39:41 PM
+```
+
+The grade badge will use the same color scheme as the report: green for A, emerald for B, yellow for C, orange for D, red for F. Only shown for completed ("done") scans that have been viewed/computed.
 
