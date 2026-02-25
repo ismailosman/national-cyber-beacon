@@ -181,6 +181,19 @@ function normalizeFindings(result: any) {
   return findings;
 }
 
+/* ─── Check if a Nikto finding is a Cloudflare infrastructure artifact ─── */
+function isCloudflareArtifact(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  // __cf_bm cookie with IP address — Cloudflare bot management, not controllable
+  if (lower.includes('__cf_bm') && lower.includes('ip address')) return true;
+  if (lower.includes('__cf_bm') && lower.includes('cookie')) return true;
+  // BREACH attack via Cloudflare compression
+  if (lower.includes('breach') && (lower.includes('deflate') || lower.includes('compress'))) return true;
+  // robots.txt entries — informational, not a vulnerability
+  if (lower.includes('robots.txt') && !lower.includes('sensitive')) return true;
+  return false;
+}
+
 /* ─── Classify Nikto findings into security categories ─── */
 function classifyNiktoFindings(nikto: any) {
   const vulns = nikto?.vulnerabilities || [];
@@ -204,16 +217,29 @@ function classifyNiktoFindings(nikto: any) {
     }
   }
 
+  const classifyFinding = (v: any, defaultSeverity: string) => {
+    const msg = v.msg || v.message || '';
+    if (isCloudflareArtifact(msg)) {
+      return {
+        msg: s(msg, 85) + ' [Cloudflare]',
+        status: 'info' as const,
+        severity: 'info',
+        recommendation: 'Cloudflare infrastructure artifact - no action required',
+      };
+    }
+    return {
+      msg: s(msg, 85),
+      status: 'fail' as const,
+      severity: defaultSeverity,
+      recommendation: getRemediation({ tool: 'Nikto', severity: defaultSeverity.toUpperCase(), name: v.id || '', description: msg }),
+    };
+  };
+
   if (headerFindings.length > 0 || vulns.length > 0) {
     checks.push({
       category: 'Security Headers',
       findings: headerFindings.length > 0
-        ? headerFindings.map(v => ({
-            msg: s(v.msg || v.message, 85),
-            status: 'fail' as const,
-            severity: 'medium',
-            recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
-          }))
+        ? headerFindings.map(v => classifyFinding(v, 'medium'))
         : [{ msg: 'All security headers present', status: 'pass' as const, severity: 'info', recommendation: '' }],
     });
   }
@@ -221,36 +247,21 @@ function classifyNiktoFindings(nikto: any) {
   if (cookieFindings.length > 0) {
     checks.push({
       category: 'Cookie Security',
-      findings: cookieFindings.map(v => ({
-        msg: s(v.msg || v.message, 85),
-        status: 'fail' as const,
-        severity: 'medium',
-        recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
-      })),
+      findings: cookieFindings.map(v => classifyFinding(v, 'medium')),
     });
   }
 
   if (infoDisclosureFindings.length > 0) {
     checks.push({
       category: 'Information Disclosure',
-      findings: infoDisclosureFindings.map(v => ({
-        msg: s(v.msg || v.message, 85),
-        status: 'fail' as const,
-        severity: 'low',
-        recommendation: getRemediation({ tool: 'Nikto', severity: 'LOW', name: v.id || '', description: v.msg || '' }),
-      })),
+      findings: infoDisclosureFindings.map(v => classifyFinding(v, 'low')),
     });
   }
 
   if (configFindings.length > 0) {
     checks.push({
       category: 'Server Configuration',
-      findings: configFindings.map(v => ({
-        msg: s(v.msg || v.message, 85),
-        status: 'fail' as const,
-        severity: 'medium',
-        recommendation: getRemediation({ tool: 'Nikto', severity: 'MEDIUM', name: v.id || '', description: v.msg || '' }),
-      })),
+      findings: configFindings.map(v => classifyFinding(v, 'medium')),
     });
   }
 
