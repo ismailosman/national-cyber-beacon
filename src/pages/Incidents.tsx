@@ -38,7 +38,7 @@ const Incidents: React.FC = () => {
   const { data: incidents = [], isLoading } = useQuery({
     queryKey: ['incidents', statusFilter],
     queryFn: async () => {
-      let q = supabase.from('incident_reports').select('*, organizations(name)').order('created_at', { ascending: false });
+      let q = supabase.from('incident_reports_safe' as any).select('*').order('created_at', { ascending: false });
       if (statusFilter !== 'all') q = q.eq('status', statusFilter as any);
       const { data } = await q;
       return data || [];

@@ -678,6 +678,13 @@ export type Database = {
             referencedRelation: "incident_reports"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "incident_timeline_incident_id_fkey"
+            columns: ["incident_id"]
+            isOneToOne: false
+            referencedRelation: "incident_reports_safe"
+            referencedColumns: ["id"]
+          },
         ]
       }
       ioc_matches: {
@@ -1293,7 +1300,59 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      incident_reports_safe: {
+        Row: {
+          affected_assets: string | null
+          assigned_to: string | null
+          attachment_urls: string[] | null
+          category: string | null
+          created_at: string | null
+          description: string | null
+          id: string | null
+          organization_id: string | null
+          reporter_email: string | null
+          reporter_type: string | null
+          severity: Database["public"]["Enums"]["severity_type"] | null
+          status: Database["public"]["Enums"]["incident_status"] | null
+        }
+        Insert: {
+          affected_assets?: never
+          assigned_to?: string | null
+          attachment_urls?: string[] | null
+          category?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string | null
+          organization_id?: string | null
+          reporter_email?: never
+          reporter_type?: string | null
+          severity?: Database["public"]["Enums"]["severity_type"] | null
+          status?: Database["public"]["Enums"]["incident_status"] | null
+        }
+        Update: {
+          affected_assets?: never
+          assigned_to?: string | null
+          attachment_urls?: string[] | null
+          category?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string | null
+          organization_id?: string | null
+          reporter_email?: never
+          reporter_type?: string | null
+          severity?: Database["public"]["Enums"]["severity_type"] | null
+          status?: Database["public"]["Enums"]["incident_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incident_reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       has_role: {
