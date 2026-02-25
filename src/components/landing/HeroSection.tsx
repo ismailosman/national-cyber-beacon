@@ -28,8 +28,7 @@ const HeroSection: React.FC = () => (
       </div>
 
       <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.1] text-white tracking-tight">
-        Secure Your Business with{' '}
-        <span className="text-[#FF4D2E]">Advanced Cyber Defense</span>
+        Precision Cyber Defense for High-Risk Environments
       </h1>
 
       <p className="mt-6 text-white/80 text-base sm:text-lg leading-relaxed max-w-2xl mx-auto">
