@@ -299,6 +299,34 @@ const EU_THREAT_SOURCES = [
   { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
 ];
 
+// ── Middle East corridor targets ─────────────────────────────────────────────
+const MIDDLE_EAST_TARGETS = [
+  { lat: 25.20, lng: 55.27, country: 'UAE', state: 'Dubai' },
+  { lat: 24.71, lng: 46.68, country: 'Saudi Arabia', state: 'Riyadh' },
+  { lat: 25.29, lng: 51.53, country: 'Qatar', state: 'Doha' },
+  { lat: 24.45, lng: 54.65, country: 'UAE', state: 'Abu Dhabi' },
+  { lat: 29.38, lng: 47.99, country: 'Kuwait', state: 'Kuwait City' },
+  { lat: 26.23, lng: 50.59, country: 'Bahrain', state: 'Manama' },
+  { lat: 23.61, lng: 58.59, country: 'Oman', state: 'Muscat' },
+  { lat: 21.49, lng: 39.19, country: 'Saudi Arabia', state: 'Jeddah' },
+  { lat: 21.43, lng: 39.83, country: 'Saudi Arabia', state: 'Mecca' },
+  { lat: 26.07, lng: 56.34, country: 'UAE', state: 'Sharjah' },
+  { lat: 31.95, lng: 35.93, country: 'Jordan', state: 'Amman' },
+  { lat: 33.89, lng: 35.50, country: 'Lebanon', state: 'Beirut' },
+];
+
+// ── Middle East corridor sources ─────────────────────────────────────────────
+const MIDDLE_EAST_THREAT_SOURCES = [
+  ...Array(4).fill({ country: 'Iran', state: 'Tehran', lat: 32.43, lng: 53.68 }),
+  ...Array(3).fill({ country: 'Russia', state: 'Moscow', lat: 61.52, lng: 105.31 }),
+  ...Array(2).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
+  ...Array(2).fill({ country: 'Israel', state: 'Tel Aviv', lat: 31.04, lng: 34.85 }),
+  { country: 'USA', state: 'VA', lat: 37.43, lng: -78.65 },
+  { country: 'North Korea', state: 'Pyongyang', lat: 40.33, lng: 127.51 },
+  { country: 'Turkey', state: 'Istanbul', lat: 38.96, lng: 35.24 },
+  { country: 'Pakistan', state: 'Islamabad', lat: 30.37, lng: 69.34 },
+];
+
 // ── South/Southeast Asia corridor targets ───────────────────────────────────
 const SEA_TARGETS = [
   { lat: 1.35, lng: 103.82, country: 'Singapore', state: 'Singapore' },
@@ -366,7 +394,7 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 };
 
 // Generate a single threat for a specific corridor
-function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'north_america' | 'eu' | 'russia' | 'sea', rand: () => number): LiveThreat {
+function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'north_america' | 'eu' | 'russia' | 'sea' | 'middle_east', rand: () => number): LiveThreat {
   let source, target;
   if (corridor === 'somalia') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
@@ -383,6 +411,9 @@ function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_sou
   } else if (corridor === 'sea') {
     source = SEA_THREAT_SOURCES[Math.floor(rand() * SEA_THREAT_SOURCES.length)];
     target = SEA_TARGETS[Math.floor(rand() * SEA_TARGETS.length)];
+  } else if (corridor === 'middle_east') {
+    source = MIDDLE_EAST_THREAT_SOURCES[Math.floor(rand() * MIDDLE_EAST_THREAT_SOURCES.length)];
+    target = MIDDLE_EAST_TARGETS[Math.floor(rand() * MIDDLE_EAST_TARGETS.length)];
   } else {
     source = EU_THREAT_SOURCES[Math.floor(rand() * EU_THREAT_SOURCES.length)];
     target = EU_TARGETS[Math.floor(rand() * EU_TARGETS.length)];
@@ -408,7 +439,8 @@ function generateBurst(index: number): LiveThreat[] {
   const burstSize = rand() < 0.6 ? 3 : 2;
 
   const r1 = rand();
-  const firstCorridor: 'somalia' | 'global_south' | 'russia' | 'sea' = r1 < 0.3 ? 'somalia' : r1 < 0.55 ? 'global_south' : r1 < 0.75 ? 'sea' : 'russia';
+  const firstCorridor: 'somalia' | 'global_south' | 'russia' | 'sea' | 'middle_east' = 
+    r1 < 0.25 ? 'somalia' : r1 < 0.45 ? 'global_south' : r1 < 0.6 ? 'sea' : r1 < 0.8 ? 'middle_east' : 'russia';
   const threats: LiveThreat[] = [
     generateCorridorThreat(index, firstCorridor, rand),
   ];
@@ -416,10 +448,11 @@ function generateBurst(index: number): LiveThreat[] {
   if (burstSize === 3) {
     threats.push(generateCorridorThreat(index, 'north_america', rand));
     const r3 = rand();
-    threats.push(generateCorridorThreat(index, r3 < 0.5 ? 'eu' : 'sea', rand));
+    threats.push(generateCorridorThreat(index, r3 < 0.35 ? 'eu' : r3 < 0.65 ? 'sea' : 'middle_east', rand));
   } else {
     const r2 = rand();
-    const secondCorridor: 'north_america' | 'eu' | 'russia' | 'sea' = r2 < 0.3 ? 'north_america' : r2 < 0.55 ? 'eu' : r2 < 0.8 ? 'sea' : 'russia';
+    const secondCorridor: 'north_america' | 'eu' | 'russia' | 'sea' | 'middle_east' = 
+      r2 < 0.25 ? 'north_america' : r2 < 0.45 ? 'eu' : r2 < 0.65 ? 'sea' : r2 < 0.85 ? 'middle_east' : 'russia';
     threats.push(generateCorridorThreat(index, secondCorridor, rand));
   }
 
