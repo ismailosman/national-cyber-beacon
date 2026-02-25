@@ -11,7 +11,7 @@ const SEVERITY_COLORS: Record<string, string> = {
   info: '#6b7280',
 };
 
-const getGrade = (score: number) => {
+export const getGrade = (score: number) => {
   if (score >= 90) return { grade: 'A', label: 'Excellent', color: 'text-green-400' };
   if (score >= 75) return { grade: 'B', label: 'Good', color: 'text-emerald-400' };
   if (score >= 60) return { grade: 'C', label: 'Fair', color: 'text-yellow-400' };
@@ -19,7 +19,7 @@ const getGrade = (score: number) => {
   return { grade: 'F', label: 'Critical', color: 'text-red-400' };
 };
 
-function computeStats(result: ScanResult) {
+export function computeStats(result: ScanResult) {
   const nuclei = result.dast_results?.nuclei?.findings || [];
   const semgrep = result.sast_results?.semgrep?.findings || [];
   const zapAlerts = result.dast_results?.zap?.site?.[0]?.alerts || [];
