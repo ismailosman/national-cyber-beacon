@@ -11,20 +11,21 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    if (req.method === "GET") {
-      const response = await fetch(`${API_BASE}/api/scan/jobs`);
-      const data = await response.json();
-      return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let body: Record<string, unknown> = {};
+    try {
+      body = await req.json();
+    } catch {
+      // no body or invalid JSON – default to list
     }
 
-    if (req.method === "POST") {
-      const body = await req.text();
+    const action = (body.action as string) || "list";
+
+    if (action === "start") {
+      const { scan_type, target } = body as { scan_type: string; target: string };
       const response = await fetch(`${API_BASE}/api/scan/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body,
+        body: JSON.stringify({ scan_type, target }),
       });
       const data = await response.json();
       return new Response(JSON.stringify(data), {
@@ -33,8 +34,10 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
+    // Default: list jobs
+    const response = await fetch(`${API_BASE}/api/scan/jobs`);
+    const data = await response.json();
+    return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: unknown) {
