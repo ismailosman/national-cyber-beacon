@@ -1,42 +1,42 @@
 
 
-## Fix: Scan Report Not Showing Data
+## Fix: Grade Consistency Between Email and PDF
 
-### Root Cause
+### Problem
+There are **3 different scoring formulas** across the codebase, causing grades to mismatch:
 
-The Kali backend returns vulnerability scan results under the key **`vuln_results`**, but the entire frontend (ScanReport, ScanReportCharts, ScanResults, email service) reads from **`dast_results`**.
+| Location | Formula | Example Score |
+|---|---|---|
+| DastScanner.tsx (email source) | critical x 15 + high x 8 | Higher scores |
+| ScanReportCharts.tsx (report page) | critical x 25 + high x 10 + nikto x 2 | Lower scores |
+| generate-scan-report (PDF) | critical x 25 + high x 10 + nikto x 2 | Lower scores |
 
-When you visit `https://cyberdefense.so/scan/0e0769ab-...`:
-1. The page loads and fetches the scan data successfully (HTTP 200)
-2. The data arrives with `vuln_results: { nikto, nuclei, zap, sqlmap }`
-3. The frontend looks for `dast_results` -- which is `undefined`
-4. All charts show "No findings", all tables are empty -- the report appears blank
+When the DAST scanner sends its score to the email function, it uses lighter weights (15/8), producing a higher score than what the report page and PDF compute (25/10). This means the email says "Grade B" while the report page might say "Grade C".
 
 ### Solution
-
-Normalize the response in `getScan()` (in `src/services/securityApi.ts`) to map `vuln_results` to `dast_results` when the latter is missing. This is the smallest, safest fix -- one place, all downstream components work automatically.
+Align all scoring to one formula: **critical x 25, high x 10, medium x 3, low x 1, nikto x 2** (the standard model already used by the report page and PDF generator).
 
 ### Changes
 
-**File: `src/services/securityApi.ts`** -- Update `getScan` function
+**File 1: `src/pages/DastScanner.tsx`** (line 177)
 
-After fetching the scan result, add a normalization step:
-
-```typescript
-export async function getScan(scanId: string): Promise<ScanResult> {
-  const raw: any = await proxyRequest(`/scan/${scanId}`);
-  // Backend uses "vuln_results" but frontend expects "dast_results"
-  if (raw.vuln_results && !raw.dast_results) {
-    raw.dast_results = raw.vuln_results;
-  }
-  return raw as ScanResult;
-}
+Change the DAST score formula from:
+```
+100 - (critical * 15 + high * 8 + medium * 3 + low * 1)
+```
+to:
+```
+100 - (critical * 25 + high * 10 + medium * 3 + low * 1)
 ```
 
-This also fixes:
-- The email report link (PDF download button on the report page)
-- The severity charts and grade calculation
-- The detailed findings table
-- The "Send Report" email feature from the report page
+This ensures the score sent to `send-dast-report` for email and PDF matches the score shown on the report page and in the main PDF generator.
 
-No other files need changes.
+**File 2: `supabase/functions/send-dast-report/index.ts`**
+
+Fix the grade box in the PDF to properly fit the "Grade" text. The current Risk Level box at coordinates (470, 726) with size 90x40 clips the text. Widen it slightly and adjust text placement so "RISK LEVEL" and the label (e.g., "Medium") render cleanly without overlap.
+
+### Result
+- DAST email body grade = PDF attachment grade = Report page grade
+- All three use the same 25/10/3/1 deduction model
+- Grade box in PDF renders cleanly
+
