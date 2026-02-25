@@ -43,6 +43,7 @@ import Playbooks from "@/pages/Playbooks";
 import DastScanner from "@/pages/DastScanner";
 import SecurityMonitor from "@/pages/SecurityMonitor";
 import SecurityScanner from "@/pages/SecurityScanner";
+import ScanReport from "@/pages/ScanReport";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -115,6 +116,7 @@ const App = () => (
               <Route path="/security/bot-protection" element={<BotProtection />} />
               <Route path="/security/identity-access" element={<IdentityAccess />} />
               <Route path="/cyber-map" element={<TurnstileGate sessionKey="turnstile_cybermap"><CyberMap /></TurnstileGate>} />
+              <Route path="/scan/:id" element={<ScanReport />} />
               
               <Route path="/dashboard" element={<ProtectedRoutes />} />
               <Route path="/*" element={<ProtectedRoutes />} />
