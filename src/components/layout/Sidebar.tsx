@@ -22,7 +22,7 @@ const navItems = [
   { to: '/threat-intelligence', icon: Crosshair, label: 'Threat Intel' },
   { to: '/dast-scanner', icon: Search, label: 'DAST Scanner' },
   { to: '/reports', icon: FileText, label: 'Reports' },
-  { to: '/playbooks', icon: FileText, label: 'Playbooks' },
+  
   { to: '/admin/security-monitor', icon: Shield, label: 'Security Monitor' },
   { to: '/security-scanner', icon: Search, label: 'Security Scanner' },
   { to: '/scan-queue', icon: ListOrdered, label: 'Scan Queue' },
