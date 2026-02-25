@@ -92,7 +92,7 @@ export default function ScanQueuePanel() {
   const fetchJobs = useCallback(async () => {
     try {
       const { data, error } = await supabase.functions.invoke("scan-queue-proxy", {
-        method: "GET",
+        body: { action: "list" },
       });
       if (error) throw error;
       const jobList = Array.isArray(data) ? data : [];
@@ -115,8 +115,7 @@ export default function ScanQueuePanel() {
     if (!target.trim()) return;
     try {
       await supabase.functions.invoke("scan-queue-proxy", {
-        method: "POST",
-        body: { scan_type: scanType, target },
+        body: { action: "start", scan_type: scanType, target },
       });
       setTarget("");
       fetchJobs();
