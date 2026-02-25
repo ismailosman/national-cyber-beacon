@@ -1,50 +1,42 @@
 
 
-## Fix: Scan Queue - Match Exact API Format and Persist Scans
+## Fix: Scan Report Not Showing Data
 
-### Problem
-1. The scan payload doesn't match the exact API spec -- it sends either `target_url` OR `repo_url`, but the API expects **both** fields
-2. Scans disappear after 60 seconds because `/scan/jobs` returns empty and the local tracking expires too quickly
-3. No individual scan status polling -- we start scans but never check their progress
+### Root Cause
+
+The Kali backend returns vulnerability scan results under the key **`vuln_results`**, but the entire frontend (ScanReport, ScanReportCharts, ScanResults, email service) reads from **`dast_results`**.
+
+When you visit `https://cyberdefense.so/scan/0e0769ab-...`:
+1. The page loads and fetches the scan data successfully (HTTP 200)
+2. The data arrives with `vuln_results: { nikto, nuclei, zap, sqlmap }`
+3. The frontend looks for `dast_results` -- which is `undefined`
+4. All charts show "No findings", all tables are empty -- the report appears blank
+
+### Solution
+
+Normalize the response in `getScan()` (in `src/services/securityApi.ts`) to map `vuln_results` to `dast_results` when the latter is missing. This is the smallest, safest fix -- one place, all downstream components work automatically.
 
 ### Changes
 
-**File 1: `supabase/functions/scan-queue-proxy/index.ts`**
+**File: `src/services/securityApi.ts`** -- Update `getScan` function
 
-Update the `start` action payload to always include both fields per the user's confirmed API format:
-```json
-{
-  "scan_type": "vuln",
-  "target_url": "<user URL>",
-  "repo_url": ""
-}
-```
-- For DAST: `scan_type: "vuln"`, `target_url: target`, `repo_url: ""`
-- For SAST: `scan_type: "sast"`, `target_url: ""`, `repo_url: target`
+After fetching the scan result, add a normalization step:
 
-Add a new `status` action that proxies `GET /scan/{scan_id}` to check individual scan progress.
-
-**File 2: `src/pages/ScanQueuePanel.tsx`**
-
-- Extend local scan tracking from 60 seconds to **5 minutes** (300,000ms)
-- After starting a scan, poll its individual status via the new `status` action every 5 seconds
-- Update the local job's status/progress when the individual poll returns data
-- Keep the scan visible in the queue even after the success banner disappears
-
-### Technical Details
-
-Edge function new `status` action:
 ```typescript
-if (action === "status") {
-  const { scan_id } = body;
-  const upstream = await fetch(`${API_BASE}/scan/${scan_id}`, {
-    headers: { "x-api-key": API_KEY }
-  });
-  // return parsed result
+export async function getScan(scanId: string): Promise<ScanResult> {
+  const raw: any = await proxyRequest(`/scan/${scanId}`);
+  // Backend uses "vuln_results" but frontend expects "dast_results"
+  if (raw.vuln_results && !raw.dast_results) {
+    raw.dast_results = raw.vuln_results;
+  }
+  return raw as ScanResult;
 }
 ```
 
-Frontend scan tracking update:
-- Change expiry from `age < 60000` to `age < 300000`
-- After successful start, begin a per-scan poller that calls `action: "status"` and updates the ref entry's status/progress
-- Stop polling when status is `completed` or `failed`
+This also fixes:
+- The email report link (PDF download button on the report page)
+- The severity charts and grade calculation
+- The detailed findings table
+- The "Send Report" email feature from the report page
+
+No other files need changes.
