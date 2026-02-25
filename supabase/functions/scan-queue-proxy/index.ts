@@ -3,7 +3,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const API_BASE = "https://cybersomalia.com";
+const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
+const API_KEY = Deno.env.get("SECURITY_API_KEY") ?? "";
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -55,11 +56,12 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Missing required fields: scan_type and target" }, 400);
       }
 
-      const upstream = await fetch(`${API_BASE}/api/scan/start`, {
+      const upstream = await fetch(`${API_BASE}/scan/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
+          "x-api-key": API_KEY,
         },
         body: JSON.stringify({ scan_type, target }),
       });
@@ -80,27 +82,40 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(parsed.data, upstream.status);
     }
 
-    // Default: list jobs
-    const upstream = await fetch(`${API_BASE}/api/scan/jobs`, {
-      headers: { "Accept": "application/json" },
-    });
-
-    const parsed = await parseJsonResponse(upstream);
-    if (parsed.error) {
-      return jsonResponse(
-        {
-          error: "Scan queue API is unavailable or misconfigured",
-          upstream_status: upstream.status,
-          upstream_content_type: parsed.contentType || "unknown",
-          upstream_body_snippet: parsed.raw.slice(0, 220),
+    // Default: list jobs — always return 200 with structured payload
+    try {
+      const upstream = await fetch(`${API_BASE}/scan/jobs`, {
+        headers: {
+          "Accept": "application/json",
+          "x-api-key": API_KEY,
         },
-        502,
-      );
-    }
+      });
 
-    return jsonResponse(parsed.data, upstream.status || 200);
+      const parsed = await parseJsonResponse(upstream);
+      if (parsed.error) {
+        // Upstream is down/misconfigured — return 200 with empty jobs + error metadata
+        return jsonResponse({
+          ok: false,
+          jobs: [],
+          error: "Scanner API is currently unavailable",
+          upstream_status: upstream.status,
+        });
+      }
+
+      return jsonResponse({
+        ok: true,
+        jobs: Array.isArray(parsed.data) ? parsed.data : [],
+      });
+    } catch (fetchErr: unknown) {
+      const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      return jsonResponse({
+        ok: false,
+        jobs: [],
+        error: `Cannot reach scanner: ${message}`,
+      });
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return jsonResponse({ error: message }, 502);
+    return jsonResponse({ ok: false, jobs: [], error: message });
   }
 });

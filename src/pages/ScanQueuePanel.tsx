@@ -85,6 +85,7 @@ function JobCard({ job }: { job: Job }) {
 export default function ScanQueuePanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [connected, setConnected] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [scanType, setScanType] = useState("DAST");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -94,12 +95,26 @@ export default function ScanQueuePanel() {
       const { data, error } = await supabase.functions.invoke("scan-queue-proxy", {
         body: { action: "list" },
       });
-      if (error) throw error;
-      const jobList = Array.isArray(data) ? data : [];
-      setJobs(jobList);
-      setConnected(true);
+      if (error) {
+        setConnected(false);
+        setErrorMsg("Failed to reach backend function");
+        return;
+      }
+      // Structured response: { ok, jobs, error? }
+      if (data && typeof data === "object" && "ok" in data) {
+        setJobs(Array.isArray(data.jobs) ? data.jobs : []);
+        setConnected(data.ok === true);
+        setErrorMsg(data.ok ? null : (data.error || "Scanner API unavailable"));
+      } else {
+        // Legacy fallback: data is array directly
+        const jobList = Array.isArray(data) ? data : [];
+        setJobs(jobList);
+        setConnected(true);
+        setErrorMsg(null);
+      }
     } catch {
       setConnected(false);
+      setErrorMsg("Network error");
     }
   }, []);
 
@@ -141,6 +156,13 @@ export default function ScanQueuePanel() {
           {connected ? "● LIVE" : "○ Disconnected"}
         </span>
       </div>
+
+      {/* Error banner */}
+      {errorMsg && (
+        <div className="bg-destructive/10 border border-destructive/30 text-destructive rounded-lg px-4 py-3 mb-4 text-xs">
+          ⚠️ {errorMsg}
+        </div>
+      )}
 
       {/* Start Scan */}
       <div className="bg-background rounded-lg p-4 mb-6 border border-border">
@@ -222,7 +244,7 @@ export default function ScanQueuePanel() {
         </div>
       )}
 
-      {jobs.length === 0 && (
+      {jobs.length === 0 && !errorMsg && (
         <div className="text-center text-muted-foreground py-12">
           No scans yet. Start your first scan above.
         </div>
