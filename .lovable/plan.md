@@ -1,19 +1,56 @@
-## Update Hero Section Heading Text and Color
+Goal: stop CAPTCHA from blocking the Preview environment while keeping CAPTCHA enabled only on the real production domain (`cyberdefense.so`), exactly as you requested.
 
-### Change
+What I found:
 
-In `src/components/landing/HeroSection.tsx`, update the hero heading from "Secure Your Business with Advanced Cyber Defense" to "Precision Cyber Defense for High-Risk Environments" — all in white (removing the red accent span).
+- The gate currently bypasses only:
+  - `localhost`
+  - hostnames containing `lovable.app`
+- Your current preview host is `*.lovableproject.com`, so it is not bypassed.
+- Because of that, Turnstile renders in preview and fails with Cloudflare error `110200` (“Unable to connect to website”), which blocks `/` and `/cyber-map`.
+- The same hostname logic is also used on `/contact`, so it can fail there too in preview.
 
-### Technical Detail
+Implementation plan:
 
-**File: `src/components/landing/HeroSection.tsx**` (lines 28-31)
+1. Make domain check explicit: protect only production host
 
-- Replace the current `<h1>` content (which splits text between white and a red `<span>`) with a single line of all-white text:
+- In `src/pages/TurnstileGate.tsx`, replace current `bypassed` logic with an allowlist check:
+  - CAPTCHA enabled only when hostname is:
+    - `cyberdefense.so`
+    - `www.cyberdefense.so`
+  - Otherwise (preview/dev/any non-production host), immediately render children without Turnstile.
+- This is safer than matching preview domains because preview domains can change over time.
 
-```tsx
-<h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.1] text-white tracking-tight">
-  Precision Cyber Defense for High-Risk Environments
-</h1>
-```
+2. Apply the same production-only rule on Contact page
 
-One file, one small change. Also disable turnstile capture when editing and using lovable preview the main page and /cyber-map page. Only use captcha for the domain of the site cyberdefense.so
+- In `src/pages/Contact.tsx`, replace `isDev` logic with the same production-host check.
+- Result:
+  - Turnstile widget is hidden in preview/dev.
+  - form submit won’t require Turnstile token in preview/dev.
+  - Turnstile verification still required in production domain only.
+
+3. Keep all other behavior unchanged
+
+- Do not change routing, UI copy, styling, token/session behavior, or verification endpoint.
+- `/` and `/cyber-map` remain protected in production.
+- `/contact` remains protected in production.
+
+4. Validation checklist after implementation
+
+- Preview (`*.lovableproject.com` / `*.lovable.app`):
+  - `/` opens directly (no security verification screen).
+  - `/cyber-map` opens directly.
+  - `/contact` submits without CAPTCHA requirement.
+- Production domain (`cyberdefense.so` and `www.cyberdefense.so`):
+  - `/` and `/cyber-map` show Turnstile gate.
+  - `/contact` requires successful verification before submit.
+- Confirm no regression in existing session-based pass behavior on production.
+
+Technical notes:
+
+- Files to update:
+  - `src/pages/TurnstileGate.tsx`
+  - `src/pages/Contact.tsx`
+- Suggested shared condition (same in both files):
+  - `const isProductionCaptchaHost = hostname === "cyberdefense.so" || hostname === "www.cyberdefense.so";`
+  - Gate/widget logic should run only when `isProductionCaptchaHost` is true.  
+  Also change the the background color of the landing page in the hero section "View Live threat" to red color
