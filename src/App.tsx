@@ -14,6 +14,15 @@ import Portfolio from "@/pages/Portfolio";
 import Privacy from "@/pages/Privacy";
 import Terms from "@/pages/Terms";
 
+import CybersecurityCompliance from "@/pages/security/CybersecurityCompliance";
+import RansomwareProtection from "@/pages/security/RansomwareProtection";
+import SecureAppsApis from "@/pages/security/SecureAppsApis";
+import DnsSecurity from "@/pages/security/DnsSecurity";
+import ZeroTrust from "@/pages/security/ZeroTrust";
+import DdosProtection from "@/pages/security/DdosProtection";
+import BotProtection from "@/pages/security/BotProtection";
+import IdentityAccess from "@/pages/security/IdentityAccess";
+
 import CyberMap from "@/pages/CyberMap";
 import Dashboard from "@/pages/Dashboard";
 import Organizations from "@/pages/Organizations";
@@ -95,6 +104,14 @@ const App = () => (
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
+              <Route path="/security/cybersecurity-compliance" element={<CybersecurityCompliance />} />
+              <Route path="/security/ransomware-protection" element={<RansomwareProtection />} />
+              <Route path="/security/secure-apps-apis" element={<SecureAppsApis />} />
+              <Route path="/security/dns-security" element={<DnsSecurity />} />
+              <Route path="/security/zero-trust" element={<ZeroTrust />} />
+              <Route path="/security/ddos-protection" element={<DdosProtection />} />
+              <Route path="/security/bot-protection" element={<BotProtection />} />
+              <Route path="/security/identity-access" element={<IdentityAccess />} />
               <Route path="/cyber-map" element={<TurnstileGate sessionKey="turnstile_cybermap"><CyberMap /></TurnstileGate>} />
               
               <Route path="/dashboard" element={<ProtectedRoutes />} />
