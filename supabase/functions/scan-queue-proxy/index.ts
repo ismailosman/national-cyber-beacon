@@ -49,6 +49,37 @@ Deno.serve(async (req: Request) => {
 
     const action = (body.action as string) || "list";
 
+    if (action === "status") {
+      const { scan_id } = body as { scan_id?: string };
+      if (!scan_id) {
+        return jsonResponse({ error: "Missing required field: scan_id" }, 400);
+      }
+
+      try {
+        const upstream = await fetch(`${API_BASE}/scan/${scan_id}`, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json",
+            "x-api-key": API_KEY,
+          },
+        });
+
+        const parsed = await parseJsonResponse(upstream);
+        if (parsed.error) {
+          return jsonResponse({
+            ok: false,
+            error: "Scanner returned non-JSON response",
+            upstream_status: upstream.status,
+          }, 502);
+        }
+
+        return jsonResponse({ ok: true, scan: parsed.data });
+      } catch (fetchErr: unknown) {
+        const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        return jsonResponse({ ok: false, error: `Cannot reach scanner: ${message}` });
+      }
+    }
+
     if (action === "start") {
       const { scan_type, target } = body as { scan_type?: string; target?: string };
 
@@ -57,36 +88,24 @@ Deno.serve(async (req: Request) => {
       }
 
       const normalizedType = scan_type.toLowerCase();
-      const modernScanType = normalizedType === "dast" ? "vuln" : normalizedType;
-      const modernPayload =
-        modernScanType === "sast"
-          ? { scan_type: modernScanType, repo_url: target }
-          : { scan_type: modernScanType, target_url: target };
+      const apiScanType = normalizedType === "dast" ? "vuln" : normalizedType;
 
-      const modernRequest: RequestInit = {
+      // Always include both fields per API spec
+      const payload = {
+        scan_type: apiScanType,
+        target_url: apiScanType !== "sast" ? target : "",
+        repo_url: apiScanType === "sast" ? target : "",
+      };
+
+      const upstream = await fetch(`${API_BASE}/scan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
           "x-api-key": API_KEY,
         },
-        body: JSON.stringify(modernPayload),
-      };
-
-      const legacyRequest: RequestInit = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "x-api-key": API_KEY,
-        },
-        body: JSON.stringify({ scan_type, target }),
-      };
-
-      let upstream = await fetch(`${API_BASE}/scan`, modernRequest);
-      if (upstream.status === 404 || upstream.status === 405) {
-        upstream = await fetch(`${API_BASE}/scan/start`, legacyRequest);
-      }
+        body: JSON.stringify(payload),
+      });
 
       const parsed = await parseJsonResponse(upstream);
       if (parsed.error) {
