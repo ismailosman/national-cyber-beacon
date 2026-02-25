@@ -56,7 +56,24 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Missing required fields: scan_type and target" }, 400);
       }
 
-      const upstream = await fetch(`${API_BASE}/scan/start`, {
+      const normalizedType = scan_type.toLowerCase();
+      const modernScanType = normalizedType === "dast" ? "vuln" : normalizedType;
+      const modernPayload =
+        modernScanType === "sast"
+          ? { scan_type: modernScanType, repo_url: target }
+          : { scan_type: modernScanType, target_url: target };
+
+      const modernRequest: RequestInit = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify(modernPayload),
+      };
+
+      const legacyRequest: RequestInit = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -64,7 +81,12 @@ Deno.serve(async (req: Request) => {
           "x-api-key": API_KEY,
         },
         body: JSON.stringify({ scan_type, target }),
-      });
+      };
+
+      let upstream = await fetch(`${API_BASE}/scan`, modernRequest);
+      if (upstream.status === 404 || upstream.status === 405) {
+        upstream = await fetch(`${API_BASE}/scan/start`, legacyRequest);
+      }
 
       const parsed = await parseJsonResponse(upstream);
       if (parsed.error) {
@@ -79,7 +101,20 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      return jsonResponse(parsed.data, upstream.status);
+      if (!upstream.ok) {
+        const detail =
+          parsed.data && typeof parsed.data === "object" && "detail" in parsed.data
+            ? (parsed.data as { detail?: unknown }).detail
+            : null;
+
+        return jsonResponse({
+          ok: false,
+          error: detail ? String(detail) : "Failed to start scan",
+          upstream_status: upstream.status,
+        });
+      }
+
+      return jsonResponse(parsed.data, 200);
     }
 
     // Default: list jobs — always return 200 with structured payload
