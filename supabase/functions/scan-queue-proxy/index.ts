@@ -85,10 +85,13 @@ Deno.serve(async (req: Request) => {
     // Default: list jobs — always return 200 with structured payload
     try {
       const upstream = await fetch(`${API_BASE}/scan/jobs`, {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "Accept": "application/json",
           "x-api-key": API_KEY,
         },
+        body: JSON.stringify({}),
       });
 
       const parsed = await parseJsonResponse(upstream);
