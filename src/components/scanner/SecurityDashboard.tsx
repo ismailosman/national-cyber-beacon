@@ -78,6 +78,20 @@ export default function SecurityDashboard() {
     try {
       const { scans } = await listScans();
       setHistory(scans);
+      // Auto-compute grades for all completed scans
+      const doneScans = scans.filter(s => s.status === "done");
+      const newGrades: Record<string, { grade: string; score: number }> = {};
+      await Promise.all(
+        doneScans.map(async (s) => {
+          try {
+            const result = await getScan(s.scan_id);
+            const stats = computeStats(result);
+            const g = getGrade(stats.score);
+            newGrades[s.scan_id] = { grade: g.grade, score: stats.score };
+          } catch {}
+        })
+      );
+      setGrades(prev => ({ ...prev, ...newGrades }));
     } catch {}
   }
 
