@@ -45,7 +45,7 @@ const HeroSection: React.FC = () => (
         </Link>
         <Link
           to="/cyber-map"
-          className="inline-flex items-center px-8 py-3.5 rounded-full text-sm font-bold text-white border border-white/30 hover:border-white/60 hover:bg-white/10 transition-all backdrop-blur-sm"
+          className="inline-flex items-center px-8 py-3.5 rounded-full text-sm font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors shadow-lg shadow-[#FF4D2E]/25"
         >
           View Live Threats
         </Link>
