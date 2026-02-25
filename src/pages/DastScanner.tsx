@@ -174,7 +174,7 @@ const DastScanner: React.FC = () => {
         passed: allFindings.filter(f => f.status === 'pass').length,
       };
 
-      const dastScore = Math.max(0, 100 - (summary.critical * 15 + summary.high * 8 + summary.medium * 3 + summary.low * 1));
+      const dastScore = Math.max(0, 100 - (summary.critical * 25 + summary.high * 10 + summary.medium * 3 + summary.low * 1));
       setCurrentScore(dastScore);
 
       await supabase.from('dast_scan_results').upsert({
