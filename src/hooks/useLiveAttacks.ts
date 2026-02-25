@@ -203,6 +203,23 @@ const USA_THREAT_SOURCES = [
   ...Array(4).fill({ country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 }),
 ];
 
+// ── Russia corridor targets ─────────────────────────────────────────────────
+const RUSSIA_TARGETS = [
+  { lat: 55.76, lng: 37.62, country: 'Russia', state: 'Moscow' },
+  { lat: 59.93, lng: 30.32, country: 'Russia', state: 'St. Petersburg' },
+  { lat: 55.01, lng: 82.93, country: 'Russia', state: 'Novosibirsk' },
+  { lat: 56.84, lng: 60.60, country: 'Russia', state: 'Yekaterinburg' },
+];
+
+// ── Russia corridor sources ─────────────────────────────────────────────────
+const RUSSIA_THREAT_SOURCES = [
+  ...Array(3).fill({ country: 'USA', state: 'VA', lat: 37.43, lng: -78.65 }),
+  ...Array(2).fill({ country: 'UK', state: 'London', lat: 55.37, lng: -3.43 }),
+  ...Array(2).fill({ country: 'Israel', state: 'Tel Aviv', lat: 31.04, lng: 34.85 }),
+  ...Array(2).fill({ country: 'Ukraine', state: 'Kyiv', lat: 48.37, lng: 31.17 }),
+  { country: 'China', state: 'Beijing', lat: 35.86, lng: 104.19 },
+];
+
 // ── EU corridor targets ──────────────────────────────────────────────────────
 const EU_TARGETS = [
   { lat: 51.51, lng: -0.13, country: 'UK', state: 'London' },
@@ -261,7 +278,7 @@ const ATTACK_SIGNATURES: Record<AttackType, string[]> = {
 };
 
 // Generate a single threat for a specific corridor
-function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'usa' | 'eu', rand: () => number): LiveThreat {
+function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_south' | 'usa' | 'eu' | 'russia', rand: () => number): LiveThreat {
   let source, target;
   if (corridor === 'somalia') {
     source = WEIGHTED_SOURCES[Math.floor(rand() * WEIGHTED_SOURCES.length)];
@@ -272,6 +289,9 @@ function generateCorridorThreat(index: number, corridor: 'somalia' | 'global_sou
   } else if (corridor === 'usa') {
     source = USA_THREAT_SOURCES[Math.floor(rand() * USA_THREAT_SOURCES.length)];
     target = USA_TARGETS[Math.floor(rand() * USA_TARGETS.length)];
+  } else if (corridor === 'russia') {
+    source = RUSSIA_THREAT_SOURCES[Math.floor(rand() * RUSSIA_THREAT_SOURCES.length)];
+    target = RUSSIA_TARGETS[Math.floor(rand() * RUSSIA_TARGETS.length)];
   } else {
     source = EU_THREAT_SOURCES[Math.floor(rand() * EU_THREAT_SOURCES.length)];
     target = EU_TARGETS[Math.floor(rand() * EU_TARGETS.length)];
@@ -296,16 +316,19 @@ function generateBurst(index: number): LiveThreat[] {
   const rand = createSeededRand(DAY_SEED + index * 7919);
   const burstSize = rand() < 0.6 ? 3 : 2;
 
-  const firstCorridor = rand() < 0.5 ? 'somalia' : 'global_south';
+  const r1 = rand();
+  const firstCorridor: 'somalia' | 'global_south' | 'russia' = r1 < 0.4 ? 'somalia' : r1 < 0.75 ? 'global_south' : 'russia';
   const threats: LiveThreat[] = [
-    generateCorridorThreat(index, firstCorridor as 'somalia' | 'global_south', rand),
+    generateCorridorThreat(index, firstCorridor, rand),
   ];
 
   if (burstSize === 3) {
     threats.push(generateCorridorThreat(index, 'usa', rand));
     threats.push(generateCorridorThreat(index, 'eu', rand));
   } else {
-    threats.push(generateCorridorThreat(index, rand() < 0.5 ? 'usa' : 'eu', rand));
+    const r2 = rand();
+    const secondCorridor: 'usa' | 'eu' | 'russia' = r2 < 0.4 ? 'usa' : r2 < 0.8 ? 'eu' : 'russia';
+    threats.push(generateCorridorThreat(index, secondCorridor, rand));
   }
 
   return threats;
@@ -314,7 +337,7 @@ function generateBurst(index: number): LiveThreat[] {
 const RING_BUFFER_SIZE = 100;
 
 const countRand = createSeededRand(DAY_SEED + 42);
-const BASE_COUNT = Math.floor(15_000 + countRand() * 30_000);
+const BASE_COUNT = Math.floor(80_000 + countRand() * 120_000);
 
 const initialIndex = calculateCurrentIndex();
 let sharedTodayCount = BASE_COUNT + initialIndex * 3;
@@ -323,7 +346,7 @@ let sharedThreatIndex = initialIndex;
 const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
 
 function incrementSharedCountBy(n: number) {
-  sharedTodayCount += n;
+  sharedTodayCount += n * 3;
   todayListeners.forEach(fn => fn(sharedTodayCount));
 }
 
