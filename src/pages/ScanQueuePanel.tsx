@@ -86,9 +86,13 @@ export default function ScanQueuePanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [connected, setConnected] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [scanType, setScanType] = useState("DAST");
+  const [recentScans, setRecentScans] = useState<Job[]>([]);
+  const [lastPoll, setLastPoll] = useState<{ time: Date; status: string; jobCount: number } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -98,25 +102,43 @@ export default function ScanQueuePanel() {
       if (error) {
         setConnected(false);
         setErrorMsg("Failed to reach backend function");
+        setLastPoll({ time: new Date(), status: "Error", jobCount: 0 });
         return;
       }
-      // Structured response: { ok, jobs, error? }
+
+      let apiJobs: Job[] = [];
+      let isOk = false;
+
       if (data && typeof data === "object" && "ok" in data) {
-        setJobs(Array.isArray(data.jobs) ? data.jobs : []);
-        setConnected(data.ok === true);
-        setErrorMsg(data.ok ? null : (data.error || "Scanner API unavailable"));
+        apiJobs = Array.isArray(data.jobs) ? data.jobs : [];
+        isOk = data.ok === true;
+        setConnected(isOk);
+        setErrorMsg(isOk ? null : (data.error || "Scanner API unavailable"));
       } else {
-        // Legacy fallback: data is array directly
-        const jobList = Array.isArray(data) ? data : [];
-        setJobs(jobList);
+        apiJobs = Array.isArray(data) ? data : [];
+        isOk = true;
         setConnected(true);
         setErrorMsg(null);
       }
+
+      // Merge recent local scans (dedup by id, expire after 60s)
+      const now = Date.now();
+      const validRecent = recentScans.filter(r => {
+        const age = now - new Date(r.created_at).getTime();
+        const inApi = apiJobs.some(a => a.id === r.id);
+        return !inApi && age < 60000;
+      });
+      setRecentScans(validRecent);
+
+      const mergedJobs = [...apiJobs, ...validRecent];
+      setJobs(mergedJobs);
+      setLastPoll({ time: new Date(), status: isOk ? "200 OK" : "Error", jobCount: mergedJobs.length });
     } catch {
       setConnected(false);
       setErrorMsg("Network error");
+      setLastPoll({ time: new Date(), status: "Network Error", jobCount: 0 });
     }
-  }, []);
+  }, [recentScans]);
 
   useEffect(() => {
     fetchJobs();
@@ -143,7 +165,24 @@ export default function ScanQueuePanel() {
         return;
       }
 
+      // Success — create local job entry for immediate feedback
+      const scanId = data?.scan_id || data?.id || crypto.randomUUID();
+      const localJob: Job = {
+        id: scanId,
+        status: "queued",
+        scan_type: scanType,
+        target,
+        progress: 0,
+        created_at: new Date().toISOString(),
+      };
+      setRecentScans(prev => [localJob, ...prev]);
+
+      // Show success message
+      setSuccessMsg(`✅ Scan queued: ${scanId.slice(0, 8)}… → ${target}`);
       setErrorMsg(null);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 5000);
+
       setTarget("");
       fetchJobs();
     } catch (err) {
@@ -169,6 +208,13 @@ export default function ScanQueuePanel() {
           {connected ? "● LIVE" : "○ Disconnected"}
         </span>
       </div>
+
+      {/* Success banner */}
+      {successMsg && (
+        <div className="bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg px-4 py-3 mb-4 text-xs">
+          {successMsg}
+        </div>
+      )}
 
       {/* Error banner */}
       {errorMsg && (
@@ -262,6 +308,17 @@ export default function ScanQueuePanel() {
           No scans yet. Start your first scan above.
         </div>
       )}
+
+      {/* Debug status line */}
+      <div className="mt-6 pt-4 border-t border-border/50 text-[10px] text-muted-foreground/50 font-mono flex items-center gap-2 flex-wrap">
+        <span>Last poll: {lastPoll ? lastPoll.time.toLocaleTimeString() : "—"}</span>
+        <span>|</span>
+        <span>Status: {lastPoll?.status ?? "—"}</span>
+        <span>|</span>
+        <span>Jobs: {lastPoll?.jobCount ?? 0}</span>
+        <span>|</span>
+        <span>{connected ? "Connected" : "Disconnected"}</span>
+      </div>
     </div>
   );
 }
