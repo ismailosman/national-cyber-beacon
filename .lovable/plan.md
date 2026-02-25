@@ -1,44 +1,42 @@
+## Route All Report Emails to Both Recipients
 
+### Overview
 
-## Fix Missing Country Flags on Cyber Map
+Currently, all automated emails are sent only to `osmando@gmail.com`. This update adds `info@cyberdefense.so` as a second recipient across all email-sending edge functions.
 
-### Problem
-When clicking countries on the map, the country name comes from Mapbox's `name_en` property, which often differs from the names in the `COUNTRY_ISO` lookup. If there's no match, the flag falls back to the UN flag (`'un'`). Known mismatches include:
-- **Republic of the Congo** -- Mapbox uses "Republic of the Congo", but `COUNTRY_ISO` only has "Congo"
-- **Democratic Republic of the Congo** -- Mapbox uses this full name, but `COUNTRY_ISO` only has "DR Congo"
-- **Suriname** -- completely missing from `COUNTRY_ISO`
-- **Trinidad and Tobago** -- exists in `COUNTRY_ISO` but the attack data uses "Trinidad" (a separate mismatch)
-- **Puerto Rico**, **Bahamas**, **Hong Kong**, **Cambodia** -- missing from `COUNTRY_ISO` but used in attack corridors
+**Note:** I'm assuming the intended address is `info@cyberdefense.so` (correcting the typo). Let me know if it should be different.
 
 ### Changes
 
-**File: `src/pages/CyberMap.tsx`** -- Add missing entries to `COUNTRY_ISO`:
+**1. `supabase/functions/send-pentest-email/index.ts**`
 
-Add these new entries to cover Mapbox `name_en` variants and missing countries:
+- Change `PENTESTER_EMAIL` from a single string to an array of two emails: `["osmando@gmail.com", "info@cyberdefense.so"]`
+- Update the three recipient-building blocks (scan_completed, critical_alert, report_delivery) to spread the array instead of pushing a single email
 
-| Key | ISO | Reason |
-|-----|-----|--------|
-| `Republic of the Congo` | `cg` | Mapbox name variant for Congo |
-| `Democratic Republic of the Congo` | `cd` | Mapbox name variant for DR Congo |
-| `Suriname` | `sr` | Missing entirely |
-| `Puerto Rico` | `pr` | Used in attack data, missing |
-| `Bahamas` | `bs` | Used in attack data, missing |
-| `Hong Kong` | `hk` | Used in attack data, missing |
-| `Cambodia` | `kh` | Used in attack data, missing |
-| `Trinidad` | `tt` | Attack data uses short name |
-| `Côte d'Ivoire` | `ci` | Mapbox name variant for Ivory Coast |
-| `United States of America` | `us` | Mapbox full name |
-| `United Kingdom` | `gb` | Mapbox full name |
-| `United Arab Emirates` | `ae` | Mapbox full name |
-| `Czechia` | `cz` | Mapbox modern name for Czech Republic |
-| `Eswatini` | `sz` | Already exists but verifying |
-| Additional ~20 countries commonly shown on world maps that could be clicked (e.g., Guyana, Belize, Laos, Brunei, Timor-Leste, etc.) |
+**2. `supabase/functions/send-contact-form/index.ts**`
 
-This is a single-file change adding approximately 30 new entries to the existing `COUNTRY_ISO` dictionary.
+- Update the `to` field from `["osmando@gmail.com"]` to `["osmando@gmail.com", "info@cyberdefense.so"]`
 
-**File: `src/hooks/useLiveAttacks.ts`** -- No changes needed. The `country` field in attack data is used for display in the attack feed sidebar, and those names already have ISO mappings or will be covered by the new entries above.
+**3. `supabase/functions/scheduled-dast-scan/index.ts**`
 
-### Technical Notes
-- The `flagcdn.com` CDN uses ISO 3166-1 alpha-2 codes, so all we need are correct two-letter codes
-- The fallback `'un'` (UN flag) will still apply for any truly unmapped territory
-- No new dependencies or database changes required
+- Update the `to` field from `["osmando@gmail.com"]` to `["osmando@gmail.com", "info@cyberdefense.so"]`
+
+**4. `supabase/functions/send-dast-report/index.ts**`
+
+- Update the default recipient fallback from `"osmando@gmail.com"` to include both emails in the `to` array
+
+**5. `src/pages/DastScanner.tsx**`
+
+- Update the default `recipientEmail` state from `"osmando@gmail.com"` to `"osmando@gmail.com"` (keep as-is since this is user-facing input; the backend functions above already ensure both addresses receive emails)
+
+### Summary
+
+Five files updated, all email delivery points now route to both `osmando@gmail.com` and `info@cyberdefense.so`.  
+  
+Please add email signature when sending emails from contact, or reports.  
+**Cyber Defense Inc**  
+Cyber Intelligence • Threat Monitoring • Digital Resilience
+
+📧 [info@cyberdefense.so](mailto:info@cyberdefense.so)  
+🌐 [www.cyberdefense.so](http://www.cyberdefense.so)  
+🛡️ Protecting Digital Infrastructure Across Nations
