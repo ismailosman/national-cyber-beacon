@@ -1,40 +1,64 @@
 
 
-## Redesign Portfolio Page with Cyber-Themed Service Cards
+## Add Security Service Pages with Dropdown Navigation
 
 ### Overview
-Replace the current simple card layout with a dark, cyber-themed design featuring animated scan lines, corner brackets, metric displays, and color-coded service cards.
+Create 8 new public-facing security service pages accessible via a "Security" dropdown menu in the landing Navbar. Each page will have rich, written content about that service, styled for both light and dark modes.
 
-### Changes
+### New Pages (8 files)
 
-**File: `src/components/landing/PortfolioSection.tsx`** — Full rewrite
+Each page will follow the same layout pattern as the existing Portfolio page (Navbar + content + Footer + CookieConsent) and include:
+- A hero banner with title, subtitle, and accent color
+- Key features/capabilities section with icon cards
+- A "Why it matters" or benefits section
+- A call-to-action linking to /contact
 
-The new component will include:
+**Files to create:**
 
-- **Enhanced service data**: Each service now has `id`, `subtitle`, `metric`, `metricLabel`, `tag`, and unique `color` fields
-- **ServiceCard sub-component** with:
-  - Hover-triggered animated scan line effect using `requestAnimationFrame`
-  - SVG corner bracket decorations on all four corners
-  - Octagon-shaped icon container with colored border
-  - Status tag badges (ACTIVE, LIVE, HARDENED, CRITICAL) with per-card colors
-  - Metric display bar showing key stats (e.g., "99.7% Detection Rate")
-  - Glow border and box-shadow on hover using each card's accent color
-  - Staggered fade-up entrance animation via inline `animationDelay`
-- **Section wrapper** with:
-  - Dark background (`#060e1a`) with subtle grid overlay pattern
-  - Radial gradient glow accent
-  - Section heading styled with Orbitron/Rajdhani fonts via inline styles
-  - Responsive 2-column grid layout
-- **Inline `<style>` tag** for:
-  - Google Fonts import (Share Tech Mono, Rajdhani, Orbitron)
-  - `@keyframes cyberFadeUp` animation
+| Route | File | Title |
+|-------|------|-------|
+| `/security/cybersecurity-compliance` | `src/pages/security/CybersecurityCompliance.tsx` | Cybersecurity Compliance |
+| `/security/ransomware-protection` | `src/pages/security/RansomwareProtection.tsx` | Ransomware Protection |
+| `/security/secure-apps-apis` | `src/pages/security/SecureAppsApis.tsx` | Secure Apps and APIs |
+| `/security/dns-security` | `src/pages/security/DnsSecurity.tsx` | DNS Delivery and Security |
+| `/security/zero-trust` | `src/pages/security/ZeroTrust.tsx` | Zero Trust |
+| `/security/ddos-protection` | `src/pages/security/DdosProtection.tsx` | DDoS Protection |
+| `/security/bot-protection` | `src/pages/security/BotProtection.tsx` | Bot and Abuse Protection |
+| `/security/identity-access` | `src/pages/security/IdentityAccess.tsx` | Identity, Credential, and Access Management |
 
-**File: `src/pages/Portfolio.tsx`** — Minor update
+### Shared Layout Component
 
-- Remove `bg-[hsl(var(--landing-bg))]` from the wrapper since PortfolioSection now controls its own dark background, or keep it and let the section's own background override visually.
+**File: `src/components/landing/SecurityPageLayout.tsx`**
 
-### Technical Notes
-- The user's pasted JSX had stripped/broken tags — I will reconstruct the complete working JSX from the intent and structure provided
-- Uses only existing dependencies (React, lucide-react) — no new packages needed
-- Fonts loaded via `@import` in an inline `<style>` tag within the component
-- All animations are CSS-based or lightweight `requestAnimationFrame` for the scan line
+A reusable wrapper to avoid duplicating the hero + features + CTA structure across all 8 pages. Each page passes its unique content (title, subtitle, description, features list, benefits) as props.
+
+### Navbar Update
+
+**File: `src/components/landing/Navbar.tsx`**
+
+- Add a "Security" item to `NAV_ITEMS` that renders as a dropdown menu (hover on desktop, tap on mobile)
+- The dropdown lists all 8 security pages with their titles
+- Styled consistently with the existing nav: gray-400 text, white on hover, dark background dropdown panel
+
+### Routing Update
+
+**File: `src/App.tsx`**
+
+- Import all 8 new page components
+- Add 8 new public routes under `/security/*` alongside existing public routes (portfolio, contact, etc.)
+
+### Light/Dark Mode Support
+
+- All pages use Tailwind's `dark:` variant classes for colors and backgrounds
+- Light mode: white/gray backgrounds, dark text
+- Dark mode: dark backgrounds (#060e1a / gray-950), light text
+- Consistent with the existing theme system managed by `next-themes`
+
+### Technical Details
+
+- No new dependencies required
+- No database changes
+- All pages are public (no auth required)
+- Content will be hardcoded (no CMS) with professional cybersecurity service descriptions
+- Each page's features section will use lucide-react icons
+
