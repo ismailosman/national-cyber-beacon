@@ -15,7 +15,7 @@ const navItems = [
   { to: '/incidents', icon: AlertOctagon, label: 'Incidents' },
   { to: '/compliance', icon: CheckSquare, label: 'Compliance' },
   
-  { to: '/cyber-map', icon: Map, label: 'Threat Map' },
+  { to: '/threat-map', icon: Map, label: 'Threat Map' },
   { to: '/uptime', icon: Activity, label: 'Uptime Monitor' },
   { to: '/ddos-monitor', icon: ShieldAlert, label: 'DDoS Monitor' },
   { to: '/early-warning', icon: Radar, label: 'Early Warning' },
