@@ -1,22 +1,26 @@
 
 
-## Set Dark Mode as Default Theme
+## Keep Navbar and Footer Always Dark (No Theme Toggle)
 
 ### Overview
-Change the default theme from "light" to "dark" so all pages (landing, dashboard, and security pages) start in dark mode.
+Remove the theme toggle button from the navbar and hardcode the navbar to always use dark styling -- matching the footer which already uses fixed dark colors (`bg-gray-950`, `text-gray-400`, etc.).
 
-### Change Required
+### Changes
 
-**File: `src/App.tsx` (line 99)**
+**File: `src/components/landing/Navbar.tsx`**
 
-Update the `ThemeProvider` `defaultTheme` prop from `"light"` to `"dark"`:
+1. Remove the `ThemeToggle` import
+2. Remove both `<ThemeToggle />` instances (desktop at line 129, mobile at line 142)
+3. Replace all `hsl(var(--landing-*))` CSS variables with hardcoded dark values to match the footer:
+   - `--landing-nav-bg` -> `bg-gray-950`
+   - `--landing-nav-border` -> `border-gray-800`
+   - `--landing-muted` -> `text-gray-400`
+   - `--landing-fg` -> `text-white`
+   - `--landing-card` -> `bg-gray-900`
+   - `--landing-card-border` -> `border-gray-800`
 
-```text
-Before: <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-After:  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-```
+This ensures the navbar always looks dark regardless of the current theme, matching the footer's styling.
 
-This single change applies dark mode globally to every page -- landing, portfolio, contact, security pages, login, and the dashboard (which already forces dark via the `.dark` class on its wrapper).
-
-No other files need to change since all landing page components already use CSS custom properties (`--landing-bg`, `--landing-fg`, etc.) that have dark-mode values defined in `index.css` under the `.dark` selector.
-
+### No other files need changes
+- The Footer already uses hardcoded dark colors
+- The ThemeToggle component itself stays in the codebase (used in the dashboard sidebar)
