@@ -1,78 +1,80 @@
-
-
-## Dark Web Monitoring Panel
+## Dark Web Monitor: PDF Export and Email Delivery
 
 ### Overview
-Add a new "Dark Web Monitor" page accessible from the sidebar. It will allow users to initiate dark web scans against a domain, poll for results, view past scans, and display findings organized by source (ransomware, HIBP, pastes, dark web mentions, intelligence databases, GitHub).
+
+Add a "Download PDF" button and "Email Report" button to the Dark Web Monitor results panel. The PDF will follow the same professional design as the DAST scanner report (navy header, red accent, logo, severity breakdown, findings tables). The email will be sent to [info@cyberdefense.so](mailto:info@cyberdefense.so) and [osmando@gmail.com](mailto:osmando@gmail.com) with the PDF attached.
 
 ### Architecture
 
-The existing `security-scanner-proxy` edge function already proxies requests to `cybersomalia.com` with the `SECURITY_API_KEY`. The dark web API endpoints (`/darkweb/scan`, `/darkweb/scans`, `/darkweb/scan/{id}`) follow the same pattern, so **no new edge function is needed** -- the proxy handles arbitrary paths.
+Create a new Edge Function `send-darkweb-report` that:
+
+1. Generates a multi-page PDF from dark web scan data (same visual style as `send-dast-report`)
+2. Sends the PDF via Resend email to the admin recipients
+3. Returns the PDF base64 to the frontend for direct download
+
+### New Edge Function: `supabase/functions/send-darkweb-report/index.ts`
+
+**PDF Design (matching DAST report):**
+
+- Page 1: Executive Summary
+  - Navy header bar with logo + "SOMALIA CYBER DEFENCE" branding
+  - Red accent line
+  - Info section: Domain, scan date, scan ID
+  - Risk level box (based on severity counts)
+  - Score computed from findings: `100 - (critical * 25 + high * 10 + medium * 3)`
+  - Severity breakdown boxes (Critical, High, Medium, Low)
+  - Source summary table (6 rows: Ransomware, HIBP, Pastes, Ahmia, IntelX, GitHub) with finding counts
+- Page 2+: Detailed Findings per source
+  - Table with columns: Source, Severity, Detail, additional fields
+  - Same alternating row styling as DAST report
+- Footer: "Somalia Cyber Defence | Date | CONFIDENTIAL | Page N"
+
+**Email Design (matching DAST report):**
+
+- White background email with navy header
+- Logo, domain, scan date
+- Severity summary cards (Critical, High, Medium counts)
+- PDF attached
+- Cyber Defense Inc signature
+
+**Logic:**
+
+- Accepts: `{ scan: DarkWebScan }` (the full scan object with results/summary)
+- Uses `fetchLogoPngData()` from shared utils
+- Sends to `["osmando@gmail.com", "info@cyberdefense.so"]`
+- Returns `{ success, pdf: base64string }`
+
+### Frontend Changes: `src/pages/DarkWebMonitor.tsx`
+
+Add two buttons in the results header area (visible when `currentScan?.darkweb_status === 'done'`):
+
+- **Download PDF** button: Calls the edge function, decodes base64 PDF, triggers browser download
+- **Email Report** button: Same call but shows a toast on success
+
+Both use a single function that invokes `supabase.functions.invoke('send-darkweb-report', { body: { scan: currentScan } })`.
 
 ### Files to Create
 
-**1. `src/pages/DarkWebMonitor.tsx`** -- Main page component
-- Scan form: domain input, comma-separated emails, comma-separated keywords
-- Start scan button that POSTs via the proxy
-- Poll every 5s while status is `queued` or `running`, showing `darkweb_phase` as live status
-- Summary cards: total findings, critical, high, medium counts
-- Tabbed results view with 6 tabs: Ransomware, Credential Leaks (HIBP), Paste Sites, Dark Web (Ahmia), Intel Database (IntelX), GitHub
-- Each tab shows a table of findings from `darkweb_results.[source].findings`
-- Scan history sidebar listing past scans from `/darkweb/scans`
-
-**2. `src/types/darkweb.ts`** -- TypeScript types
-```text
-DarkWebScanRequest { domain, emails[], keywords[] }
-DarkWebFinding { varies per source }
-DarkWebResults { ransomware, hibp, pastes, ahmia, intelx, github }
-DarkWebSummary { total_findings, critical, high, medium }
-DarkWebScan { scan_id, darkweb_status, darkweb_phase, darkweb_summary, darkweb_results, ... }
-DarkWebScanSummary (for list endpoint)
-```
-
-**3. `src/services/darkwebApi.ts`** -- API service layer
-- `startDarkWebScan(domain, emails, keywords)` -- POST `/darkweb/scan`
-- `getDarkWebScan(scanId)` -- GET `/darkweb/scan/{id}`
-- `listDarkWebScans()` -- GET `/darkweb/scans`
-- `pollDarkWebScan(scanId, onUpdate)` -- 5s polling loop, returns stop function
-- All use the existing `security-scanner-proxy` edge function
+- `supabase/functions/send-darkweb-report/index.ts` -- PDF generator + email sender
 
 ### Files to Modify
 
-**4. `src/components/layout/Sidebar.tsx`** -- Add nav item
-- Add `{ to: '/dark-web', icon: Eye, label: 'Dark Web Monitor' }` after Threat Intel
-
-**5. `src/App.tsx`** -- Add route
-- Import `DarkWebMonitor` and add `<Route path="/dark-web" element={<DarkWebMonitor />} />`
-
-### UI Design
-
-The page follows the existing scan queue panel pattern with a dark, monospace-heavy design:
-
-```text
-+----------------------------------+-------------------------------+
-|  Dark Web Monitor                |  [Status: LIVE/Offline]       |
-+----------------------------------+-------------------------------+
-|  SCAN FORM                       |                               |
-|  Domain: [___________]           |  RESULTS PANEL                |
-|  Emails: [___________]           |  +---------+---------+-----+  |
-|  Keywords: [___________]         |  | Summary Cards (4)       |  |
-|  [Start Scan]                    |  | Total | Crit | High | Med|  |
-|                                  |  +---------+---------+-----+  |
-|  SCAN HISTORY                    |  | Phase: "Checking HIBP"  |  |
-|  - scan-abc (done) [View]        |  |                         |  |
-|  - scan-def (running) [View]     |  | TABS:                   |  |
-|                                  |  | [Ransom][HIBP][Paste]   |  |
-|                                  |  | [DarkWeb][Intel][GitHub] |  |
-|                                  |  |                         |  |
-|                                  |  | Finding table per tab   |  |
-+----------------------------------+-------------------------------+
-```
+- `src/pages/DarkWebMonitor.tsx` -- Add export/email buttons and handler
+- `supabase/config.toml` is auto-managed (edge function auto-deploys)
 
 ### Technical Details
 
-- **Proxy reuse**: Calls go through `security-scanner-proxy` using the `path` query parameter (e.g., `?path=/darkweb/scan`)
-- **Polling**: Uses the same pattern as `SecurityDashboard` -- a `while(active)` loop with 5s intervals, stopped on unmount or terminal status
-- **No new secrets needed**: `SECURITY_API_KEY` and `SECURITY_API_URL` are already configured
-- **No database changes**: Results come from the external API, not stored locally
-
+- Reuses `fetchLogoPngData` from `_shared/logoUtils.ts`
+- Reuses `buildLogoXObject` pattern from DAST report
+- Same PDF object layout: catalog, pages, fonts, logo XObject, page+stream pairs with proper xref table
+- Score formula: `max(0, 100 - (critical * 25 + high * 10 + medium * 3))`
+- Grade: A (>=90), B (>=75), C (>=60), D (>=40), F (<40)
+- Uses RESEND_API_KEY (already configured) and [noreply@cyberdefense.so](mailto:noreply@cyberdefense.so) sender  
+  
+**Update the Dark Web Monitor panel with the following changes:**
+  The API `darkweb_results` object now contains 4 additional breach sources. Add these as new collapsible sections in the findings panel:
+  **New sections to add:**
+  - 🔐 **Pwned Passwords** — data from `darkweb_results.pwned_passwords.findings`, show `breach_count` and `message` per finding, never display actual password text
+  - 💀 **Breach Directory** — data from `darkweb_results.breach_directory.findings`, show `email` and mask password as `••••••••`, show `sources` list
+  - 🗄️ **Scylla Database** — data from `darkweb_results.scylla.findings`, show `email`, `username`, mask `password` as `••••••••`, show `database` name
+  - 🔓 **LeakCheck** — data from `darkweb_results.leakcheck.findings`, show `email`, `breach_name`, `breach_date`, `leak_type`
