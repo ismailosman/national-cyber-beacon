@@ -1,11 +1,18 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { Zap, Pause, Play } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Zap, Pause, Play, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLiveAttacks, type AttackType } from '@/hooks/useLiveAttacks';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
 import SomaliaPanel from '@/components/cyber-map/SomaliaPanel';
 import CountryPanel from '@/components/cyber-map/CountryPanel';
 import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS, seededRand } from '@/components/cyber-map/shared';
 import logoSrc from '@/assets/logo.png';
+
+const COUNTRY_SETS = [
+  ['Ethiopia', 'Indonesia', 'Georgia', 'Ukraine', 'Kenya'],
+  ['Somalia', 'United States', 'India', 'Pakistan', 'Brazil'],
+  ['Turkey', 'Nigeria', 'South Africa', 'Egypt', 'Bangladesh'],
+  ['Iran', 'China', 'Philippines', 'Vietnam', 'Colombia'],
+];
 
 const INDUSTRIES = [
   { name: 'Banking', icon: '🏦' },
@@ -31,21 +38,24 @@ const ThreatMapStandalone: React.FC = () => {
   const [liveOn, setLiveOn] = useState(true);
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [rotationIndex, setRotationIndex] = useState(0);
+  const [mobileStatsOpen, setMobileStatsOpen] = useState(false);
+
   const { threats, todayCount } = useLiveAttacks(liveOn);
+
+  // Rotate country sets every 30s
+  useEffect(() => {
+    const iv = setInterval(() => setRotationIndex(i => (i + 1) % COUNTRY_SETS.length), 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const currentCountries = COUNTRY_SETS[rotationIndex];
 
   const chartBars = useRef(Array.from({ length: 30 }, () => Math.floor(rnd(3e6, 18e6))));
   const maxBar = Math.max(...chartBars.current, 1);
 
-  // Compute top countries from threats
-  const topCountries = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const t of threats) counts[t.target.country] = (counts[t.target.country] || 0) + 1;
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  }, [threats]);
-
   // Compute top industries
   const topIndustries = useMemo(() => {
-    // Assign industries based on target country seeded
     const industryNames = ['Government', 'Finance', 'Technology', 'Telecommunications', 'Education', 'Health'];
     const counts: Record<string, number> = {};
     for (const t of threats) {
@@ -58,7 +68,6 @@ const ThreatMapStandalone: React.FC = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
   }, [threats]);
 
-  const defaultCountries = [['Ethiopia'], ['Indonesia'], ['Somalia'], ['Georgia'], ['Ukraine']];
   const defaultIndustries = [['Banking'], ['Government'], ['Telecom']];
 
   const rate = Math.max(1, Math.floor(threats.length / 3));
@@ -206,16 +215,18 @@ const ThreatMapStandalone: React.FC = () => {
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED COUNTRIES</p>
             <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks per organization in the last day.</p>
-            {(topCountries.length > 0 ? topCountries : defaultCountries).map(([name, _count]) => {
-              const iso = COUNTRY_ISO[name] ?? 'un';
-              return (
-                <div key={name} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
-                  onClick={() => handleCountryClick(name)}>
-                  <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
-                  <span className="text-xs text-slate-300 font-mono">{name}</span>
-                </div>
-              );
-            })}
+            <div style={{ transition: 'opacity 0.5s ease' }} key={rotationIndex}>
+              {currentCountries.map((name) => {
+                const iso = COUNTRY_ISO[name] ?? 'un';
+                return (
+                  <div key={name} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
+                    onClick={() => handleCountryClick(name)}>
+                    <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                    <span className="text-xs text-slate-300 font-mono">{name}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
@@ -267,6 +278,30 @@ const ThreatMapStandalone: React.FC = () => {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* ── Mobile Top Targeted Countries ─────────────────────────────── */}
+      <div className="lg:hidden flex-shrink-0 px-3 py-2"
+        style={{ background: '#07070f', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <button onClick={() => setMobileStatsOpen(v => !v)}
+          className="w-full flex items-center justify-between py-1">
+          <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">TOP TARGETED COUNTRIES</span>
+          {mobileStatsOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronUp className="w-3.5 h-3.5 text-slate-500" />}
+        </button>
+        {mobileStatsOpen && (
+          <div className="pt-1 pb-1" style={{ transition: 'opacity 0.5s ease' }} key={rotationIndex}>
+            {currentCountries.map((name) => {
+              const iso = COUNTRY_ISO[name] ?? 'un';
+              return (
+                <div key={name} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1"
+                  onClick={() => handleCountryClick(name)}>
+                  <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                  <span className="text-xs text-slate-300 font-mono">{name}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Scrollbar styling */}
