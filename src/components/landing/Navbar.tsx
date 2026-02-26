@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Zap, ChevronDown } from 'lucide-react';
 import logoSrc from '@/assets/logo.png';
-import ThemeToggle from '@/components/ThemeToggle';
 
 const SECURITY_ITEMS = [
   { label: 'Cybersecurity Compliance', href: '/security/cybersecurity-compliance' },
@@ -66,8 +65,8 @@ const Navbar: React.FC = () => {
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 bg-[hsl(var(--landing-nav-bg))] ${
-        scrolled ? 'shadow-md border-b border-[hsl(var(--landing-nav-border))]' : ''
+      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 bg-gray-950 ${
+        scrolled ? 'shadow-md border-b border-gray-800' : ''
       }`}
     >
       <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
@@ -80,7 +79,7 @@ const Navbar: React.FC = () => {
             <li key={item.label}>
               <button
                 onClick={() => handleNav(item)}
-                className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors"
+                className="text-sm font-medium text-gray-400 hover:text-white transition-colors"
               >
                 {item.label}
               </button>
@@ -94,19 +93,19 @@ const Navbar: React.FC = () => {
             onMouseEnter={handleDropdownEnter}
             onMouseLeave={handleDropdownLeave}
           >
-            <button className="flex items-center gap-1 text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors">
+            <button className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors">
               Security
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${securityOpen ? 'rotate-180' : ''}`} />
             </button>
             {securityOpen && (
               <div className="absolute top-full left-1/2 -translate-x-1/2 pt-2 z-50">
-                <div className="bg-[hsl(var(--landing-card))] border border-[hsl(var(--landing-card-border))] rounded-lg shadow-xl py-2 w-64">
+                <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-xl py-2 w-64">
                   {SECURITY_ITEMS.map((s) => (
                     <Link
                       key={s.href}
                       to={s.href}
                       onClick={() => setSecurityOpen(false)}
-                      className="block px-4 py-2.5 text-sm text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] hover:bg-[hsl(var(--landing-nav-bg))] transition-colors"
+                      className="block px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-950 transition-colors"
                     >
                       {s.label}
                     </Link>
@@ -126,9 +125,6 @@ const Navbar: React.FC = () => {
             </Link>
           </li>
           <li>
-            <ThemeToggle />
-          </li>
-          <li>
             <Link
               to="/contact"
               className="inline-flex items-center px-5 py-2 rounded-full text-xs font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors"
@@ -138,26 +134,23 @@ const Navbar: React.FC = () => {
           </li>
         </ul>
 
-        <div className="flex items-center gap-2 md:hidden">
-          <ThemeToggle />
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 text-[hsl(var(--landing-muted))]"
-            aria-label="Toggle menu"
-          >
-            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
-        </div>
+        <button
+          onClick={() => setMobileOpen(!mobileOpen)}
+          className="p-2 text-gray-400 md:hidden"
+          aria-label="Toggle menu"
+        >
+          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
       </nav>
 
       {mobileOpen && (
-        <div className="md:hidden bg-[hsl(var(--landing-nav-bg))] border-t border-[hsl(var(--landing-nav-border))] px-6 pb-4">
+        <div className="md:hidden bg-gray-950 border-t border-gray-800 px-6 pb-4">
           <ul className="flex flex-col gap-4 pt-2">
             {NAV_ITEMS.map((item) => (
               <li key={item.label}>
                 <button
                   onClick={() => handleNav(item)}
-                  className="text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors w-full text-left"
+                  className="text-sm font-medium text-gray-400 hover:text-white transition-colors w-full text-left"
                 >
                   {item.label}
                 </button>
@@ -168,7 +161,7 @@ const Navbar: React.FC = () => {
             <li>
               <button
                 onClick={() => setMobileSecurityOpen(!mobileSecurityOpen)}
-                className="flex items-center gap-1 text-sm font-medium text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors w-full text-left"
+                className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors w-full text-left"
               >
                 Security
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${mobileSecurityOpen ? 'rotate-180' : ''}`} />
@@ -180,7 +173,7 @@ const Navbar: React.FC = () => {
                       <Link
                         to={s.href}
                         onClick={() => setMobileOpen(false)}
-                        className="block text-sm text-[hsl(var(--landing-muted))] hover:text-[hsl(var(--landing-fg))] transition-colors"
+                        className="block text-sm text-gray-400 hover:text-white transition-colors"
                       >
                         {s.label}
                       </Link>
