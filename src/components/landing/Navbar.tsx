@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Zap, ChevronDown } from 'lucide-react';
 import logoSrc from '@/assets/logo.png';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const SECURITY_ITEMS = [
   { label: 'Cybersecurity Compliance', href: '/security/cybersecurity-compliance' },
@@ -125,6 +126,9 @@ const Navbar: React.FC = () => {
             </Link>
           </li>
           <li>
+            <ThemeToggle />
+          </li>
+          <li>
             <Link
               to="/contact"
               className="inline-flex items-center px-5 py-2 rounded-full text-xs font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors"
@@ -192,6 +196,9 @@ const Navbar: React.FC = () => {
                 <Zap className="w-4 h-4" />
                 LIVE ATTACK
               </Link>
+            </li>
+            <li>
+              <ThemeToggle />
             </li>
           </ul>
         </div>
