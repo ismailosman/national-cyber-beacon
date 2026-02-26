@@ -133,6 +133,136 @@ const ChipInput: React.FC<{
   );
 };
 
+/* ── LeakCheck Pro v2 Section ─────────────────────── */
+interface LeakCheckFinding {
+  type?: string;
+  email?: string;
+  username?: string;
+  has_password?: boolean;
+  breach_name?: string;
+  breach_date?: string;
+  fields?: string[];
+  severity?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2 };
+
+const sortBySeverity = (a: LeakCheckFinding, b: LeakCheckFinding) =>
+  (SEVERITY_ORDER[a.severity?.toUpperCase() ?? 'MEDIUM'] ?? 3) - (SEVERITY_ORDER[b.severity?.toUpperCase() ?? 'MEDIUM'] ?? 3);
+
+const leakSeverityBorder = (s?: string) => {
+  switch (s?.toUpperCase()) {
+    case 'CRITICAL': return 'border-l-red-500';
+    case 'HIGH': return 'border-l-orange-500';
+    default: return 'border-l-yellow-500';
+  }
+};
+
+const leakSeverityBadge = (s?: string) => {
+  switch (s?.toUpperCase()) {
+    case 'CRITICAL': return 'text-red-400 border-red-400/30 bg-red-400/10';
+    case 'HIGH': return 'text-orange-400 border-orange-400/30 bg-orange-400/10';
+    default: return 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10';
+  }
+};
+
+const LeakCheckFindingCard: React.FC<{ f: LeakCheckFinding }> = ({ f }) => (
+  <div className={`border border-border rounded-lg p-3 space-y-2 border-l-4 ${leakSeverityBorder(f.severity)} bg-card`}>
+    <div className="flex items-center gap-2 flex-wrap">
+      <Badge variant="outline" className={`font-mono text-[10px] ${leakSeverityBadge(f.severity)}`}>
+        {f.severity?.toUpperCase() ?? 'MEDIUM'}
+      </Badge>
+      {f.breach_name && <span className="font-mono text-sm font-bold text-foreground">{f.breach_name}</span>}
+      {f.breach_date && <span className="font-mono text-xs text-muted-foreground">{f.breach_date}</span>}
+    </div>
+    <div className="flex gap-4 text-xs font-mono text-muted-foreground flex-wrap">
+      {f.email && <span>email: <span className="text-foreground">{f.email}</span></span>}
+      {f.username && <span>username: <span className="text-foreground">{f.username}</span></span>}
+    </div>
+    {f.has_password && (
+      <Badge className="bg-red-500/20 text-red-400 border-red-500/30 font-mono text-[10px]">
+        🔑 Password Exposed
+      </Badge>
+    )}
+    {f.fields && f.fields.length > 0 && (
+      <div className="flex flex-wrap gap-1">
+        {f.fields.map((field, i) => (
+          <span key={i} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">{field}</span>
+        ))}
+      </div>
+    )}
+    {f.message && <p className="text-xs text-muted-foreground font-mono">{f.message}</p>}
+  </div>
+);
+
+const LeakCheckGroup: React.FC<{ title: string; findings: LeakCheckFinding[] }> = ({ title, findings }) => {
+  if (findings.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <h4 className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{title} ({findings.length})</h4>
+      {findings.sort(sortBySeverity).map((f, i) => <LeakCheckFindingCard key={i} f={f} />)}
+    </div>
+  );
+};
+
+const LeakCheckSection: React.FC<{ findings: LeakCheckFinding[]; quotaRemaining?: number }> = ({ findings, quotaRemaining }) => {
+  const [open, setOpen] = useState(true);
+  const count = findings.length;
+  const domainBreaches = findings.filter(f => f.type === 'domain_breach');
+  const emailBreaches = findings.filter(f => f.type === 'email_breach');
+  const keywordMentions = findings.filter(f => f.type === 'keyword_mention');
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card className="border-border bg-card">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer pb-3 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Unlock className="w-4 h-4 text-yellow-400" />
+                🔍 LeakCheck Pro Intelligence
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {count > 0 ? (
+                  <Badge variant="outline" className="text-red-400 border-red-400/30 bg-red-400/10 font-mono text-[10px]">
+                    {count} found
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 bg-emerald-400/10 font-mono text-[10px]">
+                    clean
+                  </Badge>
+                )}
+                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+              </div>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0 space-y-4">
+            {count === 0 ? (
+              <div className="flex items-center gap-2 text-emerald-400 font-mono text-sm py-6 justify-center">
+                <Check className="w-4 h-4" />
+                No credential leaks detected
+              </div>
+            ) : (
+              <>
+                <LeakCheckGroup title="Domain Breaches" findings={domainBreaches} />
+                <LeakCheckGroup title="Email Breaches" findings={emailBreaches} />
+                <LeakCheckGroup title="Keyword Mentions" findings={keywordMentions} />
+              </>
+            )}
+            {quotaRemaining !== undefined && (
+              <p className="text-[10px] font-mono text-muted-foreground text-right">API quota remaining: {quotaRemaining} queries</p>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+};
+
 /* ── Cavalier Infostealer Section ─────────────────── */
 interface CavalierFinding {
   type?: string;
@@ -354,10 +484,20 @@ const DarkWebMonitor: React.FC = () => {
   const cavalierFindings = ((currentScan?.darkweb_results as unknown as Record<string, { findings?: CavalierFinding[] }>)?.cavalier?.findings ?? []) as CavalierFinding[];
   const cavalierCount = cavalierFindings.length;
 
-  // Augmented totals
-  const augmentedTotal = (summary?.total_findings ?? 0) + cavalierCount;
-  const augmentedCritical = (summary?.critical ?? 0) + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'CRITICAL').length;
-  const augmentedHigh = (summary?.high ?? 0) + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'HIGH').length;
+  // LeakCheck findings
+  const leakcheckSource = (currentScan?.darkweb_results as unknown as Record<string, { findings?: LeakCheckFinding[]; quota_remaining?: number }>)?.leakcheck;
+  const leakcheckFindings = (leakcheckSource?.findings ?? []) as LeakCheckFinding[];
+  const leakcheckQuota = leakcheckSource?.quota_remaining;
+  const leakcheckCount = leakcheckFindings.length;
+
+  // Augmented totals (cavalier + leakcheck)
+  const augmentedTotal = (summary?.total_findings ?? 0) + cavalierCount + leakcheckCount;
+  const augmentedCritical = (summary?.critical ?? 0)
+    + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'CRITICAL').length
+    + leakcheckFindings.filter(f => f.severity?.toUpperCase() === 'CRITICAL').length;
+  const augmentedHigh = (summary?.high ?? 0)
+    + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'HIGH').length
+    + leakcheckFindings.filter(f => f.severity?.toUpperCase() === 'HIGH').length;
 
   return (
     <div className="space-y-6">
@@ -545,10 +685,14 @@ const DarkWebMonitor: React.FC = () => {
                   <CardContent className="pt-4">
                     {sourceConfig.map(({ key }) => (
                       <TabsContent key={key} value={key} className="mt-0">
-                        <FindingsTable
-                          sourceKey={key}
-                          findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []}
-                        />
+                        {key === 'leakcheck' ? (
+                          <LeakCheckSection findings={leakcheckFindings} quotaRemaining={leakcheckQuota} />
+                        ) : (
+                          <FindingsTable
+                            sourceKey={key}
+                            findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []}
+                          />
+                        )}
                       </TabsContent>
                     ))}
                   </CardContent>
