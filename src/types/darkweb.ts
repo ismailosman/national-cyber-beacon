@@ -20,6 +20,10 @@ export interface DarkWebResults {
   ahmia: DarkWebSourceResult;
   intelx: DarkWebSourceResult;
   github: DarkWebSourceResult;
+  pwned_passwords?: DarkWebSourceResult;
+  breach_directory?: DarkWebSourceResult;
+  scylla?: DarkWebSourceResult;
+  leakcheck?: DarkWebSourceResult;
 }
 
 export interface DarkWebSummary {
