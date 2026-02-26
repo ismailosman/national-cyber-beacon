@@ -118,7 +118,7 @@ const Navbar: React.FC = () => {
 
           <li>
             <Link
-              to="/cyber-map"
+              to="/threat-map"
               className="flex items-center gap-1.5 text-sm font-bold text-[#FF4D2E] hover:opacity-80 transition-opacity"
             >
               <Zap className="w-4 h-4" />
@@ -189,7 +189,7 @@ const Navbar: React.FC = () => {
 
             <li>
               <Link
-                to="/cyber-map"
+                to="/threat-map"
                 onClick={() => setMobileOpen(false)}
                 className="flex items-center gap-1.5 text-sm font-bold text-[#FF4D2E]"
               >

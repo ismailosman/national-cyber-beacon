@@ -24,7 +24,6 @@ import DdosProtection from "@/pages/security/DdosProtection";
 import BotProtection from "@/pages/security/BotProtection";
 import IdentityAccess from "@/pages/security/IdentityAccess";
 
-import CyberMap from "@/pages/CyberMap";
 import Dashboard from "@/pages/Dashboard";
 import Organizations from "@/pages/Organizations";
 import OrgDetail from "@/pages/OrgDetail";
@@ -120,7 +119,6 @@ const App = () => (
               <Route path="/security/ddos-protection" element={<DdosProtection />} />
               <Route path="/security/bot-protection" element={<BotProtection />} />
               <Route path="/security/identity-access" element={<IdentityAccess />} />
-              <Route path="/cyber-map" element={<TurnstileGate sessionKey="turnstile_cybermap"><CyberMap /></TurnstileGate>} />
               <Route path="/threat-map" element={<TurnstileGate sessionKey="turnstile_threatmap"><ThreatMapStandalone /></TurnstileGate>} />
               <Route path="/scan/:id" element={<ScanReport />} />
               

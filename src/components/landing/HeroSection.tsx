@@ -44,7 +44,7 @@ const HeroSection: React.FC = () => (
           Secure Your Business
         </Link>
         <Link
-          to="/cyber-map"
+          to="/threat-map"
           className="inline-flex items-center px-8 py-3.5 rounded-full text-sm font-bold text-white bg-[#FF4D2E] hover:bg-[#e6432a] transition-colors shadow-lg shadow-[#FF4D2E]/25"
         >
           View Live Threats
