@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Eye, Search, Shield, AlertTriangle, Activity, Clock, Loader2, Send, RefreshCw, ExternalLink, Github, Globe, Database, Key, FileText, Skull } from 'lucide-react';
+import { Eye, Search, Shield, AlertTriangle, Activity, Clock, Loader2, Send, RefreshCw, Globe, Database, Key, FileText, Skull, Download, Mail, Lock, ShieldAlert, ServerCrash, Unlock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { startDarkWebScan, getDarkWebScan, listDarkWebScans, pollDarkWebScan } from '@/services/darkwebApi';
 import type { DarkWebScan, DarkWebScanListItem, DarkWebFinding } from '@/types/darkweb';
 import { format } from 'date-fns';
+import { supabase } from '@/integrations/supabase/client';
 
 const severityColor = (s: string) => {
   switch (s) {
@@ -27,10 +28,17 @@ const sourceConfig = [
   { key: 'pastes', label: 'Paste Sites', icon: FileText },
   { key: 'ahmia', label: 'Dark Web', icon: Globe },
   { key: 'intelx', label: 'Intel Database', icon: Database },
-  { key: 'github', label: 'GitHub', icon: Github },
+  { key: 'github', label: 'GitHub', icon: Search },
+  { key: 'pwned_passwords', label: 'Pwned Passwords', icon: Lock },
+  { key: 'breach_directory', label: 'Breach Directory', icon: ShieldAlert },
+  { key: 'scylla', label: 'Scylla DB', icon: ServerCrash },
+  { key: 'leakcheck', label: 'LeakCheck', icon: Unlock },
 ] as const;
 
-const FindingsTable: React.FC<{ findings: DarkWebFinding[] }> = ({ findings }) => {
+// Fields to mask in findings display
+const MASKED_FIELDS = new Set(['password', 'hash', 'password_hash']);
+
+const FindingsTable: React.FC<{ findings: DarkWebFinding[]; sourceKey: string }> = ({ findings, sourceKey }) => {
   if (!findings || findings.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground font-mono text-sm">
@@ -39,7 +47,6 @@ const FindingsTable: React.FC<{ findings: DarkWebFinding[] }> = ({ findings }) =
     );
   }
 
-  // Get all unique keys from findings
   const keys = Array.from(new Set(findings.flatMap(f => Object.keys(f)))).slice(0, 6);
 
   return (
@@ -57,7 +64,7 @@ const FindingsTable: React.FC<{ findings: DarkWebFinding[] }> = ({ findings }) =
             <TableRow key={i} className="border-border hover:bg-muted/30">
               {keys.map(k => (
                 <TableCell key={k} className="font-mono text-xs max-w-[300px] truncate">
-                  {typeof f[k] === 'object' ? JSON.stringify(f[k]) : String(f[k] ?? '—')}
+                  {MASKED_FIELDS.has(k) ? '••••••••' : typeof f[k] === 'object' ? JSON.stringify(f[k]) : String(f[k] ?? '—')}
                 </TableCell>
               ))}
             </TableRow>
@@ -76,6 +83,7 @@ const DarkWebMonitor: React.FC = () => {
   const [currentScan, setCurrentScan] = useState<DarkWebScan | null>(null);
   const [scanHistory, setScanHistory] = useState<DarkWebScanListItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const stopPollRef = useRef<(() => void) | null>(null);
 
   const fetchHistory = useCallback(async () => {
@@ -141,7 +149,45 @@ const DarkWebMonitor: React.FC = () => {
     }
   };
 
+  const handleExport = async (downloadOnly: boolean) => {
+    if (!currentScan) return;
+    setExporting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-darkweb-report', {
+        body: { scan: currentScan },
+      });
+
+      if (error) throw error;
+      if (!data?.success && data?.error) throw new Error(data.error);
+
+      if (data?.pdf) {
+        // Decode and download
+        const byteChars = atob(data.pdf);
+        const byteArray = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteArray[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const dom = currentScan.domain || currentScan.target || 'scan';
+        a.download = `DarkWeb-Report-${dom}-${new Date().toISOString().split('T')[0]}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      toast.success(downloadOnly ? 'PDF downloaded' : 'Report sent and downloaded');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Export failed';
+      toast.error(msg);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const summary = currentScan?.darkweb_summary;
+  const isDone = currentScan?.darkweb_status === 'done';
 
   return (
     <div className="space-y-6">
@@ -156,9 +202,35 @@ const DarkWebMonitor: React.FC = () => {
             <p className="text-sm text-muted-foreground">Scan for exposed data across the dark web, breaches, and code repositories</p>
           </div>
         </div>
-        <Badge variant="outline" className={scanning ? 'text-yellow-400 border-yellow-400/30 animate-pulse' : 'text-emerald-400 border-emerald-400/30'}>
-          {scanning ? 'SCANNING' : 'READY'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {isDone && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport(true)}
+                disabled={exporting}
+                className="font-mono text-xs"
+              >
+                {exporting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Download className="w-3 h-3 mr-1" />}
+                PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport(false)}
+                disabled={exporting}
+                className="font-mono text-xs"
+              >
+                {exporting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Mail className="w-3 h-3 mr-1" />}
+                Email
+              </Button>
+            </>
+          )}
+          <Badge variant="outline" className={scanning ? 'text-yellow-400 border-yellow-400/30 animate-pulse' : 'text-emerald-400 border-emerald-400/30'}>
+            {scanning ? 'SCANNING' : 'READY'}
+          </Badge>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -175,39 +247,17 @@ const DarkWebMonitor: React.FC = () => {
             <CardContent className="space-y-3">
               <div>
                 <Label className="text-xs font-mono text-muted-foreground">Domain</Label>
-                <Input
-                  placeholder="example.com"
-                  value={domain}
-                  onChange={e => setDomain(e.target.value)}
-                  className="font-mono text-sm mt-1"
-                  disabled={scanning}
-                />
+                <Input placeholder="example.com" value={domain} onChange={e => setDomain(e.target.value)} className="font-mono text-sm mt-1" disabled={scanning} />
               </div>
               <div>
                 <Label className="text-xs font-mono text-muted-foreground">Emails (comma-separated)</Label>
-                <Input
-                  placeholder="admin@example.com, info@example.com"
-                  value={emails}
-                  onChange={e => setEmails(e.target.value)}
-                  className="font-mono text-sm mt-1"
-                  disabled={scanning}
-                />
+                <Input placeholder="admin@example.com, info@example.com" value={emails} onChange={e => setEmails(e.target.value)} className="font-mono text-sm mt-1" disabled={scanning} />
               </div>
               <div>
                 <Label className="text-xs font-mono text-muted-foreground">Keywords (comma-separated)</Label>
-                <Input
-                  placeholder="company name, brand"
-                  value={keywords}
-                  onChange={e => setKeywords(e.target.value)}
-                  className="font-mono text-sm mt-1"
-                  disabled={scanning}
-                />
+                <Input placeholder="company name, brand" value={keywords} onChange={e => setKeywords(e.target.value)} className="font-mono text-sm mt-1" disabled={scanning} />
               </div>
-              <Button
-                onClick={handleStartScan}
-                disabled={scanning || !domain.trim()}
-                className="w-full font-mono"
-              >
+              <Button onClick={handleStartScan} disabled={scanning || !domain.trim()} className="w-full font-mono">
                 {scanning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
                 {scanning ? 'Scanning…' : 'Start Scan'}
               </Button>
@@ -264,7 +314,6 @@ const DarkWebMonitor: React.FC = () => {
 
         {/* Right Column: Results */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Live Phase */}
           {scanning && currentScan && (
             <Card className="border-yellow-400/20 bg-yellow-400/5">
               <CardContent className="py-3 px-4 flex items-center gap-3">
@@ -274,7 +323,6 @@ const DarkWebMonitor: React.FC = () => {
             </Card>
           )}
 
-          {/* Summary Cards */}
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
@@ -296,7 +344,6 @@ const DarkWebMonitor: React.FC = () => {
             </div>
           )}
 
-          {/* Tabbed Results */}
           {currentScan?.darkweb_results ? (
             <Card className="border-border bg-card">
               <Tabs defaultValue="ransomware">
@@ -319,7 +366,10 @@ const DarkWebMonitor: React.FC = () => {
                 <CardContent className="pt-4">
                   {sourceConfig.map(({ key }) => (
                     <TabsContent key={key} value={key} className="mt-0">
-                      <FindingsTable findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []} />
+                      <FindingsTable
+                        sourceKey={key}
+                        findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []}
+                      />
                     </TabsContent>
                   ))}
                 </CardContent>
