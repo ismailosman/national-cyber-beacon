@@ -49,6 +49,144 @@ const sourceConfigs: SourceConfig[] = [
   { key: "leakcheck", label: "LeakCheck" },
 ];
 
+const sevOrder: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2 };
+function sortBySeverity(a: any, b: any) {
+  return (sevOrder[a.severity] ?? 3) - (sevOrder[b.severity] ?? 3);
+}
+
+function sevColor(sev: string): string {
+  if (sev === "CRITICAL") return "0.8 0.15 0.15";
+  if (sev === "HIGH") return "0.9 0.45 0.1";
+  return "0.85 0.7 0.1";
+}
+
+function sevBgColor(sev: string): string {
+  if (sev === "CRITICAL") return "0.95 0.9 0.9";
+  if (sev === "HIGH") return "0.97 0.93 0.88";
+  return "0.97 0.96 0.88";
+}
+
+// ── LeakCheck PDF pages builder ──
+function buildLeakCheckPages(
+  leakcheckFindings: any[],
+  domain: string,
+  hasLogo: boolean,
+  startPageNum: number
+): string[][] {
+  const tx = hasLogo ? 72 : 30;
+  const groups = [
+    { label: "DOMAIN BREACHES", type: "domain_breach" },
+    { label: "EMAIL BREACHES", type: "email_breach" },
+    { label: "KEYWORD MENTIONS", type: "keyword_mention" },
+  ];
+
+  const pages: string[][] = [];
+  let p: string[] = [];
+  let y = 0;
+  let pageNum = startPageNum;
+
+  function newPage() {
+    if (p.length > 0) {
+      // close previous page footer
+      p.push(`0.08 0.12 0.2 rg`, `0 0 595 40 re f`);
+      p.push(`0.8 0.15 0.15 rg`, `0 40 595 2 re f`);
+      const now = new Date().toISOString().split("T")[0];
+      p.push(`BT /F1 7 Tf 0.7 0.75 0.8 rg 30 18 Td (Somalia Cyber Defence Dark Web Report | ${now} | CONFIDENTIAL | Page ${pageNum}) Tj ET`);
+      pages.push(p);
+      pageNum++;
+    }
+    p = [];
+    p.push(`1 1 1 rg`, `0 0 595 842 re f`);
+    p.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
+    p.push(`0.8 0.15 0.15 rg`, `0 788 595 3 re f`);
+    if (hasLogo) p.push(`q 36 0 0 36 30 798 cm /Logo Do Q`);
+    p.push(`BT /F2 14 Tf 1 1 1 rg ${tx} 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
+    p.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 798 Td (LeakCheck Pro Intelligence) Tj ET`);
+    p.push(`BT /F1 8 Tf 0.8 0.85 0.9 rg 400 810 Td (${s(domain, 30)}) Tj ET`);
+    y = 760;
+  }
+
+  newPage();
+
+  for (const group of groups) {
+    const items = leakcheckFindings
+      .filter((f: any) => f.type === group.type)
+      .sort(sortBySeverity);
+
+    // Need space for group header
+    if (y < 120) newPage();
+
+    // Group header
+    p.push(`0.08 0.12 0.2 rg`, `30 ${y} 535 20 re f`);
+    p.push(`BT /F2 9 Tf 1 1 1 rg 40 ${y + 5} Td (${group.label}  -  ${items.length} found) Tj ET`);
+    y -= 28;
+
+    if (items.length === 0) {
+      p.push(`BT /F1 8 Tf 0.2 0.7 0.3 rg 40 ${y + 4} Td (No findings in this category) Tj ET`);
+      y -= 24;
+      continue;
+    }
+
+    for (const f of items) {
+      // Each finding card needs ~60px
+      if (y < 100) newPage();
+
+      const sc = sevColor(f.severity || "MEDIUM");
+      const bg = sevBgColor(f.severity || "MEDIUM");
+
+      // Left border + bg
+      p.push(`${sc} rg`, `30 ${y - 42} 4 50 re f`);
+      p.push(`${bg} rg`, `34 ${y - 42} 531 50 re f`);
+
+      // Severity badge
+      p.push(`${sc} rg`, `40 ${y - 2} 50 12 re f`);
+      p.push(`BT /F2 7 Tf 1 1 1 rg 44 ${y + 1} Td (${s(f.severity || "MEDIUM", 10)}) Tj ET`);
+
+      // Breach name + date
+      p.push(`BT /F2 9 Tf 0.15 0.15 0.2 rg 96 ${y + 1} Td (${s(f.breach_name, 35)}) Tj ET`);
+      if (f.breach_date) {
+        p.push(`BT /F1 8 Tf 0.5 0.5 0.55 rg 320 ${y + 1} Td (${s(f.breach_date, 12)}) Tj ET`);
+      }
+
+      // Email / Username row
+      let infoY = y - 14;
+      const infoParts: string[] = [];
+      if (f.email) infoParts.push(`Email: ${s(f.email, 35)}`);
+      if (f.username) infoParts.push(`User: ${s(f.username, 20)}`);
+      if (infoParts.length > 0) {
+        p.push(`BT /F1 7 Tf 0.3 0.3 0.4 rg 44 ${infoY} Td (${infoParts.join("   |   ")}) Tj ET`);
+      }
+
+      // Password exposed badge
+      if (f.has_password) {
+        p.push(`0.8 0.15 0.15 rg`, `340 ${infoY - 3} 100 12 re f`);
+        p.push(`BT /F2 7 Tf 1 1 1 rg 346 ${infoY} Td (PASSWORD EXPOSED) Tj ET`);
+      }
+
+      // Fields row
+      infoY -= 14;
+      if (f.fields && Array.isArray(f.fields) && f.fields.length > 0) {
+        const fieldsStr = f.fields.slice(0, 8).join(", ");
+        p.push(`BT /F1 6 Tf 0.4 0.4 0.5 rg 44 ${infoY} Td (Fields: ${s(fieldsStr, 70)}) Tj ET`);
+      }
+
+      y -= 60;
+    }
+    y -= 8; // gap between groups
+  }
+
+  // Close last page
+  if (p.length > 0) {
+    p.push(`0.08 0.12 0.2 rg`, `0 0 595 40 re f`);
+    p.push(`0.8 0.15 0.15 rg`, `0 40 595 2 re f`);
+    const now = new Date().toISOString().split("T")[0];
+    p.push(`BT /F1 7 Tf 0.7 0.75 0.8 rg 30 18 Td (Somalia Cyber Defence Dark Web Report | ${now} | CONFIDENTIAL | Page ${pageNum}) Tj ET`);
+    pages.push(p);
+  }
+
+  return pages;
+}
+
 function generateDarkWebPDF(data: {
   domain: string;
   scanId: string;
@@ -57,10 +195,34 @@ function generateDarkWebPDF(data: {
   logoData: { width: number; height: number; rgbHex: string } | null;
 }): Uint8Array {
   const { domain, scanId, summary, results, logoData } = data;
-  const crit = summary?.critical || 0;
-  const high = summary?.high || 0;
-  const med = summary?.medium || 0;
-  const total = summary?.total_findings || 0;
+
+  // ── Augment counts with leakcheck + cavalier ──
+  const baseCrit = summary?.critical || 0;
+  const baseHigh = summary?.high || 0;
+  const baseMed = summary?.medium || 0;
+  const baseTotal = summary?.total_findings || 0;
+
+  const leakcheckFindings: any[] = results?.leakcheck?.findings || [];
+  const cavalierFindings: any[] = results?.cavalier?.findings || [];
+
+  let lcCrit = 0, lcHigh = 0, lcMed = 0;
+  for (const f of leakcheckFindings) {
+    if (f.severity === "CRITICAL") lcCrit++;
+    else if (f.severity === "HIGH") lcHigh++;
+    else lcMed++;
+  }
+  let cavCrit = 0, cavHigh = 0, cavMed = 0;
+  for (const f of cavalierFindings) {
+    if (f.severity === "CRITICAL") cavCrit++;
+    else if (f.severity === "HIGH") cavHigh++;
+    else cavMed++;
+  }
+
+  const crit = baseCrit + lcCrit + cavCrit;
+  const high = baseHigh + lcHigh + cavHigh;
+  const med = baseMed + lcMed + cavMed;
+  const total = baseTotal + leakcheckFindings.length + cavalierFindings.length;
+
   const score = Math.max(0, 100 - (crit * 25 + high * 10 + med * 3));
   const grade = getGrade(score);
   const risk = getRiskLabel(score);
@@ -74,15 +236,9 @@ function generateDarkWebPDF(data: {
   // ── Page 1: Executive Summary ──
   const p1: string[] = [];
   p1.push(`1 1 1 rg`, `0 0 595 842 re f`);
-
-  // Header bar
   p1.push(`0.08 0.12 0.2 rg`, `0 790 595 52 re f`);
   p1.push(`0.8 0.15 0.15 rg`, `0 788 595 3 re f`);
-
-  if (hasLogo) {
-    p1.push(`q 36 0 0 36 30 798 cm /Logo Do Q`);
-  }
-
+  if (hasLogo) p1.push(`q 36 0 0 36 30 798 cm /Logo Do Q`);
   p1.push(`BT /F2 16 Tf 1 1 1 rg ${tx} 810 Td (SOMALIA CYBER DEFENCE) Tj ET`);
   p1.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 798 Td (National Cybersecurity Authority) Tj ET`);
   p1.push(`BT /F2 11 Tf 1 1 1 rg 400 810 Td (Dark Web Report) Tj ET`);
@@ -181,7 +337,6 @@ function generateDarkWebPDF(data: {
       p.push(`BT /F1 9 Tf 0.8 0.85 0.9 rg ${tx} 798 Td (Detailed Findings) Tj ET`);
       p.push(`BT /F1 8 Tf 0.8 0.85 0.9 rg 400 810 Td (${s(domain, 30)}) Tj ET`);
 
-      // Table header
       p.push(`0.08 0.12 0.2 rg`, `30 760 535 18 re f`);
       p.push(`BT /F2 7 Tf 1 1 1 rg 35 764 Td (SOURCE) Tj ET`);
       p.push(`BT /F2 7 Tf 1 1 1 rg 140 764 Td (DETAIL) Tj ET`);
@@ -199,16 +354,12 @@ function generateDarkWebPDF(data: {
         }
 
         p.push(`BT /F2 7 Tf 0.15 0.15 0.2 rg 35 ${fy} Td (${s(source, 18)}) Tj ET`);
-
-        // Build detail string from finding, masking passwords
         const detail = buildFindingDetail(f);
         p.push(`BT /F1 6 Tf 0.25 0.25 0.3 rg 140 ${fy} Td (${s(detail, 45)}) Tj ET`);
-
         const extra = buildFindingExtra(f);
         p.push(`BT /F1 6 Tf 0.4 0.4 0.5 rg 420 ${fy} Td (${s(extra, 28)}) Tj ET`);
 
         fy -= 12;
-        // Second line
         const detail2 = s(detail.length > 45 ? detail.substring(45) : "", 70);
         if (detail2) {
           p.push(`BT /F1 6 Tf 0.4 0.4 0.5 rg 140 ${fy} Td (${detail2}) Tj ET`);
@@ -220,6 +371,14 @@ function generateDarkWebPDF(data: {
       p.push(`0.8 0.15 0.15 rg`, `0 40 595 2 re f`);
       p.push(`BT /F1 7 Tf 0.7 0.75 0.8 rg 30 18 Td (Somalia Cyber Defence Dark Web Report | ${now} | CONFIDENTIAL | Page ${pageIdx + 2}) Tj ET`);
       pages.push(p);
+    }
+  }
+
+  // ── LeakCheck detail pages ──
+  if (leakcheckFindings.length > 0) {
+    const lcPages = buildLeakCheckPages(leakcheckFindings, domain, hasLogo, pages.length + 1);
+    for (const lcp of lcPages) {
+      pages.push(lcp);
     }
   }
 
@@ -270,7 +429,6 @@ function generateDarkWebPDF(data: {
 }
 
 function buildFindingDetail(f: any): string {
-  // Mask passwords
   const parts: string[] = [];
   if (f.email) parts.push(`Email: ${f.email}`);
   if (f.username) parts.push(`User: ${f.username}`);
@@ -280,7 +438,6 @@ function buildFindingDetail(f: any): string {
   if (f.url) parts.push(f.url);
   if (f.breach_count !== undefined) parts.push(`Breaches: ${f.breach_count}`);
   if (parts.length === 0) {
-    // Fallback: stringify first few keys
     const keys = Object.keys(f).slice(0, 3);
     for (const k of keys) {
       if (k === "password" || k === "hash") continue;
@@ -324,9 +481,33 @@ serve(async (req) => {
     const scanId = scan.scan_id || "unknown";
     const summary = scan.darkweb_summary;
     const results = scan.darkweb_results;
-    const crit = summary?.critical || 0;
-    const high = summary?.high || 0;
-    const med = summary?.medium || 0;
+
+    // ── Augment counts ──
+    const baseCrit = summary?.critical || 0;
+    const baseHigh = summary?.high || 0;
+    const baseMed = summary?.medium || 0;
+    const baseTotal = summary?.total_findings || 0;
+
+    const leakcheckFindings: any[] = results?.leakcheck?.findings || [];
+    const cavalierFindings: any[] = results?.cavalier?.findings || [];
+
+    let lcCrit = 0, lcHigh = 0, lcMed = 0;
+    for (const f of leakcheckFindings) {
+      if (f.severity === "CRITICAL") lcCrit++;
+      else if (f.severity === "HIGH") lcHigh++;
+      else lcMed++;
+    }
+    let cavCrit = 0, cavHigh = 0;
+    for (const f of cavalierFindings) {
+      if (f.severity === "CRITICAL") cavCrit++;
+      else if (f.severity === "HIGH") cavHigh++;
+    }
+
+    const crit = baseCrit + lcCrit + cavCrit;
+    const high = baseHigh + lcHigh + cavHigh;
+    const med = baseMed + lcMed;
+    const total = baseTotal + leakcheckFindings.length + cavalierFindings.length;
+
     const score = Math.max(0, 100 - (crit * 25 + high * 10 + med * 3));
     const grade = getGrade(score);
     const scanDate = new Date().toISOString().split("T")[0];
@@ -341,6 +522,32 @@ serve(async (req) => {
 
     const scoreColor = score >= 75 ? "#22c55e" : score >= 50 ? "#eab308" : "#dc2626";
     const logoUrl = "https://awdysfgjmhnqwsoyhbah.supabase.co/storage/v1/object/public/media/logo.png";
+
+    // LeakCheck breakdown for email
+    const lcDomain = leakcheckFindings.filter((f: any) => f.type === "domain_breach").length;
+    const lcEmail = leakcheckFindings.filter((f: any) => f.type === "email_breach").length;
+    const lcKeyword = leakcheckFindings.filter((f: any) => f.type === "keyword_mention").length;
+    const lcTotal = leakcheckFindings.length;
+
+    const leakcheckEmailHtml = lcTotal > 0 ? `
+    <div style="margin-top:20px;padding:16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px">
+      <div style="font-size:13px;font-weight:bold;color:#991b1b;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px">LeakCheck Pro Intelligence — ${lcTotal} Findings</div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td style="padding:6px 10px;font-size:12px;color:#0f172a;border-bottom:1px solid #fecaca"><strong>Domain Breaches</strong></td>
+          <td style="padding:6px 10px;font-size:14px;font-weight:bold;color:#dc2626;text-align:right;border-bottom:1px solid #fecaca">${lcDomain}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;font-size:12px;color:#0f172a;border-bottom:1px solid #fecaca"><strong>Email Breaches</strong></td>
+          <td style="padding:6px 10px;font-size:14px;font-weight:bold;color:#f97316;text-align:right;border-bottom:1px solid #fecaca">${lcEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;font-size:12px;color:#0f172a"><strong>Keyword Mentions</strong></td>
+          <td style="padding:6px 10px;font-size:14px;font-weight:bold;color:#eab308;text-align:right">${lcKeyword}</td>
+        </tr>
+      </table>
+      <div style="font-size:11px;color:#64748b;margin-top:8px">Critical: ${lcCrit} | High: ${lcHigh} | Medium: ${lcMed}</div>
+    </div>` : "";
 
     const html = `
 <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#ffffff;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
@@ -395,7 +602,9 @@ serve(async (req) => {
       </tr>
     </table>
 
-    <p style="color:#475569;font-size:13px;line-height:1.6;margin:0">The full dark web exposure report with detailed findings is attached as a PDF document.</p>
+    ${leakcheckEmailHtml}
+
+    <p style="color:#475569;font-size:13px;line-height:1.6;margin:16px 0 0">The full dark web exposure report with detailed findings is attached as a PDF document.</p>
   </div>
   <div style="padding:20px 30px;border-top:1px solid #e2e8f0;background:#ffffff;">
     <p style="color:#0f172a;font-size:14px;font-weight:bold;margin:0;">Cyber Defense Inc</p>
