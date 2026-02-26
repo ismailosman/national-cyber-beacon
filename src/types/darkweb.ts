@@ -31,12 +31,13 @@ export interface DarkWebSummary {
 
 export interface DarkWebScan {
   scan_id: string;
-  domain: string;
+  domain?: string;
+  target?: string;
   darkweb_status: 'queued' | 'running' | 'done' | 'error';
-  darkweb_phase: string;
+  darkweb_phase?: string;
   darkweb_summary: DarkWebSummary | null;
   darkweb_results: DarkWebResults | null;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface DarkWebScanListItem {

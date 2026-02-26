@@ -1,65 +1,38 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { DarkWebScan, DarkWebScanListItem } from '@/types/darkweb';
 
-const darkwebPathCandidates = (path: string): string[] => {
-  if (path.startsWith('/darkweb/')) {
-    // Upstream darkweb routes are served behind /api/* on the scanner backend.
-    return [`/api${path}`, path];
-  }
-
-  return [path];
-};
-
-const isProxyRouteNotFound = (status: number, responseText: string) => {
-  return status === 502 && responseText.includes('"status":404');
-};
-
 const proxyFetch = async (path: string, method = 'GET', body?: unknown) => {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
   const session = (await supabase.auth.getSession()).data.session;
   const token = session?.access_token ?? anonKey;
-  const candidates = darkwebPathCandidates(path);
 
-  let lastError = 'Request failed';
+  const url = `${supabaseUrl}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidatePath = candidates[i];
-    const url = `${supabaseUrl}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(candidatePath)}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        apikey: anonKey,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+  const text = await res.text();
 
-    const text = await res.text();
-
-    if (!res.ok) {
-      const canFallback = i < candidates.length - 1;
-      if (canFallback && isProxyRouteNotFound(res.status, text)) {
-        lastError = `Route not found for ${candidatePath}`;
-        continue;
-      }
-
-      throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
-    }
-
-    if (!text) return null;
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error('API returned invalid JSON');
-    }
+  if (!res.ok) {
+    throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
   }
 
-  throw new Error(lastError);
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('API returned invalid JSON');
+  }
 };
 
 export const startDarkWebScan = async (
@@ -76,7 +49,12 @@ export const getDarkWebScan = async (scanId: string): Promise<DarkWebScan> => {
 
 export const listDarkWebScans = async (): Promise<DarkWebScanListItem[]> => {
   const data = await proxyFetch('/darkweb/scans');
-  return Array.isArray(data) ? data : data?.scans ?? [];
+  const scans = Array.isArray(data) ? data : data?.scans ?? [];
+  return scans.map((s: Record<string, unknown>) => ({
+    ...s,
+    domain: (s.domain ?? s.target ?? '') as string,
+    darkweb_status: (s.darkweb_status ?? s.status ?? 'unknown') as string,
+  })) as DarkWebScanListItem[];
 };
 
 export const pollDarkWebScan = (
