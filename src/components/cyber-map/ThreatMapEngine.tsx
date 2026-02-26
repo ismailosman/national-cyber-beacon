@@ -38,6 +38,7 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
   const [mapToken, setMapToken]   = useState<string | null>(null);
   const [mapError, setMapError]   = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   const mapContainer   = useRef<HTMLDivElement>(null);
   const mapRef         = useRef<any>(null);
@@ -367,7 +368,7 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; setMapLoaded(false); }
     };
-  }, [mapToken]);
+  }, [mapToken, retryCount]);
 
   // ── Update map sources ────────────────────────────────────────────────
   const updateMapSources = useCallback((nowMs?: number) => {
@@ -451,7 +452,7 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
       {mapError && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90 gap-4">
           <p className="text-sm text-slate-400 font-mono">{mapError}</p>
-          <button onClick={() => { setMapError(null); if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } setMapLoaded(false); }}
+          <button onClick={() => { setMapError(null); if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } setMapLoaded(false); setRetryCount(c => c + 1); }}
             className="px-4 py-2 text-xs font-mono rounded border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 transition-colors">Retry</button>
         </div>
       )}
