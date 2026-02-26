@@ -1,26 +1,17 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { DarkWebScan, DarkWebScanListItem } from '@/types/darkweb';
 
-const invoke = async (path: string, method = 'GET', body?: unknown) => {
-  const params = new URLSearchParams({ path });
-  const url = `security-scanner-proxy?${params}`;
-
-  const options: Record<string, unknown> = { method };
-  if (body) {
-    options.body = JSON.stringify(body);
-    options.headers = { 'Content-Type': 'application/json' };
+const darkwebPathCandidates = (path: string): string[] => {
+  if (path.startsWith('/darkweb/')) {
+    // Upstream darkweb routes are served behind /api/* on the scanner backend.
+    return [`/api${path}`, path];
   }
 
-  const { data, error } = await supabase.functions.invoke(url.split('?')[0], {
-    body: method === 'GET' ? undefined : body,
-    method: method as 'GET' | 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return [path];
+};
 
-  // For GET requests, we need to pass the path via query params
-  // The edge function reads `path` from URL search params
-  if (error) throw new Error(error.message ?? 'Request failed');
-  return data;
+const isProxyRouteNotFound = (status: number, responseText: string) => {
+  return status === 502 && responseText.includes('"status":404');
 };
 
 const proxyFetch = async (path: string, method = 'GET', body?: unknown) => {
@@ -29,25 +20,46 @@ const proxyFetch = async (path: string, method = 'GET', body?: unknown) => {
 
   const session = (await supabase.auth.getSession()).data.session;
   const token = session?.access_token ?? anonKey;
+  const candidates = darkwebPathCandidates(path);
 
-  const url = `${supabaseUrl}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+  let lastError = 'Request failed';
 
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      apikey: anonKey,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidatePath = candidates[i];
+    const url = `${supabaseUrl}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(candidatePath)}`;
 
-  if (!res.ok) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        apikey: anonKey,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
     const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
+
+    if (!res.ok) {
+      const canFallback = i < candidates.length - 1;
+      if (canFallback && isProxyRouteNotFound(res.status, text)) {
+        lastError = `Route not found for ${candidatePath}`;
+        continue;
+      }
+
+      throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
+    }
+
+    if (!text) return null;
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error('API returned invalid JSON');
+    }
   }
 
-  return res.json();
+  throw new Error(lastError);
 };
 
 export const startDarkWebScan = async (
