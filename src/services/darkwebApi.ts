@@ -38,9 +38,10 @@ const proxyFetch = async (path: string, method = 'GET', body?: unknown) => {
 export const startDarkWebScan = async (
   domain: string,
   emails: string[],
-  keywords: string[]
+  keywords: string[],
+  usernames: string[] = []
 ): Promise<{ scan_id: string }> => {
-  return proxyFetch('/darkweb/scan', 'POST', { domain, emails, keywords });
+  return proxyFetch('/darkweb/scan', 'POST', { domain, emails, keywords, usernames });
 };
 
 export const getDarkWebScan = async (scanId: string): Promise<DarkWebScan> => {
