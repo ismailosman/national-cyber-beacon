@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Eye, Search, Shield, AlertTriangle, Activity, Clock, Loader2, Send, RefreshCw, Globe, Database, Key, FileText, Skull, Download, Mail, Lock, ShieldAlert, ServerCrash, Unlock } from 'lucide-react';
+import { Eye, Search, Shield, AlertTriangle, Activity, Clock, Loader2, Send, RefreshCw, Globe, Database, Key, FileText, Skull, Download, Mail, Lock, ShieldAlert, ServerCrash, Unlock, ChevronDown, Bug, X, User, Check } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { startDarkWebScan, getDarkWebScan, listDarkWebScans, pollDarkWebScan } from '@/services/darkwebApi';
 import type { DarkWebScan, DarkWebScanListItem, DarkWebFinding } from '@/types/darkweb';
@@ -75,10 +76,171 @@ const FindingsTable: React.FC<{ findings: DarkWebFinding[]; sourceKey: string }>
   );
 };
 
+/* ── Chip Input ────────────────────────────────────── */
+const ChipInput: React.FC<{
+  label: string;
+  placeholder: string;
+  chips: string[];
+  onChange: (chips: string[]) => void;
+  disabled?: boolean;
+  icon?: React.ReactNode;
+}> = ({ label, placeholder, chips, onChange, disabled, icon }) => {
+  const [input, setInput] = useState('');
+
+  const addChip = (raw: string) => {
+    const v = raw.trim();
+    if (v && !chips.includes(v)) onChange([...chips, v]);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addChip(input);
+      setInput('');
+    } else if (e.key === 'Backspace' && !input && chips.length) {
+      onChange(chips.slice(0, -1));
+    }
+  };
+
+  return (
+    <div>
+      <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+        {icon}
+        {label}
+      </Label>
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1 mb-1">
+          {chips.map(c => (
+            <Badge key={c} variant="secondary" className="font-mono text-[10px] gap-1 pr-1">
+              {c}
+              <button type="button" onClick={() => onChange(chips.filter(x => x !== c))} className="hover:text-destructive">
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+      <Input
+        placeholder={placeholder}
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => { if (input.trim()) { addChip(input); setInput(''); } }}
+        className="font-mono text-sm mt-1"
+        disabled={disabled}
+      />
+    </div>
+  );
+};
+
+/* ── Cavalier Infostealer Section ─────────────────── */
+interface CavalierFinding {
+  type?: string;
+  stealer?: string;
+  computer_name?: string;
+  os?: string;
+  date_uploaded?: string;
+  email?: string;
+  username?: string;
+  domain?: string;
+  credentials?: { url?: string; password?: string }[];
+  severity?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+const CavalierSection: React.FC<{ findings: CavalierFinding[] }> = ({ findings }) => {
+  const [open, setOpen] = useState(true);
+  const count = findings.length;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card className="border-border bg-card">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer pb-3 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Bug className="w-4 h-4 text-red-400" />
+                🦠 Infostealer Intelligence (Hudson Rock)
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {count > 0 ? (
+                  <Badge variant="outline" className="text-red-400 border-red-400/30 bg-red-400/10 font-mono text-[10px]">
+                    {count} found
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 bg-emerald-400/10 font-mono text-[10px]">
+                    clean
+                  </Badge>
+                )}
+                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+              </div>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0 space-y-3">
+            {count === 0 ? (
+              <div className="flex items-center gap-2 text-emerald-400 font-mono text-sm py-6 justify-center">
+                <Check className="w-4 h-4" />
+                No infostealer infections detected
+              </div>
+            ) : (
+              findings.map((f, i) => {
+                const isCritical = f.severity?.toUpperCase() === 'CRITICAL';
+                const borderClass = isCritical ? 'border-l-red-500' : 'border-l-orange-500';
+                return (
+                  <div key={i} className={`border border-border rounded-lg p-3 space-y-2 border-l-4 ${borderClass} bg-card`}>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        {f.stealer && (
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 font-mono text-[10px]">
+                            {f.stealer} Stealer
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className={isCritical ? 'text-red-400 border-red-400/30' : 'text-orange-400 border-orange-400/30'}>
+                          {f.severity?.toUpperCase() ?? 'HIGH'}
+                        </Badge>
+                      </div>
+                      {f.type && <span className="font-mono text-[10px] text-muted-foreground">{f.type}</span>}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-1 text-xs font-mono text-muted-foreground">
+                      {f.computer_name && <span>Machine: <span className="text-foreground">{f.computer_name}</span></span>}
+                      {f.os && <span>OS: <span className="text-foreground">{f.os}</span></span>}
+                      {f.date_uploaded && <span>Uploaded: <span className="text-foreground">{f.date_uploaded}</span></span>}
+                    </div>
+
+                    {f.message && <p className="text-xs text-muted-foreground font-mono">{f.message}</p>}
+
+                    {f.credentials && f.credentials.length > 0 && (
+                      <div className="mt-1 space-y-1">
+                        <span className="text-[10px] font-mono uppercase text-muted-foreground">Credentials</span>
+                        {f.credentials.map((cred, ci) => (
+                          <div key={ci} className="flex items-center gap-2 text-xs font-mono bg-muted/30 rounded px-2 py-1">
+                            <span className="truncate text-foreground">{cred.url ?? '—'}</span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className="text-muted-foreground">••••••••</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+};
+
 const DarkWebMonitor: React.FC = () => {
   const [domain, setDomain] = useState('');
   const [emails, setEmails] = useState('');
   const [keywords, setKeywords] = useState('');
+  const [usernames, setUsernames] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
   const [currentScan, setCurrentScan] = useState<DarkWebScan | null>(null);
   const [scanHistory, setScanHistory] = useState<DarkWebScanListItem[]>([]);
@@ -109,7 +271,7 @@ const DarkWebMonitor: React.FC = () => {
     try {
       const emailList = emails.split(',').map(e => e.trim()).filter(Boolean);
       const kwList = keywords.split(',').map(k => k.trim()).filter(Boolean);
-      const { scan_id } = await startDarkWebScan(domain.trim(), emailList, kwList);
+      const { scan_id } = await startDarkWebScan(domain.trim(), emailList, kwList, usernames);
       toast.success(`Scan started: ${scan_id.slice(0, 8)}…`);
 
       stopPollRef.current?.();
@@ -161,7 +323,6 @@ const DarkWebMonitor: React.FC = () => {
       if (!data?.success && data?.error) throw new Error(data.error);
 
       if (data?.pdf) {
-        // Decode and download
         const byteChars = atob(data.pdf);
         const byteArray = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) {
@@ -188,6 +349,15 @@ const DarkWebMonitor: React.FC = () => {
 
   const summary = currentScan?.darkweb_summary;
   const isDone = currentScan?.darkweb_status === 'done';
+
+  // Cavalier findings
+  const cavalierFindings = ((currentScan?.darkweb_results as unknown as Record<string, { findings?: CavalierFinding[] }>)?.cavalier?.findings ?? []) as CavalierFinding[];
+  const cavalierCount = cavalierFindings.length;
+
+  // Augmented totals
+  const augmentedTotal = (summary?.total_findings ?? 0) + cavalierCount;
+  const augmentedCritical = (summary?.critical ?? 0) + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'CRITICAL').length;
+  const augmentedHigh = (summary?.high ?? 0) + cavalierFindings.filter(f => f.severity?.toUpperCase() === 'HIGH').length;
 
   return (
     <div className="space-y-6">
@@ -257,6 +427,14 @@ const DarkWebMonitor: React.FC = () => {
                 <Label className="text-xs font-mono text-muted-foreground">Keywords (comma-separated)</Label>
                 <Input placeholder="company name, brand" value={keywords} onChange={e => setKeywords(e.target.value)} className="font-mono text-sm mt-1" disabled={scanning} />
               </div>
+              <ChipInput
+                label="Usernames to check"
+                placeholder="Type a username and press Enter"
+                chips={usernames}
+                onChange={setUsernames}
+                disabled={scanning}
+                icon={<User className="w-3 h-3" />}
+              />
               <Button onClick={handleStartScan} disabled={scanning || !domain.trim()} className="w-full font-mono">
                 {scanning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
                 {scanning ? 'Scanning…' : 'Start Scan'}
@@ -326,9 +504,9 @@ const DarkWebMonitor: React.FC = () => {
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                { label: 'Total', value: summary.total_findings, icon: Activity, color: 'text-foreground' },
-                { label: 'Critical', value: summary.critical, icon: AlertTriangle, color: 'text-red-400' },
-                { label: 'High', value: summary.high, icon: Shield, color: 'text-orange-400' },
+                { label: 'Total', value: augmentedTotal, icon: Activity, color: 'text-foreground' },
+                { label: 'Critical', value: augmentedCritical, icon: AlertTriangle, color: 'text-red-400' },
+                { label: 'High', value: augmentedHigh, icon: Shield, color: 'text-orange-400' },
                 { label: 'Medium', value: summary.medium, icon: Shield, color: 'text-yellow-400' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <Card key={label} className="border-border bg-card">
@@ -345,36 +523,41 @@ const DarkWebMonitor: React.FC = () => {
           )}
 
           {currentScan?.darkweb_results ? (
-            <Card className="border-border bg-card">
-              <Tabs defaultValue="ransomware">
-                <CardHeader className="pb-0">
-                  <TabsList className="bg-muted/50 w-full flex-wrap h-auto gap-1 p-1">
-                    {sourceConfig.map(({ key, label, icon: Icon }) => {
-                      const count = (currentScan.darkweb_results as unknown as Record<string, { findings?: unknown[] }>)?.[key]?.findings?.length ?? 0;
-                      return (
-                        <TabsTrigger key={key} value={key} className="font-mono text-xs gap-1.5 data-[state=active]:bg-background">
-                          <Icon className="w-3 h-3" />
-                          {label}
-                          {count > 0 && (
-                            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive text-[10px]">{count}</span>
-                          )}
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  {sourceConfig.map(({ key }) => (
-                    <TabsContent key={key} value={key} className="mt-0">
-                      <FindingsTable
-                        sourceKey={key}
-                        findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []}
-                      />
-                    </TabsContent>
-                  ))}
-                </CardContent>
-              </Tabs>
-            </Card>
+            <>
+              <Card className="border-border bg-card">
+                <Tabs defaultValue="ransomware">
+                  <CardHeader className="pb-0">
+                    <TabsList className="bg-muted/50 w-full flex-wrap h-auto gap-1 p-1">
+                      {sourceConfig.map(({ key, label, icon: Icon }) => {
+                        const count = (currentScan.darkweb_results as unknown as Record<string, { findings?: unknown[] }>)?.[key]?.findings?.length ?? 0;
+                        return (
+                          <TabsTrigger key={key} value={key} className="font-mono text-xs gap-1.5 data-[state=active]:bg-background">
+                            <Icon className="w-3 h-3" />
+                            {label}
+                            {count > 0 && (
+                              <span className="ml-1 px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive text-[10px]">{count}</span>
+                            )}
+                          </TabsTrigger>
+                        );
+                      })}
+                    </TabsList>
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    {sourceConfig.map(({ key }) => (
+                      <TabsContent key={key} value={key} className="mt-0">
+                        <FindingsTable
+                          sourceKey={key}
+                          findings={(currentScan.darkweb_results as unknown as Record<string, { findings?: DarkWebFinding[] }>)?.[key]?.findings ?? []}
+                        />
+                      </TabsContent>
+                    ))}
+                  </CardContent>
+                </Tabs>
+              </Card>
+
+              {/* Cavalier Infostealer Section */}
+              <CavalierSection findings={cavalierFindings} />
+            </>
           ) : !scanning && !currentScan ? (
             <Card className="border-border bg-card">
               <CardContent className="py-16 text-center">

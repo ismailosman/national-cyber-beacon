@@ -2,6 +2,7 @@ export interface DarkWebScanRequest {
   domain: string;
   emails: string[];
   keywords: string[];
+  usernames: string[];
 }
 
 export interface DarkWebFinding {
@@ -24,6 +25,7 @@ export interface DarkWebResults {
   breach_directory?: DarkWebSourceResult;
   scylla?: DarkWebSourceResult;
   leakcheck?: DarkWebSourceResult;
+  cavalier?: DarkWebSourceResult;
 }
 
 export interface DarkWebSummary {
