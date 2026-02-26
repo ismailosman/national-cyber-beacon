@@ -46,6 +46,7 @@ import SecurityScanner from "@/pages/SecurityScanner";
 import ScanReport from "@/pages/ScanReport";
 import ScanQueuePanel from "@/pages/ScanQueuePanel";
 import DarkWebMonitor from "@/pages/DarkWebMonitor";
+import ThreatMapStandalone from "@/pages/ThreatMapStandalone";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -120,6 +121,7 @@ const App = () => (
               <Route path="/security/bot-protection" element={<BotProtection />} />
               <Route path="/security/identity-access" element={<IdentityAccess />} />
               <Route path="/cyber-map" element={<TurnstileGate sessionKey="turnstile_cybermap"><CyberMap /></TurnstileGate>} />
+              <Route path="/threat-map" element={<TurnstileGate sessionKey="turnstile_threatmap"><ThreatMapStandalone /></TurnstileGate>} />
               <Route path="/scan/:id" element={<ScanReport />} />
               
               <Route path="/dashboard" element={<ProtectedRoutes />} />
