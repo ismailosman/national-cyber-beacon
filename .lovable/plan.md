@@ -1,26 +1,22 @@
 
 
-## Keep Navbar and Footer Always Dark (No Theme Toggle)
+## Add Theme Toggle Back to Navbar (Page Content Only)
 
 ### Overview
-Remove the theme toggle button from the navbar and hardcode the navbar to always use dark styling -- matching the footer which already uses fixed dark colors (`bg-gray-950`, `text-gray-400`, etc.).
+Add a sun/moon toggle button back into the navbar that switches the page body content between light and dark mode. The navbar and footer will remain permanently dark (hardcoded `bg-gray-950`), unaffected by the theme change.
 
-### Changes
+### Change
 
 **File: `src/components/landing/Navbar.tsx`**
 
-1. Remove the `ThemeToggle` import
-2. Remove both `<ThemeToggle />` instances (desktop at line 129, mobile at line 142)
-3. Replace all `hsl(var(--landing-*))` CSS variables with hardcoded dark values to match the footer:
-   - `--landing-nav-bg` -> `bg-gray-950`
-   - `--landing-nav-border` -> `border-gray-800`
-   - `--landing-muted` -> `text-gray-400`
-   - `--landing-fg` -> `text-white`
-   - `--landing-card` -> `bg-gray-900`
-   - `--landing-card-border` -> `border-gray-800`
+1. Import the `ThemeToggle` component from `@/components/ThemeToggle`
+2. Add `<ThemeToggle />` in the desktop nav (before the "Secure Your Business" button)
+3. Add `<ThemeToggle />` in the mobile menu (at the top or bottom of the menu items)
 
-This ensures the navbar always looks dark regardless of the current theme, matching the footer's styling.
+The ThemeToggle component already exists and uses `next-themes` to toggle between light/dark. Since the navbar and footer use hardcoded dark colors (`bg-gray-950`, `text-gray-400`, `border-gray-800`), they won't be affected by the theme change. Only page content using CSS custom properties (e.g., `--landing-bg`, `--landing-fg`) will switch appearance.
 
 ### No other files need changes
-- The Footer already uses hardcoded dark colors
-- The ThemeToggle component itself stays in the codebase (used in the dashboard sidebar)
+- `ThemeToggle` component already exists at `src/components/ThemeToggle.tsx`
+- Navbar and footer are already hardcoded dark
+- Landing pages already use theme-aware CSS variables for body content
+
