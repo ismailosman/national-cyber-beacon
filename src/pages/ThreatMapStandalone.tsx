@@ -8,6 +8,7 @@ import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS, seededRand } from '@/compone
 import logoSrc from '@/assets/logo.png';
 
 const INDUSTRIES = [
+  { name: 'Banking', icon: '🏦' },
   { name: 'Education', icon: '🎓' },
   { name: 'Telecommunications', icon: '📡' },
   { name: 'Government', icon: '🏛' },
@@ -58,7 +59,7 @@ const ThreatMapStandalone: React.FC = () => {
   }, [threats]);
 
   const defaultCountries = [['Ethiopia'], ['Indonesia'], ['Somalia'], ['Georgia'], ['Ukraine']];
-  const defaultIndustries = [['Education'], ['Telecommunications'], ['Government']];
+  const defaultIndustries = [['Banking'], ['Government'], ['Telecom']];
 
   const rate = Math.max(1, Math.floor(threats.length / 3));
 
@@ -221,8 +222,8 @@ const ThreatMapStandalone: React.FC = () => {
 
           {/* Top Targeted Industries */}
           <div className="p-3">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED INDUSTRIES</p>
-            <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks per organization in the last day.</p>
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED INDUSTRIES IN SOMALIA</p>
+            <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks per industry in Somalia in the last day.</p>
             {(topIndustries.length > 0 ? topIndustries : defaultIndustries).map(([name, _count]) => {
               const ind = INDUSTRIES.find(i => i.name === name) || { name, icon: '🔒' };
               return (
