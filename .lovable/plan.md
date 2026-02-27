@@ -1,41 +1,88 @@
 
 
-## Fix: Compliance API Returns 404
+## Enhance Compliance Scanner Page
 
-### Root Cause
+This is a large enhancement to the Compliance Scanner page adding interactive charts, detailed breakdowns, technical evidence, scan metadata, and clickable history rows. The page will be significantly richer and more interactive.
 
-The compliance scan proxy edge function is **working correctly**. The 404 error is coming from the **upstream backend API** itself -- the `/compliance/scans` and `/compliance/scan` endpoints do not exist at the configured `SECURITY_API_URL` backend (which serves the "CyberSomalia Pentest API").
+### 1. Expand Types
 
-I confirmed this by calling the same path through the already-working `security-scanner-proxy` edge function and getting the identical 404 response. The backend health endpoint responds fine (`/health` returns 200), but the compliance endpoints have not been deployed to that server.
+Update the `ComplianceResults` interface to include additional fields the UI needs:
+- `checked_at: string` (timestamp)
+- `passed_controls: Array<{ control_key, name, detail }>` 
+- `failed_controls: Array<{ control_key, name, detail, severity, remediation, nist_control, iso_control, gdpr_article, itu_pillar }>`
+- `raw_checks: { uptime, ssl, headers, ddos, dns }` with appropriate sub-types for Technical Evidence section
 
-### What Needs to Happen
+### 2. Clickable Framework Graphs (Sheet Drawer)
 
-Since the backend API doesn't have compliance endpoints, there are two options:
+Modify `FrameworkBarCard` to accept an `onBarClick(categoryName)` callback. Use Recharts' `onClick` on each `<Bar>` or `<Cell>`. When a bar is clicked:
+- Open a `<Sheet>` (slide-out from right) showing:
+  - Framework + category name as header
+  - Score as large colored number
+  - List of controls for that category, each with pass/fail status, detail, and remediation if failed
+- The Sheet component already exists at `src/components/ui/sheet.tsx`
 
-**Option A (Recommended): Add debug logging and a user-friendly error message**
-- Update `ComplianceScan.tsx` to catch 404 errors specifically and show a clear message: "Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed."
-- Add error state handling so users aren't left with a blank screen
-- Add console logging of the actual error response for debugging
+Create a new `FrameworkDetailSheet` component that receives framework name, category, score, and the filtered findings/controls for that category.
 
-**Option B: If you have a different URL for the compliance API**
-- If the compliance endpoints live at a different base URL than the security scanner (e.g., a separate service), we need to configure a separate secret (e.g., `COMPLIANCE_API_URL`) and update the proxy to use it
-- This would require you to provide the correct URL
+### 3. Overall Score Card -- Passed/Failed Breakdown
 
-### Proposed Changes (Option A)
+Extend `OverallScoreCard` to show two columns below the progress bar:
+- Left column: Passed controls (green, with control name)
+- Right column: Failed controls (red/orange by severity, with control name and brief detail)
+- Each control is clickable, opening the same Sheet drawer with details
 
-**File: `src/pages/ComplianceScan.tsx`**
-- Add an `error` state variable to display API errors
-- In `startScan`, catch non-OK responses and show `data.detail` or `data.error` message
-- In the history fetch, catch 404 gracefully and show "Compliance API not available" instead of silently failing
-- In `pollScan`, handle error status from the API response
-- Display error messages in a red-bordered card with clear text
+### 4. Enhanced Findings Table
 
-This way, when the backend compliance endpoints become available, everything will work automatically without frontend changes.
+Update `FindingRow` expanded view to show all additional fields:
+- ITU Pillar, NIST control name, ISO control name, GDPR article name
+- Full remediation text in a styled box with light background
+- Cosmetic "Mark as Acknowledged" button (grey, no-op with toast feedback)
 
-### Technical Details
+### 5. Technical Evidence Section
 
-- The edge function `compliance-scan-proxy` does NOT need changes -- it correctly proxies to the upstream API
-- The `security-scanner-proxy` is confirmed working (200 on `/health`)
-- Both proxies use the same `SECURITY_API_URL` and `SECURITY_API_KEY` secrets
-- The 404 `{"detail":"Not Found"}` is a FastAPI-style response from the upstream server
+Add a new `TechnicalEvidence` component rendered below findings when `results.raw_checks` exists. Contains collapsible sub-sections:
+- **Uptime**: Each check method with status icon and detail
+- **SSL**: Valid status, common_name, issuer, expiry date, days remaining
+- **Headers**: Present headers as green chips, missing as red chips, grade letter
+- **DDoS**: Verdict, providers, evidence strings
+- **DNS**: SPF, DMARC, zone transfer status
 
+### 6. Scan Metadata Header
+
+Add a `ScanMetadata` component rendered at the top of results showing:
+- Target URL (clickable `<a>` opening new tab)
+- Organization name
+- Scan completed timestamp (from `checked_at`)
+- Overall grade as large colored letter
+- "Download Report" button that creates a JSON blob and triggers `URL.createObjectURL` download
+
+### 7. Updated Bar Colors
+
+Change the color thresholds in `FrameworkBarCard` and the `scoreColor` helper:
+- Score >= 80: `#00c853` (green)
+- Score 60-79: `#ffab00` (yellow)  
+- Score 40-59: `#ff6d00` (orange)
+- Score < 40: `#d50000` (red)
+
+### 8. Clickable History Rows
+
+Make each history table row clickable. On click:
+- If the row has `compliance_results` inline, load those directly into `results` state
+- Otherwise fetch via `GET /compliance/scan/{scan_id}/report` through the proxy
+- Also set `orgName` and `targetUrl` from the history record
+- Highlight the selected row
+
+### Files to Modify
+
+| File | Action |
+|------|--------|
+| `src/pages/ComplianceScan.tsx` | Major rewrite -- all 7 enhancements above |
+
+This is a single-file change since all components are defined inline in `ComplianceScan.tsx`. The file will grow from ~424 lines to approximately ~900 lines with the new sub-components.
+
+### Technical Notes
+
+- Uses existing `Sheet` component from `src/components/ui/sheet.tsx` for the slide-out drawer
+- Recharts `Cell` supports `onClick` for bar click handling
+- JSON download uses standard `Blob` + `URL.createObjectURL` + programmatic anchor click
+- All new sections gracefully handle missing data (optional chaining) since backend may not return all fields
+- No new dependencies needed -- everything uses existing Recharts, Radix Sheet, and Collapsible components
