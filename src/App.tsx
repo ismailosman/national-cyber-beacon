@@ -33,6 +33,7 @@ import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import Incidents from "@/pages/Incidents";
 import Compliance from "@/pages/Compliance";
+import ComplianceScan from "@/pages/ComplianceScan";
 
 import UptimeMonitor from "@/pages/UptimeMonitor";
 import DdosMonitor from "@/pages/DdosMonitor";
@@ -77,6 +78,7 @@ const ProtectedRoutes = () => {
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/incidents" element={<Incidents />} />
         <Route path="/compliance" element={<Compliance />} />
+        <Route path="/compliance-scan" element={<ComplianceScan />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/uptime" element={<UptimeMonitor />} />
         <Route path="/ddos-monitor" element={<DdosMonitor />} />

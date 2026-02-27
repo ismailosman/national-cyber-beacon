@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.scan-queue-proxy]
 verify_jwt = false
+
+[functions.compliance-scan-proxy]
+verify_jwt = false
