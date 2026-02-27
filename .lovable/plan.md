@@ -1,29 +1,41 @@
-## Add More Country Rotation Sets
+
+
+## Make Country Attack Counts Look Realistic
 
 ### Problem
-
-Currently there are only 2 sets of 10 countries, so the rotation just alternates between the same two groups repeatedly.
+The "Top Targeted Countries" list shows **0** for most countries because `countMap` only counts threats from the small live feed buffer (~40 threats). Since the simulated feed only covers a handful of countries per burst, most countries in the rotation never appear and show 0.
 
 ### Solution
-
-Expand `COUNTRY_SETS` to 4-5 sets of 10 countries each, drawing from the countries already in the `COUNTRY_ISO` mapping. This gives much more variety as the list cycles every 30 seconds.
+Generate seeded baseline attack counts for every country in `COUNTRY_SETS` so they always display realistic, non-zero numbers. The seeded counts will be deterministic (based on the country name) so they stay consistent within a session, and the live feed counts will be added on top.
 
 ### Changes in `src/pages/ThreatMapStandalone.tsx`
 
-Update the `COUNTRY_SETS` constant to include more sets:
+1. **Add a `seededCountryCounts` constant** using a simple string hash to generate a realistic base count for each country (range: ~800 to ~15,000). Countries like the US, China, Russia, and India get higher base values to look realistic.
 
+2. **Update the `countMap` useMemo** to merge seeded base counts with live feed counts:
+   ```
+   finalCount = seededBase[country] + liveFeedCount[country]
+   ```
+
+This way every country always shows a plausible number (e.g., Japan: 3,847, Germany: 5,212) and the numbers slowly increment as live threats come in.
+
+### Technical Details
+
+```text
+// Seeded count generation (deterministic per country name)
+function countryBaseCount(name: string): number {
+  let hash = 0;
+  for (const ch of name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+  return 800 + Math.abs(hash) % 14200;  // range 800-15000
+}
 ```
-Set 1: Ethiopia, Indonesia, Georgia, Ukraine, Kenya, Somalia, United States, India, Pakistan, Brazil
-Set 2: Turkey, Nigeria, South Africa, Egypt, Bangladesh, Iran, China, Philippines, Vietnam, Colombia
-Set 3: Russia, Japan, Germany, France, United Kingdom, Mexico, Saudi Arabia, Australia, Canada, Israel
-Set 4: Thailand, Malaysia, Poland, Romania, Argentina, Morocco, Algeria, Sweden, Netherlands, Iraq
-Set 5: Somalia, United States, China, India, Brazil, Russia, Nigeria, Turkey, Iran, Kenya
+
+The merge in `countMap`:
+```text
+for each country in all COUNTRY_SETS:
+  m[country] = countryBaseCount(country)
+then add live feed counts on top
 ```
 
-Also add any missing ISO codes to `COUNTRY_ISO` in `src/components/cyber-map/shared.ts` for the new countries (e.g., Japan, Germany, France, UK, Mexico, Saudi Arabia, Australia, Canada, Israel, Thailand, Malaysia, Poland, Romania, Argentina, Morocco, Algeria, Sweden, Netherlands, Iraq).
-
-### Files Modified
-
-- `src/pages/ThreatMapStandalone.tsx` -- expand `COUNTRY_SETS` to 5 rotation groups
-- `src/components/cyber-map/shared.ts` -- add missing ISO codes for new countries  
-TOP COUNTRIES must show real numbers and 0 and 1
+### File Modified
+- `src/pages/ThreatMapStandalone.tsx`
