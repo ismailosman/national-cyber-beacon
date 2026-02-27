@@ -1,88 +1,74 @@
 
 
-## Enhance Compliance Scanner Page
+## Replace DDoS Monitor with Real Backend Data
 
-This is a large enhancement to the Compliance Scanner page adding interactive charts, detailed breakdowns, technical evidence, scan metadata, and clickable history rows. The page will be significantly richer and more interactive.
+Replace the simulated DDoS risk data with live results from the Kali Linux backend API, using the existing `security-scanner-proxy` edge function as the proxy.
 
-### 1. Expand Types
+### Current State
+The DDoS Monitor page currently calculates risk from local `uptime_logs` and a `check-ddos-risk` edge function that checks HTTP headers. It builds risk assessments client-side from ping data.
 
-Update the `ComplianceResults` interface to include additional fields the UI needs:
-- `checked_at: string` (timestamp)
-- `passed_controls: Array<{ control_key, name, detail }>` 
-- `failed_controls: Array<{ control_key, name, detail, severity, remediation, nist_control, iso_control, gdpr_article, itu_pillar }>`
-- `raw_checks: { uptime, ssl, headers, ddos, dns }` with appropriate sub-types for Technical Evidence section
+### New Approach
+Route all DDoS scanning through the backend API via the existing `security-scanner-proxy` edge function (same pattern as compliance scanning). The backend returns complete risk assessments including WAF detection, response time analysis, exposed ports, and protection status.
 
-### 2. Clickable Framework Graphs (Sheet Drawer)
+### API Paths (via `security-scanner-proxy`)
 
-Modify `FrameworkBarCard` to accept an `onBarClick(categoryName)` callback. Use Recharts' `onClick` on each `<Bar>` or `<Cell>`. When a bar is clicked:
-- Open a `<Sheet>` (slide-out from right) showing:
-  - Framework + category name as header
-  - Score as large colored number
-  - List of controls for that category, each with pass/fail status, detail, and remediation if failed
-- The Sheet component already exists at `src/components/ui/sheet.tsx`
+| Action | Method | Path | Body |
+|--------|--------|------|------|
+| Scan single org | POST | `/ddos/scan/single` | `{ name, url, sector }` |
+| Scan all orgs | POST | `/ddos/scan/bulk` | `{ organizations: [{name, url, sector}] }` |
+| Poll result | GET | `/ddos/scan/{scan_id}` | -- |
 
-Create a new `FrameworkDetailSheet` component that receives framework name, category, score, and the filtered findings/controls for that category.
+### Changes
 
-### 3. Overall Score Card -- Passed/Failed Breakdown
+**File: `src/pages/DdosMonitor.tsx`** -- Major refactor
 
-Extend `OverallScoreCard` to show two columns below the progress bar:
-- Left column: Passed controls (green, with control name)
-- Right column: Failed controls (red/orange by severity, with control name and brief detail)
-- Each control is clickable, opening the same Sheet drawer with details
+1. **New types**: Replace `DdosProtection` and `RiskAssessment` interfaces with types matching the backend response shape (`DdosScanResult` with `risk_level`, `risk_score`, `risk_factors`, `waf_cdn`, `protected`, `rate_limited`, `origin_exposed`, `response_time`, `exposed_ports`, `waf_evidence`, `checked_at`).
 
-### 4. Enhanced Findings Table
+2. **Proxy helper**: Add a `proxyUrl(path)` function (same pattern as ComplianceScan) that builds the URL through `security-scanner-proxy`.
 
-Update `FindingRow` expanded view to show all additional fields:
-- ITU Pillar, NIST control name, ISO control name, GDPR article name
-- Full remediation text in a styled box with light background
-- Cosmetic "Mark as Acknowledged" button (grey, no-op with toast feedback)
+3. **"Check All Now" button**:
+   - Collect all loaded orgs (name, url, sector) from existing state
+   - POST to `/ddos/scan/bulk`
+   - Show progress: "Scanning X organizations..."
+   - Poll GET `/ddos/scan/{scan_id}` every 5 seconds until `status === "done"`
+   - When done, populate table with real results from `result.organizations`
+   - Update summary stats from `result.summary`
 
-### 5. Technical Evidence Section
+4. **Single org re-check**:
+   - POST to `/ddos/scan/single` with that org's `{ name, url, sector }`
+   - Poll until done
+   - Update just that row in state
 
-Add a new `TechnicalEvidence` component rendered below findings when `results.raw_checks` exists. Contains collapsible sub-sections:
-- **Uptime**: Each check method with status icon and detail
-- **SSL**: Valid status, common_name, issuer, expiry date, days remaining
-- **Headers**: Present headers as green chips, missing as red chips, grade letter
-- **DDoS**: Verdict, providers, evidence strings
-- **DNS**: SPF, DMARC, zone transfer status
+5. **Table columns mapped to real data**:
+   - Risk badge: `result.risk_level` (CRITICAL/HIGH/MEDIUM/LOW)
+   - DDoS Protection: CDN provider name if `protected`, otherwise "No Protection"
+   - WAF: first item from `waf_cdn` array or "None"
+   - Rate Limit: checkmark if `rate_limited`, cross if not
+   - Origin: "Hidden" if `!origin_exposed`, "Exposed" if true
+   - Resp. Trend: `response_time.trend` with arrow icon (up/down/stable)
+   - 1h Avg: `response_time.avg_ms` + "ms"
+   - Flaps: `exposed_ports.length` (exposed dangerous ports count)
 
-### 6. Scan Metadata Header
+6. **Detail drawer** (expanded row):
+   - Risk score as large colored number
+   - Risk factors list with severity badges
+   - WAF evidence list
+   - Response time details (avg, min, max, trend, status)
+   - Exposed ports table (port, service, risk)
+   - Checked at timestamp
 
-Add a `ScanMetadata` component rendered at the top of results showing:
-- Target URL (clickable `<a>` opening new tab)
-- Organization name
-- Scan completed timestamp (from `checked_at`)
-- Overall grade as large colored letter
-- "Download Report" button that creates a JSON blob and triggers `URL.createObjectURL` download
+7. **Summary stat cards**: Use `result.summary` fields (total, critical, high, medium, low, protected).
 
-### 7. Updated Bar Colors
+8. **localStorage persistence**: Save last scan results under key `ddos_last_scan`. On mount, load from localStorage if available so the table persists between page visits.
 
-Change the color thresholds in `FrameworkBarCard` and the `scoreColor` helper:
-- Score >= 80: `#00c853` (green)
-- Score 60-79: `#ffab00` (yellow)  
-- Score 40-59: `#ff6d00` (orange)
-- Score < 40: `#d50000` (red)
-
-### 8. Clickable History Rows
-
-Make each history table row clickable. On click:
-- If the row has `compliance_results` inline, load those directly into `results` state
-- Otherwise fetch via `GET /compliance/scan/{scan_id}/report` through the proxy
-- Also set `orgName` and `targetUrl` from the history record
-- Highlight the selected row
-
-### Files to Modify
-
-| File | Action |
-|------|--------|
-| `src/pages/ComplianceScan.tsx` | Major rewrite -- all 7 enhancements above |
-
-This is a single-file change since all components are defined inline in `ComplianceScan.tsx`. The file will grow from ~424 lines to approximately ~900 lines with the new sub-components.
+9. **Remove old code**: Remove `calculateRiskLevel` function, `checkHeaders` function, `calculateRisks` function, uptime_logs queries, and the `check-ddos-risk` edge function invocation. Keep all filter/sort/search/styling logic intact.
 
 ### Technical Notes
 
-- Uses existing `Sheet` component from `src/components/ui/sheet.tsx` for the slide-out drawer
-- Recharts `Cell` supports `onClick` for bar click handling
-- JSON download uses standard `Blob` + `URL.createObjectURL` + programmatic anchor click
-- All new sections gracefully handle missing data (optional chaining) since backend may not return all fields
-- No new dependencies needed -- everything uses existing Recharts, Radix Sheet, and Collapsible components
+- No new edge function needed -- reusing `security-scanner-proxy` with `/ddos/scan/*` paths
+- The org list still loads from `organizations` table via existing query
+- All existing filters (risk level, sector, protection, search, sort) remain unchanged
+- The `MiniSparkline` component will be removed since the backend doesn't return ping history; the "Resp. Trend" column will show a text trend indicator instead
+- Error handling follows same pattern as compliance scanner (catch non-OK, show toast)
+- Polling uses `setInterval` with cleanup, same as compliance scanner
+
