@@ -54,7 +54,7 @@ interface ThreatScanResult {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-async function proxyFetch<T>(path: string, method = 'GET', body?: any): Promise<T> {
+async function proxyFetch<T>(path: string, method = 'GET', body?: any, opts?: { allowNotFound?: boolean }): Promise<T> {
   const url = `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
   const res = await fetch(url, {
     method,
@@ -64,7 +64,10 @@ async function proxyFetch<T>(path: string, method = 'GET', body?: any): Promise<
   const text = await res.text();
   let json: any;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-  if (!res.ok) throw new Error(json?.detail || json?.error || res.statusText || 'API Error');
+  if (!res.ok) {
+    if (opts?.allowNotFound && res.status === 404) return null as T;
+    throw new Error(json?.detail || json?.error || res.statusText || 'API Error');
+  }
   return json as T;
 }
 
@@ -256,7 +259,8 @@ const ThreatIntelligence: React.FC = () => {
       return await new Promise<boolean>((resolve) => {
         pollRef.current = setInterval(async () => {
           try {
-            const pollRes = await proxyFetch<any>(`/threat/scan/${startRes.scan_id}`);
+            const pollRes = await proxyFetch<any>(`/threat/scan/${startRes.scan_id}`, 'GET', undefined, { allowNotFound: true });
+            if (!pollRes) return; // scan not yet registered, retry next interval
             if (pollRes.phase) setScanPhase(pollRes.phase);
             if (typeof pollRes.percent === 'number') setScanPercent(pollRes.percent);
 
