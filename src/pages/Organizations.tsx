@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Filter, Globe, ChevronRight, Plus, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Search, Filter, Globe, ChevronRight, Plus, TrendingUp, TrendingDown, Minus, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,7 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 type Sector = 'All' | 'Government' | 'Bank' | 'Telecom' | 'Health' | 'Education' | 'Other';
 
@@ -56,6 +58,76 @@ const Organizations: React.FC = () => {
       return trends;
     },
   });
+
+  // Fetch latest SSL and tech fingerprint data for compliance badges
+  const { data: sslData = [] } = useQuery({
+    queryKey: ['org-ssl-latest'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ssl_logs').select('organization_id, is_valid, days_until_expiry').order('checked_at', { ascending: false });
+      // Deduplicate: keep first (latest) per org
+      const seen = new Set<string>();
+      return (data || []).filter(r => {
+        if (!r.organization_id || seen.has(r.organization_id)) return false;
+        seen.add(r.organization_id);
+        return true;
+      });
+    },
+  });
+
+  const { data: techData = [] } = useQuery({
+    queryKey: ['org-tech-latest'],
+    queryFn: async () => {
+      const { data } = await supabase.from('tech_fingerprints').select('organization_id, vulnerabilities_count, outdated_count').order('checked_at', { ascending: false });
+      const seen = new Set<string>();
+      return (data || []).filter(r => {
+        if (!r.organization_id || seen.has(r.organization_id)) return false;
+        seen.add(r.organization_id);
+        return true;
+      });
+    },
+  });
+
+  // Compute compliance status per org
+  const complianceMap = useMemo(() => {
+    const map: Record<string, { failed: number; warnings: number; details: string[] }> = {};
+    const sslByOrg: Record<string, { valid: boolean; daysLeft: number | null }> = {};
+    const techByOrg: Record<string, { vulns: number; outdated: number }> = {};
+
+    for (const s of sslData) {
+      if (s.organization_id) sslByOrg[s.organization_id] = { valid: s.is_valid, daysLeft: s.days_until_expiry };
+    }
+    for (const t of techData) {
+      if (t.organization_id) techByOrg[t.organization_id] = { vulns: t.vulnerabilities_count, outdated: t.outdated_count };
+    }
+
+    for (const org of orgs) {
+      const ssl = sslByOrg[(org as any).id];
+      const tech = techByOrg[(org as any).id];
+      let failed = 0, warnings = 0;
+      const details: string[] = [];
+
+      // GDPR Art.25 — software CVEs
+      const vulns = tech?.vulns ?? 0;
+      if (vulns > 0) { failed++; details.push(`GDPR Art.25: ${vulns} vulnerability(ies)`); }
+
+      // GDPR Art.32 — SSL + vulns
+      if (ssl && !ssl.valid) { failed++; details.push('GDPR Art.32: Invalid SSL'); }
+      else if (vulns > 0 && (!ssl || ssl.valid)) { /* already counted */ }
+
+      // NIST ID.RA-1 — vulnerability identification
+      if (vulns > 0) { failed++; details.push(`NIST ID.RA-1: ${vulns} CVE(s)`); }
+
+      // NIST PR.DS-2 — data-in-transit
+      if (ssl && !ssl.valid) { failed++; details.push('NIST PR.DS-2: SSL invalid'); }
+      else if (ssl && ssl.daysLeft !== null && ssl.daysLeft <= 30) { warnings++; details.push(`NIST PR.DS-2: SSL expiring in ${ssl.daysLeft}d`); }
+
+      // NIST PR.IP-12 — patch management
+      if (tech && tech.outdated > 0) { warnings++; details.push(`NIST PR.IP-12: ${tech.outdated} outdated component(s)`); }
+
+      map[(org as any).id] = { failed, warnings, details };
+    }
+    return map;
+  }, [orgs, sslData, techData]);
 
   const filtered = orgs.filter((o: any) => {
     const matchSector = sector === 'All' || o.sector.toLowerCase() === sector.toLowerCase();
@@ -191,6 +263,7 @@ const Organizations: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((org: any) => {
             const status = statusConfig[org.status as keyof typeof statusConfig] || statusConfig.Warning;
+            const compliance = complianceMap[org.id];
             return (
               <button
                 key={org.id}
@@ -214,13 +287,45 @@ const Organizations: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={cn('text-xs px-2 py-0.5 rounded border font-mono', status.badge)}>
                       {org.status}
                     </span>
-                    <span className="ml-2 text-xs px-2 py-0.5 rounded border font-mono text-neon-cyan border-neon-cyan/30 bg-neon-cyan/5">
+                    <span className="text-xs px-2 py-0.5 rounded border font-mono text-neon-cyan border-neon-cyan/30 bg-neon-cyan/5">
                       {org.sector}
                     </span>
+                    {/* Compliance Badge */}
+                    {compliance && (compliance.failed > 0 || compliance.warnings > 0) && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={cn(
+                              'inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-mono',
+                              compliance.failed > 0
+                                ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                            )}>
+                              <ShieldAlert className="w-3 h-3" />
+                              {compliance.failed > 0
+                                ? `${compliance.failed} failed`
+                                : `${compliance.warnings} warn`}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            <p className="font-semibold mb-1">GDPR / NIST Controls</p>
+                            {compliance.details.map((d, i) => (
+                              <p key={i} className="text-muted-foreground">{d}</p>
+                            ))}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {compliance && compliance.failed === 0 && compliance.warnings === 0 && (sslData.some(s => s.organization_id === org.id) || techData.some(t => t.organization_id === org.id)) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-mono bg-green-500/10 text-green-400 border-green-500/20">
+                        <ShieldCheck className="w-3 h-3" />
+                        Compliant
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="flex items-center justify-end gap-1">
