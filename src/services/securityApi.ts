@@ -5,7 +5,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 async function proxyRequest<T>(path: string, method = "GET", body?: any): Promise<T> {
-  const url = `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+  const url = `${SUPABASE_URL}/functions/v1/api-proxy?path=${encodeURIComponent(path)}`;
 
   const res = await fetch(url, {
     method,

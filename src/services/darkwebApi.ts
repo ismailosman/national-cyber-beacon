@@ -8,7 +8,7 @@ const proxyFetch = async (path: string, method = 'GET', body?: unknown) => {
   const session = (await supabase.auth.getSession()).data.session;
   const token = session?.access_token ?? anonKey;
 
-  const url = `${supabaseUrl}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+  const url = `${supabaseUrl}/functions/v1/api-proxy?path=${encodeURIComponent(path)}`;
 
   const res = await fetch(url, {
     method,

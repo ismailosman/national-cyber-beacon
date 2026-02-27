@@ -109,7 +109,7 @@ const riskOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low
 
 /* ─── Proxy helper ─── */
 function proxyUrl(path: string): string {
-  return `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+  return `${SUPABASE_URL}/functions/v1/api-proxy?path=${encodeURIComponent(path)}`;
 }
 
 async function proxyFetch<T>(path: string, method = 'GET', body?: any): Promise<T> {

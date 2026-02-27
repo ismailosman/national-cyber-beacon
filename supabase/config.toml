@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.compliance-scan-proxy]
 verify_jwt = false
+
+[functions.api-proxy]
+verify_jwt = false
