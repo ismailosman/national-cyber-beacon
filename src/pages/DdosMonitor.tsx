@@ -478,6 +478,7 @@ const DdosMonitor: React.FC = () => {
                   <tr className="border-b border-border">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Risk</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organization</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Scan</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">URL</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sector</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">DDoS Protection</th>
@@ -488,7 +489,6 @@ const DdosMonitor: React.FC = () => {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">1h Avg</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Exposed Ports</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Risk Factors</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -506,6 +506,23 @@ const DdosMonitor: React.FC = () => {
                             </Badge>
                           </td>
                           <td className="px-4 py-3 font-medium">{org.name}</td>
+                          <td className="px-4 py-3">
+                            <Button
+                              size="sm"
+                              variant={result ? "outline" : "default"}
+                              className={cn(
+                                "text-xs h-8 font-semibold",
+                                result
+                                  ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30 hover:text-emerald-300"
+                                  : "bg-primary text-primary-foreground"
+                              )}
+                              disabled={recheckingOrg === org.id}
+                              onClick={e => { e.stopPropagation(); recheckSingle(org); }}
+                            >
+                              {recheckingOrg === org.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
+                              Scan
+                            </Button>
+                          </td>
                           <td className="px-4 py-3">
                             <a href={org.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-400 hover:underline" onClick={e => e.stopPropagation()}>
                               {new URL(org.url).hostname} <ExternalLink className="w-3 h-3" />
@@ -556,23 +573,6 @@ const DdosMonitor: React.FC = () => {
                               ))}
                               {(result?.risk_factors?.length || 0) > 2 && <Badge variant="outline" className="text-[10px] px-1.5 py-0">+{result!.risk_factors.length - 2}</Badge>}
                             </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Button
-                              size="sm"
-                              variant={result ? "outline" : "default"}
-                              className={cn(
-                                "text-xs h-8 font-semibold",
-                                result
-                                  ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30 hover:text-emerald-300"
-                                  : "bg-primary text-primary-foreground"
-                              )}
-                              disabled={recheckingOrg === org.id}
-                              onClick={e => { e.stopPropagation(); recheckSingle(org); }}
-                            >
-                              {recheckingOrg === org.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
-                              Scan
-                            </Button>
                           </td>
                         </tr>
                       </React.Fragment>
