@@ -1,74 +1,125 @@
 
 
-## Replace DDoS Monitor with Real Backend Data
+## Replace Threat Intelligence Scorecards with Real Backend Data
 
-Replace the simulated DDoS risk data with live results from the Kali Linux backend API, using the existing `security-scanner-proxy` edge function as the proxy.
+Replace the simulated scorecard data (built from multiple DB tables and edge functions) with real scan results from the Kali Linux backend API, routed through the existing `security-scanner-proxy` edge function. Only the Scorecards tab changes; other tabs show a "Coming soon" placeholder.
 
-### Current State
-The DDoS Monitor page currently calculates risk from local `uptime_logs` and a `check-ddos-risk` edge function that checks HTTP headers. It builds risk assessments client-side from ping data.
+### API Integration
 
-### New Approach
-Route all DDoS scanning through the backend API via the existing `security-scanner-proxy` edge function (same pattern as compliance scanning). The backend returns complete risk assessments including WAF detection, response time analysis, exposed ports, and protection status.
+Use the same proxy pattern as DDoS Monitor. The `security-scanner-proxy` edge function already forwards any path to the backend.
 
-### API Paths (via `security-scanner-proxy`)
+| Action | Method | Proxy Path |
+|--------|--------|------------|
+| Bulk scan | POST | `/threat/scan/bulk` |
+| Single scan | POST | `/threat/scan/single` |
+| Poll result | GET | `/threat/scan/{scan_id}` |
 
-| Action | Method | Path | Body |
-|--------|--------|------|------|
-| Scan single org | POST | `/ddos/scan/single` | `{ name, url, sector }` |
-| Scan all orgs | POST | `/ddos/scan/bulk` | `{ organizations: [{name, url, sector}] }` |
-| Poll result | GET | `/ddos/scan/{scan_id}` | -- |
+### Changes to `src/pages/ThreatIntelligence.tsx`
 
-### Changes
+#### 1. New Types
 
-**File: `src/pages/DdosMonitor.tsx`** -- Major refactor
+Replace `OrgScorecard` and `BreakdownItem` with types matching the backend response:
 
-1. **New types**: Replace `DdosProtection` and `RiskAssessment` interfaces with types matching the backend response shape (`DdosScanResult` with `risk_level`, `risk_score`, `risk_factors`, `waf_cdn`, `protected`, `rate_limited`, `origin_exposed`, `response_time`, `exposed_ports`, `waf_evidence`, `checked_at`).
+- `ThreatScanResult` -- mirrors the single scan `result` object (score, grade, risk_level, alerts, checks with all 10 sub-objects, checked_at)
+- `BulkScanSummary` -- mirrors `summary` (total, avg_score, critical/high/medium/low counts, grade_counts, national_risk)
+- `ThreatScanRecord` -- wraps `{ org: MonitoredOrg, result: ThreatScanResult }`
 
-2. **Proxy helper**: Add a `proxyUrl(path)` function (same pattern as ComplianceScan) that builds the URL through `security-scanner-proxy`.
+#### 2. Proxy Helper
 
-3. **"Check All Now" button**:
-   - Collect all loaded orgs (name, url, sector) from existing state
-   - POST to `/ddos/scan/bulk`
-   - Show progress: "Scanning X organizations..."
-   - Poll GET `/ddos/scan/{scan_id}` every 5 seconds until `status === "done"`
-   - When done, populate table with real results from `result.organizations`
-   - Update summary stats from `result.summary`
+Add `proxyFetch<T>(path, method?, body?)` using the same pattern as DDoS Monitor -- builds URL via `security-scanner-proxy?path=...`, includes apikey header.
 
-4. **Single org re-check**:
-   - POST to `/ddos/scan/single` with that org's `{ name, url, sector }`
-   - Poll until done
-   - Update just that row in state
+#### 3. "Run Full Scan" Button
 
-5. **Table columns mapped to real data**:
-   - Risk badge: `result.risk_level` (CRITICAL/HIGH/MEDIUM/LOW)
-   - DDoS Protection: CDN provider name if `protected`, otherwise "No Protection"
-   - WAF: first item from `waf_cdn` array or "None"
-   - Rate Limit: checkmark if `rate_limited`, cross if not
-   - Origin: "Hidden" if `!origin_exposed`, "Exposed" if true
-   - Resp. Trend: `response_time.trend` with arrow icon (up/down/stable)
-   - 1h Avg: `response_time.avg_ms` + "ms"
-   - Flaps: `exposed_ports.length` (exposed dangerous ports count)
+- Collect all orgs (name, url, sector) from existing org state
+- POST to `/threat/scan/bulk`
+- Poll every 5s showing progress: "Scanning {phase} -- {percent}%"
+- When `status === "done"`, populate `scanResults` map and `summary` state
+- Save to localStorage key `threat_intel_last_scan`
 
-6. **Detail drawer** (expanded row):
-   - Risk score as large colored number
-   - Risk factors list with severity badges
-   - WAF evidence list
-   - Response time details (avg, min, max, trend, status)
-   - Exposed ports table (port, service, risk)
-   - Checked at timestamp
+#### 4. National Threat Level Banner
 
-7. **Summary stat cards**: Use `result.summary` fields (total, critical, high, medium, low, protected).
+- Use `summary.national_risk` for level text (CRITICAL/HIGH/MEDIUM/LOW)
+- Use `summary.avg_score` for percentage display
+- Use `summary.total` for orgs assessed count
 
-8. **localStorage persistence**: Save last scan results under key `ddos_last_scan`. On mount, load from localStorage if available so the table persists between page visits.
+#### 5. Grade Distribution Pills
 
-9. **Remove old code**: Remove `calculateRiskLevel` function, `checkHeaders` function, `calculateRisks` function, uptime_logs queries, and the `check-ddos-risk` edge function invocation. Keep all filter/sort/search/styling logic intact.
+- Use `summary.grade_counts` object (`A+`, `A`, `B`, `C`, `D`, `F`) for the 5 grade cards
+- D/F card combines `grade_counts.D + grade_counts.F`
+
+#### 6. Scorecard Grid (Real Data)
+
+Each card shows:
+- `ScoreGauge` using `result.score` (out of 100) and `result.grade`
+- Risk badge using `result.risk_level`
+- Score text: `{result.score}/100 pts ({result.score}%)`
+- Timestamp: `result.checked_at` formatted as "Xm ago"
+- 10 check badges at bottom, each showing pass/warn/fail:
+  - uptime: `checks.uptime.verdict === "ONLINE"` -> green; score > 0 but not 10 -> amber; else red
+  - ssl: `checks.ssl.valid && checks.ssl.days_left > 30` -> green; valid but expiring -> amber; else red
+  - ddos: `checks.ddos.protected` -> green; else red
+  - email: `checks.email.results.spf.present && checks.email.results.dmarc.present` -> green; one present -> amber; else red
+  - headers: `checks.headers.score >= 7` -> green; >= 4 -> amber; else red
+  - ports: `checks.ports.risky_count === 0` -> green; else red
+  - defacement: `!checks.defacement.defaced` -> green; else red
+  - dns: `checks.dns.zone_transfer_blocked` -> green; else red
+  - blacklist: `!checks.blacklist.listed` -> green; else red
+  - software: `checks.software.vulnerabilities.length === 0` -> green; else red
+
+#### 7. Detail Drawer (Sheet)
+
+Replace the current Dialog with a Sheet (slide-out). When a scorecard is clicked:
+- Overall score + grade as large display
+- All 10 checks with individual scores (0-10) as progress bars
+- Alerts list with severity badges
+- For each failed check: show `alert_msg`
+- SSL: issuer, expiry, days_left
+- DDoS: providers list or "None", evidence
+- Email: SPF/DMARC/DKIM status
+- Ports: table of `exposed_risky` (port, service, severity)
+- Software: detected tech and vulnerabilities
+- Blacklist: `listed_on` entries
+- DNS: zone transfer, DNSSEC, CAA
+- `checked_at` timestamp
+
+#### 8. Single Org Refresh
+
+Add a refresh icon button on each scorecard. On click:
+- POST `/threat/scan/single` with that org's details
+- Show spinner on that card only
+- Poll until done, update just that card's result
+- Update localStorage
+
+#### 9. localStorage Persistence
+
+- On mount, load from `localStorage.getItem('threat_intel_last_scan')`
+- Parse and restore `scanResults` map and `summary`
+- On any scan completion, save updated state
+
+#### 10. Other Tabs -- "Coming Soon"
+
+Replace Threat Feed, Tech Stack, Phishing, and Breaches tab content with a centered "Coming soon -- real data integration in progress" message. Keep the tab structure intact.
+
+#### 11. Code Removal
+
+Remove all old scanning logic:
+- `calculateScorecards` function and all DB queries (uptime_logs, ssl_logs, ddos_risk_logs, early_warning_logs, tech_fingerprints)
+- `runFingerprinting`, `runSecurityHeadersCheck`, `runEmailDnsCheck`, `runBlacklistCheck`, `runDefacementCheck`, `runPortsCheck` callbacks
+- `invokeWithRetry`, `logCheckError` helpers
+- `runBreachCheck`, `runPhishingCheck`, `fetchThreatFeed` callbacks
+- All realtime subscriptions and background scheduling intervals
+- `OrgScorecard`, `BreakdownItem`, `ThreatFeedData`, `TechFingerprint`, `PhishingResult`, `BreachResult` types
+- `matchLogToOrg`, `matchFirstLogToOrg`, `orgNameMatches`, `NAME_ALIASES`
+- `ConfidenceBadge` component
+- Breach detail dialog
+
+Keep: `MonitoredOrg` type, org loading from `organizations` table, `ScoreGauge` component, `gradeColor`/`gradeBg`/`severityBadge`/`timeAgo` helpers, search/filter/grade filter logic, all styling/layout.
 
 ### Technical Notes
 
-- No new edge function needed -- reusing `security-scanner-proxy` with `/ddos/scan/*` paths
-- The org list still loads from `organizations` table via existing query
-- All existing filters (risk level, sector, protection, search, sort) remain unchanged
-- The `MiniSparkline` component will be removed since the backend doesn't return ping history; the "Resp. Trend" column will show a text trend indicator instead
-- Error handling follows same pattern as compliance scanner (catch non-OK, show toast)
-- Polling uses `setInterval` with cleanup, same as compliance scanner
+- No new edge function needed -- reuses `security-scanner-proxy`
+- File will shrink from ~2132 lines to ~800-900 lines
+- Polling uses `setInterval` with ref-based cleanup, same pattern as DDoS Monitor
+- All data gracefully handles missing fields with optional chaining
+- Error handling: catch non-OK responses, show toast with error detail
 
