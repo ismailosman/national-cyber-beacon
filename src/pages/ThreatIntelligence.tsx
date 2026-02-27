@@ -64,8 +64,10 @@ async function proxyFetch<T>(path: string, method = 'GET', body?: any, opts?: { 
   const text = await res.text();
   let json: any;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  // Proxy wraps 404s in 200 with _not_found marker
+  if (json?._not_found && opts?.allowNotFound) return null as T;
+  if (json?._not_found) throw new Error('Not found');
   if (!res.ok) {
-    if (opts?.allowNotFound && res.status === 404) return null as T;
     throw new Error(json?.detail || json?.error || res.statusText || 'API Error');
   }
   return json as T;
