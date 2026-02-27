@@ -253,43 +253,57 @@ const ThreatIntelligence: React.FC = () => {
         name: org.name, url: org.url, sector: org.sector,
       });
 
-      // Give backend a moment to register the scan before first poll
-      await new Promise(r => setTimeout(r, 2000));
+      // Poll with retry loop instead of setInterval
+      const scanId = startRes.scan_id;
+      console.log('[TI] Scan started, id:', scanId);
+      let notFoundCount = 0;
+      const maxNotFound = 15; // give up after 15 consecutive 404s (~60s)
 
-      return await new Promise<boolean>((resolve) => {
-        pollRef.current = setInterval(async () => {
-          try {
-            const pollRes = await proxyFetch<any>(`/threat/scan/${startRes.scan_id}`, 'GET', undefined, { allowNotFound: true });
-            if (!pollRes) return; // scan not yet registered, retry next interval
-            if (pollRes.phase) setScanPhase(pollRes.phase);
-            if (typeof pollRes.percent === 'number') setScanPercent(pollRes.percent);
-
-            if (pollRes.status === 'done' && pollRes.result) {
-              if (pollRef.current) clearInterval(pollRef.current);
-              pollRef.current = null;
-
-              setScanResults(prev => ({ ...prev, [pollRes.result.org_name]: pollRes.result }));
-              saveOrgResult(org.name, pollRes.result);
-              setScanningOrgId(null);
-              setScanningOrgName('');
-              setScanPhase('');
-              setScanPercent(0);
-              toast({ title: `${org.name} scanned`, description: `Score: ${pollRes.result.score}/100 (${pollRes.result.grade})` });
-              resolve(true);
-            } else if (pollRes.status === 'error') {
-              if (pollRef.current) clearInterval(pollRef.current);
-              pollRef.current = null;
-              setScanningOrgId(null);
-              setScanningOrgName('');
-              setScanPhase('');
-              setScanPercent(0);
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise(r => setTimeout(r, notFoundCount < 3 ? 3000 : 4000));
+        try {
+          const pollRes = await proxyFetch<any>(`/threat/scan/${scanId}`, 'GET', undefined, { allowNotFound: true });
+          if (!pollRes) {
+            notFoundCount++;
+            console.log(`[TI] Poll 404 #${notFoundCount} for ${scanId}`);
+            if (notFoundCount >= maxNotFound) {
+              console.warn('[TI] Giving up after too many 404s');
               setErrorOrgs(prev => new Set(prev).add(org.id));
-              toast({ title: `Scan failed for ${org.name}`, variant: 'destructive' });
-              resolve(false);
+              toast({ title: `Scan timed out for ${org.name}`, variant: 'destructive' });
+              break;
             }
-          } catch { /* continue polling */ }
-        }, 4000);
-      });
+            continue;
+          }
+          notFoundCount = 0; // reset on success
+          if (pollRes.phase) setScanPhase(pollRes.phase);
+          if (typeof pollRes.percent === 'number') setScanPercent(pollRes.percent);
+
+          if (pollRes.status === 'done' && pollRes.result) {
+            setScanResults(prev => ({ ...prev, [pollRes.result.org_name]: pollRes.result }));
+            saveOrgResult(org.name, pollRes.result);
+            toast({ title: `${org.name} scanned`, description: `Score: ${pollRes.result.score}/100 (${pollRes.result.grade})` });
+            setScanningOrgId(null);
+            setScanningOrgName('');
+            setScanPhase('');
+            setScanPercent(0);
+            return true;
+          } else if (pollRes.status === 'error') {
+            setErrorOrgs(prev => new Set(prev).add(org.id));
+            toast({ title: `Scan failed for ${org.name}`, variant: 'destructive' });
+            break;
+          }
+        } catch (pollErr) {
+          console.error('[TI] Poll error:', pollErr);
+          // continue polling
+        }
+      }
+
+      setScanningOrgId(null);
+      setScanningOrgName('');
+      setScanPhase('');
+      setScanPercent(0);
+      return false;
     } catch (err: any) {
       setScanningOrgId(null);
       setScanningOrgName('');
