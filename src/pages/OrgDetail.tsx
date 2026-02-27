@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus, Wifi, WifiOff, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus, Wifi, WifiOff, ShieldAlert, ChevronDown } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -18,6 +18,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+
+// -- types for verified backend data --
+interface VerifiedFinding {
+  category: string;
+  title: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  message: string;
+  evidence: string[];
+  verified_by: string;
+  verified: boolean;
+}
+interface VerifiedChecks {
+  uptime: { verdict: string; checks: { method: string; online: boolean; detail: string; status_code: number | null }[] };
+  ddos_protection: { verdict: string; providers: string[]; evidence: string[] };
+  ssl: { valid: boolean; days_until_expiry: number; issuer: string; common_name: string };
+  headers: { score: number; grade: string; missing: Record<string, boolean> };
+  dns_security: { results: { spf: { present: boolean }; dmarc: { present: boolean }; zone_transfer: { allowed: boolean } } };
+}
 
 const checkTypeLabels: Record<string, string> = {
   ssl: 'SSL / TLS Certificate',
@@ -40,6 +59,13 @@ const statusConfig = {
   fail: { icon: XCircle, color: 'text-neon-red', bg: 'bg-neon-red/10 border-neon-red/30' },
 };
 
+const severityStyles: Record<string, string> = {
+  CRITICAL: 'bg-neon-red/20 text-neon-red',
+  HIGH: 'bg-neon-red/15 text-neon-red',
+  MEDIUM: 'bg-neon-amber/20 text-neon-amber',
+  LOW: 'bg-neon-cyan/20 text-neon-cyan',
+};
+
 const OrgDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -54,6 +80,10 @@ const OrgDetail: React.FC = () => {
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertForm, setAlertForm] = useState({ title: '', description: '', severity: 'medium', source: 'manual' });
   const [alertSaving, setAlertSaving] = useState(false);
+
+  // Verified scan response state
+  const [verifiedFindings, setVerifiedFindings] = useState<VerifiedFinding[] | null>(null);
+  const [verifiedChecks, setVerifiedChecks] = useState<VerifiedChecks | null>(null);
 
   const canEdit = userRole?.role === 'SuperAdmin' || userRole?.role === 'OrgAdmin';
   const isSuperAdmin = userRole?.role === 'SuperAdmin';
@@ -128,10 +158,13 @@ const OrgDetail: React.FC = () => {
     if (!org) return;
     setScanning(true);
     try {
-      const { error } = await supabase.functions.invoke('run-security-checks', {
+      const { data, error } = await supabase.functions.invoke('run-security-checks', {
         body: { org_id: id },
       });
       if (error) throw error;
+      // Store verified data from response
+      if (data?.verified_findings) setVerifiedFindings(data.verified_findings);
+      if (data?.verified_checks) setVerifiedChecks(data.verified_checks);
       toast.success('Scan completed successfully');
       queryClient.invalidateQueries({ queryKey: ['org', id] });
       queryClient.invalidateQueries({ queryKey: ['security-checks', id] });
@@ -221,7 +254,7 @@ const OrgDetail: React.FC = () => {
     }
   };
 
-  // Helper: get the latest score for a given check type (most recent checked_at)
+  // Helper: get the latest score for a given check type (fallback)
   const latestCheck = (type: string): number => {
     const found = [...checks]
       .filter((c: any) => c.check_type === type)
@@ -240,7 +273,21 @@ const OrgDetail: React.FC = () => {
       ? rawDDoSStatus
       : null;
 
-  const radarData = [
+  // Radar data: use verified_checks if available, otherwise fallback to latestCheck
+  const radarData = verifiedChecks ? [
+    { subject: 'SSL', value: verifiedChecks.ssl.valid ? Math.max(0, 100 - Math.max(0, 30 - verifiedChecks.ssl.days_until_expiry) * 3) : 0 },
+    { subject: 'Headers', value: verifiedChecks.headers.score },
+    { subject: 'Uptime', value: verifiedChecks.uptime.verdict === 'ONLINE' ? 100 : 0 },
+    { subject: 'DNS', value: (() => {
+      let s = 50;
+      if (verifiedChecks.dns_security.results.spf.present) s += 25;
+      if (verifiedChecks.dns_security.results.dmarc.present) s += 25;
+      if (verifiedChecks.dns_security.results.zone_transfer.allowed) s -= 50;
+      return Math.max(0, Math.min(100, s));
+    })() },
+    { subject: 'DDoS', value: verifiedChecks.ddos_protection.verdict === 'PROTECTED' ? 100 : 0 },
+    { subject: 'WAF', value: latestCheck('waf') },
+  ] : [
     { subject: 'SSL', value: latestCheck('ssl') || latestCheck('tls') },
     { subject: 'Headers', value: latestCheck('headers') },
     { subject: 'Uptime', value: latestCheck('uptime') },
@@ -640,37 +687,96 @@ const OrgDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* Alerts */}
-      {orgAlerts.length > 0 && (
-        <div className="glass-card rounded-xl border border-border overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-neon-amber" />
-            <h3 className="text-sm font-semibold">Alert History</h3>
+      {/* Verified Findings / Alerts */}
+      {verifiedFindings !== null ? (
+        verifiedFindings.length === 0 ? (
+          <div className="rounded-xl border border-neon-green/40 bg-neon-green/5 p-5 flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-neon-green flex-shrink-0" />
+            <div>
+              <p className="font-bold text-neon-green text-sm">✓ All security checks passed</p>
+              <p className="text-xs text-muted-foreground mt-0.5">No security issues were detected during the latest scan.</p>
+            </div>
           </div>
-          <div className="p-4 space-y-2">
-            {orgAlerts.map((alert: any) => (
-              <div key={alert.id} className={cn('p-3 rounded-lg border text-sm flex items-start gap-3',
-                alert.severity === 'critical' ? 'bg-neon-red/5 border-neon-red/20' :
-                alert.severity === 'high' ? 'bg-neon-red/5 border-neon-red/20' :
-                alert.severity === 'medium' ? 'bg-neon-amber/5 border-neon-amber/20' :
-                'bg-neon-cyan/5 border-neon-cyan/20'
-              )}>
-                <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono flex-shrink-0',
-                  alert.severity === 'critical' || alert.severity === 'high' ? 'bg-neon-red/20 text-neon-red' :
-                  alert.severity === 'medium' ? 'bg-neon-amber/20 text-neon-amber' :
-                  'bg-neon-cyan/20 text-neon-cyan'
-                )}>{alert.severity}</span>
-                <div className="flex-1">
-                  <p className="text-foreground font-medium">{alert.title}</p>
-                  <p className="text-xs text-muted-foreground">{alert.description}</p>
-                  <p className="text-xs text-muted-foreground mt-1 font-mono">
-                    {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}
-                  </p>
+        ) : (
+          <div className="glass-card rounded-xl border border-border overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-neon-amber" />
+              <h3 className="text-sm font-semibold">Verified Findings ({verifiedFindings.length})</h3>
+            </div>
+            <div className="p-4 space-y-3">
+              {verifiedFindings.map((finding, idx) => (
+                <div key={idx} className={cn('p-3 rounded-lg border text-sm',
+                  finding.severity === 'CRITICAL' || finding.severity === 'HIGH' ? 'bg-neon-red/5 border-neon-red/20' :
+                  finding.severity === 'MEDIUM' ? 'bg-neon-amber/5 border-neon-amber/20' :
+                  'bg-neon-cyan/5 border-neon-cyan/20'
+                )}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-neon-green/20 text-neon-green border border-neon-green/30">
+                        <CheckCircle className="w-3 h-3" />
+                        Verified
+                      </span>
+                      <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono', severityStyles[finding.severity] || severityStyles.MEDIUM)}>
+                        {finding.severity}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-foreground font-medium">{finding.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{finding.message}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">Source: {finding.verified_by}</p>
+                      {finding.evidence && finding.evidence.length > 0 && (
+                        <Collapsible className="mt-2">
+                          <CollapsibleTrigger className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+                            <ChevronDown className="w-3 h-3" />
+                            Evidence ({finding.evidence.length})
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="mt-1.5 space-y-1">
+                            {finding.evidence.map((ev, i) => (
+                              <p key={i} className="text-[11px] text-muted-foreground font-mono pl-4 border-l-2 border-border">{ev}</p>
+                            ))}
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )
+      ) : (
+        /* Fallback: show DB alerts when no verified findings available */
+        orgAlerts.length > 0 && (
+          <div className="glass-card rounded-xl border border-border overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-neon-amber" />
+              <h3 className="text-sm font-semibold">Alert History</h3>
+            </div>
+            <div className="p-4 space-y-2">
+              {orgAlerts.map((alert: any) => (
+                <div key={alert.id} className={cn('p-3 rounded-lg border text-sm flex items-start gap-3',
+                  alert.severity === 'critical' ? 'bg-neon-red/5 border-neon-red/20' :
+                  alert.severity === 'high' ? 'bg-neon-red/5 border-neon-red/20' :
+                  alert.severity === 'medium' ? 'bg-neon-amber/5 border-neon-amber/20' :
+                  'bg-neon-cyan/5 border-neon-cyan/20'
+                )}>
+                  <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono flex-shrink-0',
+                    alert.severity === 'critical' || alert.severity === 'high' ? 'bg-neon-red/20 text-neon-red' :
+                    alert.severity === 'medium' ? 'bg-neon-amber/20 text-neon-amber' :
+                    'bg-neon-cyan/20 text-neon-cyan'
+                  )}>{alert.severity}</span>
+                  <div className="flex-1">
+                    <p className="text-foreground font-medium">{alert.title}</p>
+                    <p className="text-xs text-muted-foreground">{alert.description}</p>
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">
+                      {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
       )}
 
       {/* Last scan info */}
