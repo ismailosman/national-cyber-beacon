@@ -250,6 +250,9 @@ const ThreatIntelligence: React.FC = () => {
         name: org.name, url: org.url, sector: org.sector,
       });
 
+      // Give backend a moment to register the scan before first poll
+      await new Promise(r => setTimeout(r, 2000));
+
       return await new Promise<boolean>((resolve) => {
         pollRef.current = setInterval(async () => {
           try {
