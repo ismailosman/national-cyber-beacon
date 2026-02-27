@@ -14,15 +14,16 @@ import { cn } from '@/lib/utils';
 import { formatET } from '@/lib/dateUtils';
 
 /* ── helpers ── */
-const proxyUrl = (path: string) => {
-  const id = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-  return `https://${id}.supabase.co/functions/v1/compliance-scan-proxy?path=${encodeURIComponent(path)}`;
-};
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+const proxyUrl = (path: string) =>
+  `${SUPABASE_URL}/functions/v1/compliance-scan-proxy?path=${encodeURIComponent(path)}`;
 
 const apiHeaders = () => ({
   'Content-Type': 'application/json',
-  apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+  apikey: ANON_KEY,
+  Authorization: `Bearer ${ANON_KEY}`,
 });
 
 const scoreColor = (s: number) => (s >= 75 ? 'text-neon-green' : s >= 50 ? 'text-neon-amber' : 'text-neon-red');
