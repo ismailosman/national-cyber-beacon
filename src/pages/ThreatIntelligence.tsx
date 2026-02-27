@@ -822,6 +822,9 @@ const ThreatIntelligence: React.FC = () => {
                   </DetailSection>
                 )}
 
+                {/* Compliance Cross-Reference */}
+                <ComplianceCrossRef checks={detailResult.checks} />
+
                 {/* Timestamp */}
                 {detailResult.checked_at && (
                   <p className="text-xs text-muted-foreground text-right pt-2 border-t border-border">
@@ -1057,6 +1060,145 @@ const SoftwareDetail: React.FC<{ sw: ThreatScanResult['checks']['software'] }> =
           ))}
         </div>
       </div>
+    </div>
+  );
+};
+
+/* ─── Compliance Cross-Reference ─── */
+const ComplianceCrossRef: React.FC<{ checks: ThreatScanResult['checks'] }> = ({ checks }) => {
+  const sw = checks.software;
+  const ssl = checks.ssl;
+  const headers = checks.headers;
+  const critCves = sw?.critical_cves ?? 0;
+  const highCves = sw?.high_cves ?? 0;
+  const totalCves = sw?.total_cves ?? 0;
+  const hasCves = totalCves > 0;
+
+  const controls: { framework: string; control: string; title: string; status: 'pass' | 'fail' | 'warn'; detail: string }[] = [
+    // GDPR
+    {
+      framework: 'GDPR',
+      control: 'Art. 25',
+      title: 'Data Protection by Design & Default',
+      status: critCves > 0 ? 'fail' : highCves > 0 ? 'warn' : 'pass',
+      detail: critCves > 0
+        ? `${critCves} critical CVE(s) — unpatched software violates Art. 25 requirements`
+        : highCves > 0
+        ? `${highCves} high CVE(s) — remediation recommended`
+        : 'All detected components are up to date',
+    },
+    {
+      framework: 'GDPR',
+      control: 'Art. 32',
+      title: 'Security of Processing',
+      status: (!ssl?.valid || critCves > 0) ? 'fail' : (headers?.score ?? 0) < 5 ? 'warn' : 'pass',
+      detail: !ssl?.valid
+        ? 'Invalid SSL certificate — encryption requirement not met'
+        : critCves > 0
+        ? 'Critical vulnerabilities compromise processing security'
+        : (headers?.score ?? 0) < 5
+        ? 'Security headers insufficient'
+        : 'Encryption and security controls adequate',
+    },
+    // NIST CSF
+    {
+      framework: 'NIST CSF',
+      control: 'ID.AM-2',
+      title: 'Software Inventory',
+      status: (sw?.has_fingerprint ?? false) ? 'pass' : 'warn',
+      detail: (sw?.has_fingerprint ?? false)
+        ? `${sw?.detected?.length ?? 0} software components identified`
+        : 'Unable to fingerprint software — inventory incomplete',
+    },
+    {
+      framework: 'NIST CSF',
+      control: 'ID.RA-1',
+      title: 'Vulnerability Identification',
+      status: hasCves ? (critCves > 0 ? 'fail' : 'warn') : 'pass',
+      detail: hasCves
+        ? `${totalCves} CVE(s) identified (${critCves} critical, ${highCves} high)`
+        : 'No known vulnerabilities detected',
+    },
+    {
+      framework: 'NIST CSF',
+      control: 'PR.IP-12',
+      title: 'Vulnerability Management',
+      status: critCves > 0 ? 'fail' : highCves > 0 ? 'warn' : 'pass',
+      detail: critCves > 0
+        ? 'Critical CVEs remain unpatched — vulnerability management process failing'
+        : highCves > 0
+        ? 'High-severity CVEs pending remediation'
+        : 'Patch management adequate',
+    },
+    {
+      framework: 'NIST CSF',
+      control: 'PR.DS-2',
+      title: 'Data-in-Transit Protection',
+      status: ssl?.valid ? (ssl.days_left > 30 ? 'pass' : 'warn') : 'fail',
+      detail: !ssl?.valid
+        ? 'SSL/TLS invalid — data in transit unprotected'
+        : ssl.days_left <= 30
+        ? `Certificate expiring in ${ssl.days_left} days`
+        : 'TLS encryption active and valid',
+    },
+  ];
+
+  const failCount = controls.filter(c => c.status === 'fail').length;
+  const warnCount = controls.filter(c => c.status === 'warn').length;
+
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold">Compliance Cross-Reference</h4>
+        {failCount > 0 ? (
+          <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-400 border-red-500/20">
+            {failCount} failed
+          </Badge>
+        ) : warnCount > 0 ? (
+          <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
+            {warnCount} warnings
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+            All passed
+          </Badge>
+        )}
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-xs">Framework</TableHead>
+            <TableHead className="text-xs">Control</TableHead>
+            <TableHead className="text-xs">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.map((c, i) => (
+            <TableRow key={i} className={cn(
+              c.status === 'fail' ? 'bg-red-500/5' : c.status === 'warn' ? 'bg-yellow-500/5' : ''
+            )}>
+              <TableCell className="text-xs">
+                <span className="font-medium">{c.framework}</span>
+                <span className="text-muted-foreground ml-1">{c.control}</span>
+              </TableCell>
+              <TableCell className="text-[10px] max-w-[180px]">
+                <p className="font-medium">{c.title}</p>
+                <p className="text-muted-foreground mt-0.5">{c.detail}</p>
+              </TableCell>
+              <TableCell className="text-center">
+                {c.status === 'pass' ? (
+                  <span className="text-emerald-400 text-xs font-bold">✓</span>
+                ) : c.status === 'warn' ? (
+                  <span className="text-yellow-400 text-xs font-bold">~</span>
+                ) : (
+                  <span className="text-red-400 text-xs font-bold">✗</span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 };
