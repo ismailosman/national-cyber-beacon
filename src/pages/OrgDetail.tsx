@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus, Wifi, WifiOff, ShieldAlert, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Play, Shield, Globe, Clock, CheckCircle, XCircle, AlertTriangle, MapPin, Pencil, Trash2, Plus, Wifi, WifiOff, ShieldAlert, ChevronDown, Lightbulb, Lock, Server, FileWarning, ShieldCheck } from 'lucide-react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -64,6 +64,212 @@ const severityStyles: Record<string, string> = {
   HIGH: 'bg-neon-red/15 text-neon-red',
   MEDIUM: 'bg-neon-amber/20 text-neon-amber',
   LOW: 'bg-neon-cyan/20 text-neon-cyan',
+};
+
+const getRemediation = (category: string, severity: string): string => {
+  const key = `${category}/${severity}`;
+  const map: Record<string, string> = {
+    'Uptime/CRITICAL': 'Investigate server health immediately. Check hosting provider status, verify DNS configuration, and review load balancer settings.',
+    'Uptime/HIGH': 'Monitor server availability closely. Consider adding redundancy and failover mechanisms.',
+    'SSL/CRITICAL': 'Renew or install a valid SSL/TLS certificate immediately. Expired certificates expose users to man-in-the-middle attacks.',
+    'SSL/HIGH': 'SSL certificate is expiring soon. Schedule renewal before expiration to avoid service disruption.',
+    'SSL/MEDIUM': 'Review SSL configuration for best practices. Consider upgrading to a stronger cipher suite.',
+    'DDoS Protection/CRITICAL': 'Site is unprotected against DDoS attacks. Deploy a CDN/WAF immediately (Cloudflare, AWS Shield, or Akamai).',
+    'DDoS Protection/HIGH': 'Limited DDoS protection detected. Consider upgrading to an enterprise-grade solution.',
+    'DDoS Protection/MEDIUM': 'Consider deploying a CDN/WAF like Cloudflare, AWS Shield, or Akamai for additional protection.',
+    'Security Headers/CRITICAL': 'Critical security headers are missing. Add Content-Security-Policy, X-Frame-Options, and Strict-Transport-Security immediately.',
+    'Security Headers/HIGH': 'Important security headers are missing. Add them to your web server configuration (nginx/Apache) or CDN settings.',
+    'Security Headers/MEDIUM': 'Some recommended security headers are missing. Review and add them to improve your security posture.',
+    'DNS Security/CRITICAL': 'DNS zone transfer is allowed publicly, exposing your entire DNS infrastructure. Restrict zone transfers immediately.',
+    'DNS Security/HIGH': 'SPF and DMARC records are missing. Add them to prevent email spoofing and phishing attacks.',
+    'DNS Security/MEDIUM': 'Add SPF/DMARC TXT records to your DNS zone to prevent email spoofing and improve deliverability.',
+  };
+  return map[key] || map[`${category}/${severity === 'LOW' ? 'MEDIUM' : severity}`] || `Review ${category.toLowerCase()} configuration and apply security best practices.`;
+};
+
+// -- Finding card with collapsible details --
+const FindingCard: React.FC<{ finding: VerifiedFinding }> = ({ finding }) => {
+  const [open, setOpen] = useState(false);
+  const remediation = getRemediation(finding.category, finding.severity);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className={cn('rounded-lg border text-sm transition-all',
+        finding.severity === 'CRITICAL' || finding.severity === 'HIGH' ? 'bg-neon-red/5 border-neon-red/20' :
+        finding.severity === 'MEDIUM' ? 'bg-neon-amber/5 border-neon-amber/20' :
+        'bg-neon-cyan/5 border-neon-cyan/20'
+      )}>
+        <CollapsibleTrigger className="w-full cursor-pointer p-3 hover:bg-accent/10 transition-colors rounded-lg text-left">
+          <div className="flex items-start gap-3">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-neon-green/20 text-neon-green border border-neon-green/30">
+                <CheckCircle className="w-3 h-3" />
+                Verified
+              </span>
+              <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono', severityStyles[finding.severity] || severityStyles.MEDIUM)}>
+                {finding.severity}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-foreground font-medium">{finding.title}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{finding.message}</p>
+            </div>
+            <ChevronDown className={cn('w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5 transition-transform duration-200', open && 'rotate-180')} />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-3 pb-3">
+          <div className="mt-1 pt-2 border-t border-border/50 space-y-2.5">
+            <p className="text-[10px] text-muted-foreground/70 font-mono">Source: {finding.verified_by}</p>
+            <div className="flex items-start gap-2 p-2 rounded-md bg-neon-amber/5 border border-neon-amber/15">
+              <Lightbulb className="w-3.5 h-3.5 text-neon-amber flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] font-bold text-neon-amber uppercase tracking-wider">Recommendation</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{remediation}</p>
+              </div>
+            </div>
+            {finding.evidence && finding.evidence.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Evidence</p>
+                <div className="space-y-1">
+                  {finding.evidence.map((ev, i) => (
+                    <p key={i} className="text-[11px] text-muted-foreground font-mono pl-3 border-l-2 border-border">{ev}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+};
+
+// -- Verified Checks Summary Panel --
+const VerifiedChecksSummary: React.FC<{ checks: VerifiedChecks }> = ({ checks }) => {
+  const missingHeaders = Object.entries(checks.headers.missing || {}).filter(([, v]) => v).map(([k]) => k);
+  const gradeColor = checks.headers.grade === 'A' ? 'text-neon-green' : checks.headers.grade === 'B' ? 'text-neon-cyan' : checks.headers.grade === 'C' ? 'text-neon-amber' : 'text-neon-red';
+
+  return (
+    <div className="glass-card rounded-xl border border-border overflow-hidden">
+      <div className="p-4 border-b border-border flex items-center gap-2">
+        <ShieldCheck className="w-4 h-4 text-neon-cyan" />
+        <h3 className="text-sm font-semibold">Scan Summary</h3>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-border/50">
+        {/* Uptime */}
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2 mb-2">
+            <Server className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Uptime</span>
+          </div>
+          <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold border',
+            checks.uptime.verdict === 'ONLINE' ? 'bg-neon-green/10 text-neon-green border-neon-green/30' : 'bg-neon-red/10 text-neon-red border-neon-red/30'
+          )}>
+            <span className={cn('w-1.5 h-1.5 rounded-full', checks.uptime.verdict === 'ONLINE' ? 'bg-neon-green' : 'bg-neon-red')} />
+            {checks.uptime.verdict}
+          </span>
+          {checks.uptime.checks?.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {checks.uptime.checks.map((c, i) => (
+                <p key={i} className="text-[11px] text-muted-foreground font-mono">
+                  {c.method}: {c.online ? '✓' : '✗'} {c.status_code && `(${c.status_code})`}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* SSL */}
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2 mb-2">
+            <Lock className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">SSL Certificate</span>
+          </div>
+          <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold border',
+            checks.ssl.valid ? 'bg-neon-green/10 text-neon-green border-neon-green/30' : 'bg-neon-red/10 text-neon-red border-neon-red/30'
+          )}>
+            {checks.ssl.valid ? '✓ Valid' : '✗ Invalid'}
+          </span>
+          <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground font-mono">
+            {checks.ssl.days_until_expiry > 0 && <p>Expires in {checks.ssl.days_until_expiry} days</p>}
+            {checks.ssl.issuer && <p>Issuer: {checks.ssl.issuer}</p>}
+            {checks.ssl.common_name && <p>CN: {checks.ssl.common_name}</p>}
+          </div>
+        </div>
+
+        {/* Headers */}
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2 mb-2">
+            <FileWarning className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Security Headers</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={cn('text-lg font-bold font-mono', gradeColor)}>{checks.headers.grade}</span>
+            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+              <div className={cn('h-full rounded-full transition-all', checks.headers.score >= 75 ? 'bg-neon-green' : checks.headers.score >= 50 ? 'bg-neon-amber' : 'bg-neon-red')} style={{ width: `${checks.headers.score}%` }} />
+            </div>
+            <span className="text-xs font-mono text-muted-foreground">{checks.headers.score}%</span>
+          </div>
+          {missingHeaders.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] text-muted-foreground mb-1">Missing:</p>
+              <div className="flex flex-wrap gap-1">
+                {missingHeaders.map(h => (
+                  <span key={h} className="text-[10px] px-1.5 py-0.5 rounded bg-neon-red/10 text-neon-red border border-neon-red/20 font-mono">{h}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* DNS */}
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2 mb-2">
+            <Globe className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">DNS Security</span>
+          </div>
+          <div className="space-y-1.5">
+            {[
+              { label: 'SPF', present: checks.dns_security.results.spf.present },
+              { label: 'DMARC', present: checks.dns_security.results.dmarc.present },
+            ].map(r => (
+              <div key={r.label} className="flex items-center gap-2">
+                <span className={cn('w-1.5 h-1.5 rounded-full', r.present ? 'bg-neon-green' : 'bg-neon-red')} />
+                <span className="text-xs font-mono text-muted-foreground">{r.label}</span>
+                <span className={cn('text-[10px] font-bold', r.present ? 'text-neon-green' : 'text-neon-red')}>{r.present ? 'Present' : 'Missing'}</span>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <span className={cn('w-1.5 h-1.5 rounded-full', !checks.dns_security.results.zone_transfer.allowed ? 'bg-neon-green' : 'bg-neon-red')} />
+              <span className="text-xs font-mono text-muted-foreground">Zone Transfer</span>
+              <span className={cn('text-[10px] font-bold', !checks.dns_security.results.zone_transfer.allowed ? 'text-neon-green' : 'text-neon-red')}>
+                {checks.dns_security.results.zone_transfer.allowed ? 'Allowed' : 'Blocked'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* DDoS */}
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2 mb-2">
+            <ShieldAlert className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">DDoS Protection</span>
+          </div>
+          <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold border',
+            checks.ddos_protection.verdict === 'PROTECTED' ? 'bg-neon-green/10 text-neon-green border-neon-green/30' : 'bg-neon-red/10 text-neon-red border-neon-red/30'
+          )}>
+            {checks.ddos_protection.verdict === 'PROTECTED' ? '✓ Protected' : '✗ No Protection'}
+          </span>
+          {checks.ddos_protection.providers?.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {checks.ddos_protection.providers.map(p => (
+                <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20 font-mono">{p}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const OrgDetail: React.FC = () => {
@@ -705,41 +911,7 @@ const OrgDetail: React.FC = () => {
             </div>
             <div className="p-4 space-y-3">
               {verifiedFindings.map((finding, idx) => (
-                <div key={idx} className={cn('p-3 rounded-lg border text-sm',
-                  finding.severity === 'CRITICAL' || finding.severity === 'HIGH' ? 'bg-neon-red/5 border-neon-red/20' :
-                  finding.severity === 'MEDIUM' ? 'bg-neon-amber/5 border-neon-amber/20' :
-                  'bg-neon-cyan/5 border-neon-cyan/20'
-                )}>
-                  <div className="flex items-start gap-3">
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-neon-green/20 text-neon-green border border-neon-green/30">
-                        <CheckCircle className="w-3 h-3" />
-                        Verified
-                      </span>
-                      <span className={cn('text-xs font-bold uppercase px-1.5 py-0.5 rounded font-mono', severityStyles[finding.severity] || severityStyles.MEDIUM)}>
-                        {finding.severity}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-foreground font-medium">{finding.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{finding.message}</p>
-                      <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">Source: {finding.verified_by}</p>
-                      {finding.evidence && finding.evidence.length > 0 && (
-                        <Collapsible className="mt-2">
-                          <CollapsibleTrigger className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
-                            <ChevronDown className="w-3 h-3" />
-                            Evidence ({finding.evidence.length})
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="mt-1.5 space-y-1">
-                            {finding.evidence.map((ev, i) => (
-                              <p key={i} className="text-[11px] text-muted-foreground font-mono pl-4 border-l-2 border-border">{ev}</p>
-                            ))}
-                          </CollapsibleContent>
-                        </Collapsible>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <FindingCard key={idx} finding={finding} />
               ))}
             </div>
           </div>
@@ -779,7 +951,9 @@ const OrgDetail: React.FC = () => {
         )
       )}
 
-      {/* Last scan info */}
+      {/* Verified Checks Summary Panel */}
+      {verifiedChecks && <VerifiedChecksSummary checks={verifiedChecks} />}
+
       <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
         <Clock className="w-3 h-3" />
         Last scan: {org.last_scan ? formatDistanceToNow(new Date(org.last_scan), { addSuffix: true }) : 'Never'}
