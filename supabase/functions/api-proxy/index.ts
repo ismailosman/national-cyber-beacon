@@ -48,6 +48,14 @@ Deno.serve(async (req: Request) => {
 
     const responseText = await response.text();
 
+    // Wrap 404s in 200 with a marker so browser error-detection doesn't fire
+    if (response.status === 404) {
+      return new Response(
+        JSON.stringify({ _not_found: true, _status: 404, detail: "Not found" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     return new Response(responseText, {
       status: response.status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
