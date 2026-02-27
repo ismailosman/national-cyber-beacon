@@ -8,22 +8,8 @@ import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS, seededRand } from '@/compone
 import logoSrc from '@/assets/logo.png';
 
 const COUNTRY_SETS = [
-  ['Ethiopia', 'Indonesia', 'Georgia', 'Ukraine', 'Kenya'],
-  ['Somalia', 'United States', 'India', 'Pakistan', 'Brazil'],
-  ['Turkey', 'Nigeria', 'South Africa', 'Egypt', 'Bangladesh'],
-  ['Iran', 'China', 'Philippines', 'Vietnam', 'Colombia'],
-];
-
-const INDUSTRIES = [
-  { name: 'Banking', icon: '🏦' },
-  { name: 'Education', icon: '🎓' },
-  { name: 'Telecommunications', icon: '📡' },
-  { name: 'Government', icon: '🏛' },
-  { name: 'Finance', icon: '💳' },
-  { name: 'Technology', icon: '💻' },
-  { name: 'Manufacturing', icon: '🏭' },
-  { name: 'Telecom', icon: '📡' },
-  { name: 'Health', icon: '🏥' },
+  ['Ethiopia', 'Indonesia', 'Georgia', 'Ukraine', 'Kenya', 'Somalia', 'United States', 'India', 'Pakistan', 'Brazil'],
+  ['Turkey', 'Nigeria', 'South Africa', 'Egypt', 'Bangladesh', 'Iran', 'China', 'Philippines', 'Vietnam', 'Colombia'],
 ];
 
 const MALWARE_TYPES = [
@@ -63,22 +49,6 @@ const ThreatMapStandalone: React.FC = () => {
     }
     return m;
   }, [threats]);
-
-  // Compute top industries
-  const topIndustries = useMemo(() => {
-    const industryNames = ['Government', 'Finance', 'Technology', 'Telecommunications', 'Education', 'Health'];
-    const counts: Record<string, number> = {};
-    for (const t of threats) {
-      let seed = 0;
-      for (const c of t.target.country) seed = (seed * 31 + c.charCodeAt(0)) | 0;
-      const idx = Math.abs(seed) % industryNames.length;
-      const ind = industryNames[idx];
-      counts[ind] = (counts[ind] || 0) + 1;
-    }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  }, [threats]);
-
-  const defaultIndustries = [['Banking'], ['Government'], ['Telecom']];
 
   const rate = Math.max(1, Math.floor(threats.length / 3));
 
@@ -226,23 +196,6 @@ const ThreatMapStandalone: React.FC = () => {
                 );
               })}
             </div>
-          </div>
-
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
-
-          {/* Top Targeted Industries */}
-          <div className="p-3">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED INDUSTRIES IN SOMALIA</p>
-            <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks per industry in Somalia in the last day.</p>
-            {(topIndustries.length > 0 ? topIndustries : defaultIndustries).map(([name, _count]) => {
-              const ind = INDUSTRIES.find(i => i.name === name) || { name, icon: '🔒' };
-              return (
-                <div key={name} className="flex items-center gap-2 py-1.5 px-1">
-                  <span>{ind.icon}</span>
-                  <span className="text-xs text-slate-300 font-mono">{name}</span>
-                </div>
-              );
-            })}
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
