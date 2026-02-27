@@ -1,81 +1,43 @@
 
 
-## Update Organization Scan System to Use Verified Backend Data
+## Make Verified Findings Interactive with Expanded Details
 
-### Overview
-Restructure the scan pipeline so the backend returns structured `verified_findings` and `verified_checks` objects, and the frontend uses ONLY these verified results for alerts, radar chart scores, and status display.
+### Problem
+The verified finding cards are not clickable/interactive. The "Evidence" collapsible trigger doesn't look clickable (no cursor pointer, no visual affordance), and the cards lack detailed remediation guidance and check metadata from `verified_checks`.
 
-### 1. Update Backend Edge Function (`supabase/functions/run-security-checks/index.ts`)
+### Solution
+Enhance each finding card to be fully interactive with:
+1. Fix the Evidence collapsible to be visually clickable (cursor-pointer, hover effects, chevron rotation)
+2. Add a "Recommendation" section to each finding with remediation guidance
+3. Add a detailed "Scan Summary" panel below findings showing `verified_checks` data (uptime status, SSL details, header grade, DNS records status, DDoS protection status)
 
-**Build `verified_findings` array** from each check result (lines 436-522 area). Instead of generating alerts inline, collect structured findings:
+### Changes in `src/pages/OrgDetail.tsx`
 
-```text
-verified_findings = [
-  {
-    category: "Uptime" | "DDoS Protection" | "SSL" | "Security Headers" | "DNS Security",
-    title: string,
-    severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
-    message: string,
-    evidence: string[],
-    verified_by: string (e.g. "HEAD probe", "DNS-over-HTTPS", "TLS handshake"),
-    verified: true
-  }
-]
-```
+**1. Fix Evidence Collapsible Interactivity**
+- Add `cursor-pointer` to `CollapsibleTrigger`
+- Add chevron rotation animation on open state (track with Collapsible `open` prop)
+- Add hover background effect to the trigger
+- Make the entire evidence section more prominent
 
-**Build `verified_checks` object** from each check's raw details:
+**2. Add Remediation Text per Category**
+Create a `getRemediation(category, severity)` helper that returns actionable fix guidance:
+- Uptime/CRITICAL: "Investigate server health, check hosting provider status, verify DNS configuration"
+- SSL/CRITICAL: "Renew or install a valid SSL certificate immediately"
+- DDoS Protection/MEDIUM: "Consider deploying a CDN/WAF like Cloudflare, AWS Shield, or Akamai"
+- Security Headers/HIGH: "Add missing headers to your web server configuration (nginx/Apache) or CDN settings"
+- DNS Security/MEDIUM: "Add SPF/DMARC TXT records to your DNS zone to prevent email spoofing"
 
-- `uptime`: `{ verdict, checks: [{method, online, detail, status_code}] }`
-- `ddos_protection`: `{ verdict, providers, evidence }`
-- `ssl`: `{ valid, days_until_expiry, issuer, common_name }` (enhance `checkSSL` to extract cert metadata via TLS connection details)
-- `headers`: `{ score, grade, missing }` (compute score as % of required headers present)
-- `dns_security`: `{ results: { spf: {present}, dmarc: {present}, zone_transfer: {allowed} } }` (add SPF/DMARC lookups to `checkDNS`)
+Display this as a small "Recommendation" line under each finding with a lightbulb icon.
 
-**Return both** in the response JSON alongside existing fields. Also store `verified_findings` as the source for alert generation (replace current hardcoded alert logic).
+**3. Add Verified Checks Summary Panel**
+Below the findings list, add a summary grid showing the structured `verified_checks` data:
+- Uptime: verdict badge (ONLINE/OFFLINE) with method and status code
+- SSL: valid badge, days until expiry, issuer, common name
+- Headers: score bar, grade badge, list of missing headers
+- DNS: SPF present/absent, DMARC present/absent, zone transfer status
+- DDoS: verdict badge, list of detected providers
 
-### 2. Enhance DNS Check for SPF/DMARC
+This gives users a complete at-a-glance view of all check results even for passing checks.
 
-Add two additional DNS lookups in `checkDNS`:
-- Query `_spf.{domain}` or parse TXT records for SPF
-- Query `_dmarc.{domain}` for DMARC record
-- Return these in `details.spf_present`, `details.dmarc_present`
-
-### 3. Update Frontend OrgDetail Page (`src/pages/OrgDetail.tsx`)
-
-**New state**: After `handleRunScan`, store the scan response (which now includes `verified_findings` and `verified_checks`).
-
-**Replace alert display (lines 643-673)**:
-- If `verified_findings` is empty: show green banner with checkmark icon and "All security checks passed"
-- If findings exist: render each as a card with:
-  - Green "Verified" badge (checkmark icon + text)
-  - Severity badge (existing styling)
-  - Title and message
-  - "Source: {verified_by}" in small grey text
-  - Collapsible "Evidence" section using the Collapsible component, showing each evidence string
-
-**Update Radar Chart (lines 243-250)**:
-Replace `latestCheck()` calls with scores derived from `verified_checks`:
-- SSL: `ssl.valid ? Math.max(0, 100 - Math.max(0, 30 - ssl.days_until_expiry) * 3) : 0`
-- Headers: `headers.score`
-- DDoS: `ddos_protection.verdict === "PROTECTED" ? 100 : 0`
-- DNS: Score based on SPF + DMARC presence and zone transfer status
-- Uptime: `uptime.verdict === "ONLINE" ? 100 : 0`
-- WAF: keep existing `latestCheck('waf')` as fallback
-
-**Remove auto-generated frontend alert logic**: The backend is now the single source of truth for findings.
-
-### 4. Files Modified
-
-| File | Change |
-|------|--------|
-| `supabase/functions/run-security-checks/index.ts` | Add verified_findings + verified_checks to response; enhance DNS for SPF/DMARC; enhance SSL for cert metadata; compute header score/grade |
-| `src/pages/OrgDetail.tsx` | Store scan response; replace alert section with verified findings cards (with badges, evidence collapsible, source line); update radar chart to use verified_checks scores; add green banner for zero findings |
-
-### 5. Technical Details
-
-- The `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` components from `@radix-ui/react-collapsible` are already available
-- Edge function DNS enhancement uses Cloudflare DNS-over-HTTPS (`type=TXT`) for SPF/DMARC lookups
-- SSL cert metadata extraction is limited in Deno's `fetch` -- will use available response data and mark fields as best-effort
-- Header score: `(found.length / total_required.length) * 100`, grade mapped A/B/C/F from score ranges
-- All existing styling, layout, and card structure preserved
-
+### File Modified
+- `src/pages/OrgDetail.tsx` -- fix collapsible interactivity, add remediation text, add checks summary panel
