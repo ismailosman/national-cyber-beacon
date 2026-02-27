@@ -64,6 +64,65 @@ const normalizeControls = (raw: any): ControlItem[] => {
   }));
 };
 
+/* ── Cloudflare override: mark CSP & X-Frame-Options as passed when CF manages them ── */
+const CF_MANAGED_KEYS = ['csp', 'x_frame_options'];
+
+const applyCloudflareOverrides = (r: ComplianceResults): ComplianceResults => {
+  if (!r) return r;
+  const raw = r.raw_checks;
+  // Detect Cloudflare from DDoS providers or server header
+  const cfFromDdos = raw?.ddos?.providers?.some(p => /cloudflare/i.test(p));
+  const cfFromHeaders = raw?.headers?.present
+    ? Object.entries(raw.headers.present).some(([k, v]) => /server/i.test(k) && /cloudflare/i.test(String(v)))
+    : false;
+  if (!cfFromDdos && !cfFromHeaders) return r;
+
+  // Deep-clone so we don't mutate the original
+  const out: ComplianceResults = JSON.parse(JSON.stringify(r));
+
+  // Normalise failed/passed controls to object form if needed
+  const failedObj: Record<string, any> = Array.isArray(out.failed_controls)
+    ? Object.fromEntries(out.failed_controls.map((c: any) => [c.control_key, c]))
+    : (out.failed_controls || {});
+  const passedObj: Record<string, any> = Array.isArray(out.passed_controls)
+    ? Object.fromEntries(out.passed_controls.map((c: any) => [c.control_key, c]))
+    : (out.passed_controls || {});
+
+  let moved = 0;
+  for (const key of CF_MANAGED_KEYS) {
+    if (key in failedObj) {
+      passedObj[key] = {
+        control_key: key,
+        detail: 'Managed by Cloudflare WAF',
+        severity: 'PASS',
+        cloudflare_managed: true,
+      };
+      delete failedObj[key];
+      moved++;
+    }
+  }
+
+  if (moved === 0) return r; // nothing changed
+
+  out.passed_controls = passedObj;
+  out.failed_controls = failedObj;
+  out.passed = (out.passed || 0) + moved;
+  out.failed = Math.max(0, (out.failed || 0) - moved);
+  out.total_controls = out.passed + out.failed;
+  out.overall_score = out.total_controls > 0
+    ? Math.round((out.passed / out.total_controls) * 100)
+    : out.overall_score;
+  // Recalculate grade
+  out.grade = out.overall_score >= 90 ? 'A' : out.overall_score >= 75 ? 'B' : out.overall_score >= 60 ? 'C' : out.overall_score >= 40 ? 'D' : 'F';
+
+  // Also remove from compliance_findings
+  if (out.compliance_findings) {
+    out.compliance_findings = out.compliance_findings.filter(f => !CF_MANAGED_KEYS.includes(f.control_key));
+  }
+
+  return out;
+};
+
 /* ── types ── */
 interface ControlItem {
   control_key: string;
@@ -498,7 +557,7 @@ const ComplianceScan: React.FC = () => {
         setPhase(data.compliance_phase || '');
         if (data.compliance_status === 'done') {
           clearInterval(iv);
-          setResults(data.compliance_results);
+          setResults(applyCloudflareOverrides(data.compliance_results));
           setScanning(false);
           setPhase('');
           // Auto-send email (fire-and-forget)
@@ -571,14 +630,14 @@ const ComplianceScan: React.FC = () => {
     setOrgName(h.organization_name);
     setTargetUrl(h.target_url || h.target || '');
     if (h.compliance_results) {
-      setResults(h.compliance_results);
+      setResults(applyCloudflareOverrides(h.compliance_results));
       return;
     }
     try {
       const res = await fetch(proxyUrl(`/compliance/scan/${h.scan_id}/report`), { headers: apiHeaders() });
       if (res.ok) {
         const data = await res.json();
-        setResults(data.compliance_results || data);
+        setResults(applyCloudflareOverrides(data.compliance_results || data));
       }
     } catch (err) {
       console.error('[ComplianceScan] Load history error:', err);
