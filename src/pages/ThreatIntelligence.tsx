@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -18,7 +19,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useToast } from '@/hooks/use-toast';
 import {
   Crosshair, RefreshCw, Shield, Globe, Wrench, Fish, Database,
-  Check, X, Search, Trophy, Clock, Loader2, Play, Square, AlertTriangle
+  Check, X, Search, Trophy, Clock, Loader2, Play, Square, AlertTriangle,
+  ChevronDown, ExternalLink
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -45,7 +47,22 @@ interface ThreatScanResult {
     defacement: { defaced: boolean; score: number; page_title?: string; keywords_found?: string[]; alert: boolean; alert_msg?: string };
     dns: { score: number; zone_transfer_blocked?: boolean; dnssec_enabled?: boolean; caa_record?: boolean; issues?: string[]; alert_msg?: string };
     blacklist: { listed: boolean; score: number; listed_on?: { ip: string; blacklist: string }[]; alert: boolean; alert_msg?: string };
-    software: { score: number; detected?: { type: string; name: string }[]; vulnerabilities?: string[]; alert: boolean; alert_msg?: string };
+    software: {
+      score: number;
+      has_fingerprint?: boolean;
+      summary?: string;
+      detected?: { type: string; name: string; version?: string; source?: string; evidence?: string }[];
+      inventory?: { name: string; type: string; version: string | null; source: string; cves?: { cve: string; severity: string; desc: string; affected_version: string; fix_version: string }[] }[];
+      cve_findings?: { cve: string; severity: string; desc: string; affected_version: string; fix_version: string; component?: string }[];
+      vulnerabilities?: string[];
+      critical_cves?: number;
+      high_cves?: number;
+      medium_cves?: number;
+      total_cves?: number;
+      evidence?: string[];
+      alert: boolean;
+      alert_msg?: string;
+    };
   };
   checked_at: string;
 }
@@ -124,7 +141,13 @@ function checkBadgeStatus(checks: ThreatScanResult['checks'], key: string): 'gre
     case 'defacement': return !c.defacement?.defaced ? 'green' : 'red';
     case 'dns': return c.dns?.zone_transfer_blocked ? 'green' : 'red';
     case 'blacklist': return !c.blacklist?.listed ? 'green' : 'red';
-    case 'software': return (c.software?.vulnerabilities?.length ?? 0) === 0 ? 'green' : 'red';
+    case 'software': {
+      const sw = c.software;
+      if (!sw) return 'red';
+      if ((sw.critical_cves ?? 0) > 0 || (sw.high_cves ?? 0) > 0 || (sw.score ?? 0) < 5) return 'red';
+      if ((sw.score ?? 0) >= 8 && (sw.total_cves ?? 0) === 0) return 'green';
+      return 'amber';
+    }
     default: return 'red';
   }
 }
@@ -773,20 +796,9 @@ const ThreatIntelligence: React.FC = () => {
                   </DetailSection>
                 )}
 
-                {/* Software */}
+                {/* Software / Tech Stack */}
                 {detailResult.checks.software && (
-                  <DetailSection title="Software / Tech">
-                    {detailResult.checks.software.detected?.map((d, i) => (
-                      <span key={i} className="text-xs mr-2">{d.name} ({d.type})</span>
-                    ))}
-                    {(detailResult.checks.software.vulnerabilities?.length ?? 0) > 0 && (
-                      <div className="mt-1 space-y-0.5">
-                        {detailResult.checks.software.vulnerabilities!.map((v, i) => (
-                          <p key={i} className="text-[10px] text-red-400">⚠ {v}</p>
-                        ))}
-                      </div>
-                    )}
-                  </DetailSection>
+                  <SoftwareDetail sw={detailResult.checks.software} />
                 )}
 
                 {/* Blacklist */}
@@ -849,5 +861,204 @@ const DetailRow: React.FC<{ label: string; value: string }> = ({ label, value })
     <span className="font-mono">{value}</span>
   </div>
 );
+
+/* ─── Software Detail Component ─── */
+const SoftwareDetail: React.FC<{ sw: ThreatScanResult['checks']['software'] }> = ({ sw }) => {
+  const [expandedComponent, setExpandedComponent] = React.useState<string | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = React.useState(false);
+
+  const inventory = sw.inventory ?? [];
+  const cveFindings = sw.cve_findings ?? [];
+  const detected = sw.detected ?? [];
+  const totalCves = sw.total_cves ?? 0;
+  const criticalCves = sw.critical_cves ?? 0;
+  const highCves = sw.high_cves ?? 0;
+  const hasFP = sw.has_fingerprint ?? (detected.length > 0);
+
+  // Build CVE lookup by component name for inventory click
+  const cveFindingsForComponent = (compName: string) =>
+    cveFindings.filter(c => compName.toLowerCase().includes(c.component?.toLowerCase() ?? '___'));
+
+  return (
+    <div className="space-y-3 border-t border-border pt-3">
+      <h4 className="text-sm font-semibold">Software / Tech Stack</h4>
+
+      {/* Assessment Summary */}
+      {!hasFP ? (
+        <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-2.5 text-xs text-yellow-400">
+          ⚠ No technology fingerprint obtained — target may be behind a CDN masking server headers. Manual assessment recommended.
+        </div>
+      ) : totalCves === 0 ? (
+        <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-400">
+          ✓ {detected.length} components identified — no known CVEs detected
+        </div>
+      ) : (
+        <div className="rounded-md bg-red-500/10 border border-red-500/20 p-2.5 text-xs text-red-400">
+          ⚠ {totalCves} CVEs found across {detected.length} components — immediate patching recommended
+        </div>
+      )}
+
+      {/* Inventory Table */}
+      {inventory.length > 0 && (
+        <div>
+          <p className="text-xs font-medium mb-1 text-muted-foreground">Component Inventory</p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Component</TableHead>
+                <TableHead className="text-xs">Type</TableHead>
+                <TableHead className="text-xs">Version</TableHead>
+                <TableHead className="text-xs">Source</TableHead>
+                <TableHead className="text-xs text-right">CVEs</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {inventory.map((item, i) => {
+                const cveCount = item.cves?.length ?? 0;
+                const isExpanded = expandedComponent === item.name;
+                return (
+                  <React.Fragment key={i}>
+                    <TableRow
+                      className={cn(cveCount > 0 && 'cursor-pointer hover:bg-red-500/5')}
+                      onClick={() => cveCount > 0 && setExpandedComponent(isExpanded ? null : item.name)}
+                    >
+                      <TableCell className="text-xs font-mono">{item.name}</TableCell>
+                      <TableCell className="text-xs">{item.type}</TableCell>
+                      <TableCell className={cn('text-xs font-mono',
+                        !item.version ? 'text-muted-foreground' :
+                        cveCount > 0 ? 'text-red-400' : 'text-emerald-400'
+                      )}>
+                        {item.version || '—'}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{item.source}</TableCell>
+                      <TableCell className="text-xs text-right">
+                        {cveCount > 0 ? (
+                          <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-400 border-red-500/20">
+                            {cveCount}
+                          </Badge>
+                        ) : (
+                          <span className="text-emerald-400 text-[10px]">0</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && item.cves?.map((cve, ci) => (
+                      <TableRow key={`${i}-cve-${ci}`} className="bg-muted/30">
+                        <TableCell colSpan={5} className="text-[10px] pl-6 py-1">
+                          <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve}`} target="_blank" rel="noopener noreferrer"
+                            className="text-neon-cyan hover:underline inline-flex items-center gap-1">
+                            {cve.cve} <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                          <span className={cn('ml-2 font-semibold',
+                            cve.severity === 'CRITICAL' ? 'text-red-400' : cve.severity === 'HIGH' ? 'text-orange-400' : 'text-yellow-400'
+                          )}>{cve.severity}</span>
+                          <span className="ml-2 text-muted-foreground">{cve.desc}</span>
+                          {cve.fix_version && <span className="ml-2 text-emerald-400">Fix: {cve.fix_version}</span>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Fallback: detected list if no inventory */}
+      {inventory.length === 0 && detected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {detected.map((d, i) => (
+            <Badge key={i} variant="outline" className="text-xs">{d.name} ({d.type})</Badge>
+          ))}
+        </div>
+      )}
+
+      {/* CVE Findings Table */}
+      {cveFindings.length > 0 && (
+        <div>
+          <p className="text-xs font-medium mb-1 text-muted-foreground">CVE Findings ({totalCves})</p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">CVE ID</TableHead>
+                <TableHead className="text-xs">Severity</TableHead>
+                <TableHead className="text-xs">Description</TableHead>
+                <TableHead className="text-xs">Fix</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cveFindings.map((cve, i) => (
+                <TableRow key={i} className={cn(
+                  cve.severity === 'CRITICAL' ? 'bg-red-500/10' :
+                  cve.severity === 'HIGH' ? 'bg-orange-500/10' : ''
+                )}>
+                  <TableCell className="text-xs font-mono">
+                    <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve}`} target="_blank" rel="noopener noreferrer"
+                      className="text-neon-cyan hover:underline inline-flex items-center gap-1">
+                      {cve.cve} <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={cn('text-[10px]',
+                      cve.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                      cve.severity === 'HIGH' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                      'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                    )}>{cve.severity}</Badge>
+                  </TableCell>
+                  <TableCell className="text-[10px] max-w-[200px] truncate">{cve.desc}</TableCell>
+                  <TableCell className="text-xs font-mono text-emerald-400">{cve.fix_version || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Version Disclosure Issues */}
+      {(sw.vulnerabilities?.length ?? 0) > 0 && (
+        <div className="space-y-0.5">
+          {sw.vulnerabilities!.map((v, i) => (
+            <p key={i} className="text-[10px] text-red-400">⚠ {v}</p>
+          ))}
+        </div>
+      )}
+
+      {/* Evidence (collapsible) */}
+      {(sw.evidence?.length ?? 0) > 0 && (
+        <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', evidenceOpen && 'rotate-180')} />
+            Raw Evidence ({sw.evidence!.length} lines)
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-1.5">
+            <div className="bg-muted/50 rounded-md border border-border p-2 space-y-0.5 max-h-40 overflow-y-auto">
+              {sw.evidence!.map((line, i) => (
+                <pre key={i} className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-all">{line}</pre>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      {/* Recommendations */}
+      <div>
+        <p className="text-xs font-medium mb-1 text-muted-foreground">Recommendations</p>
+        <div className="space-y-0.5">
+          {[
+            { text: 'Inventory all software components and versions', ok: hasFP && inventory.length > 0 },
+            { text: 'Monitor for CVEs in used components', ok: totalCves === 0 },
+            { text: 'Update components to latest stable versions', ok: totalCves === 0 },
+            { text: 'Remove unused or deprecated components', ok: (sw.vulnerabilities?.length ?? 0) === 0 },
+          ].map((rec, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-xs">
+              <span className={rec.ok ? 'text-emerald-400' : 'text-red-400'}>{rec.ok ? '✓' : '✗'}</span>
+              <span className={rec.ok ? 'text-muted-foreground' : 'text-foreground'}>{rec.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default ThreatIntelligence;
