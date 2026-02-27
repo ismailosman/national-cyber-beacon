@@ -1,18 +1,43 @@
+## Override CSP and X-Frame-Options for Cloudflare-Managed Sites
 
+### Problem
 
-## Add Prominent Per-Site Scan Button to DDoS Monitor
+When running a compliance scan on a site whose DNS is managed by Cloudflare, the `csp` (Content-Security-Policy) and `x_frame_options` (X-Frame-Options) controls are marked as failed because Cloudflare manages these headers at the WAF/edge level and they may not appear in direct HTTP responses. These should be marked as passed since Cloudflare provides this protection.
 
-### What's Changing
-Make the per-site scan button more visible and prominent in the DDoS Monitor table. Currently there's a small "Re-check" button in the Actions column that may be hard to spot. We'll make it stand out better.
+### Solution
+
+Add a post-processing step in the frontend that detects Cloudflare and reclassifies these two controls as passed.
 
 ### Changes
 
-**File: `src/pages/DdosMonitor.tsx`**
+**File: `src/pages/ComplianceScan.tsx**`
 
-1. Rename the "Re-check" button to "Scan" with a play/scan icon for better visibility
-2. Style the button with a more prominent color (green/cyan accent) so it stands out from the table
-3. For rows with no scan results yet, show a primary-colored "Scan" button instead of "Re-check" to indicate first-time scanning
-4. On mobile cards, add a visible "Scan" button as well (the `MobileCard` component)
+Add a helper function `applyCloudflareOverrides` that:
 
-The existing `recheckSingle()` function already handles single-site scanning via the `/ddos/scan/single` API endpoint, so no backend changes are needed -- just UI improvements to make the button more discoverable.
+1. Checks if Cloudflare is detected via `raw_checks.ddos.providers` (contains "Cloudflare") or `raw_checks.headers.present` keys suggesting Cloudflare
+2. If detected, moves `csp` and `x_frame_options` from `failed_controls` to `passed_controls` with updated detail text: "Managed by Cloudflare WAF"
+3. Adjusts `passed`/`failed` counts and recalculates `overall_score` proportionally
+4. Adds a `cloudflare_managed: true` flag to the evidence data
 
+Apply this function in two places:
+
+- In `pollScan` when `compliance_status === 'done'` (before calling `setResults`)
+- In the history reload handler (when loading a previous scan's results)
+
+### Technical Detail
+
+```text
+function applyCloudflareOverrides(results):
+  - Detect CF from raw_checks.ddos.providers or headers server field
+  - CF_MANAGED_KEYS = ['csp', 'x_frame_options']
+  - For each key in CF_MANAGED_KEYS:
+    - If key exists in failed_controls, remove it and add to passed_controls
+    - Update detail to "Managed by Cloudflare WAF"
+    - Adjust passed/failed counts
+  - Recalculate overall_score based on new pass ratio
+  - Return modified results
+```
+
+This mirrors the existing pattern in `check-security-headers` edge function which already marks these headers as "Managed by WAF" with `managed: true` for Cloudflare sites.  
+  
+Please make sure only authenticated admin users can access /dashboard and run any scan or generate report. 
