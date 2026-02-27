@@ -1,40 +1,23 @@
 
 
-## Fix: Pre-populate Threats on Page Load
+## Changes to Threat Map Right Panel
 
-### Problem
-When `/threat-map` is refreshed, the `threats` array starts empty (`[]`). This means:
-- All attack count badges show **0**
-- The live feed sidebar is empty
-- The "Active Threats" stat shows **0**
-- The map has no arcs until the first burst fires (2-5 seconds later)
+### 1. Show 10 countries instead of 5
+Update `COUNTRY_SETS` to contain sets of 10 countries each (merge the current 4 sets of 5 into 2 sets of 10). Both desktop and mobile views will display 10 countries at a time.
 
-The `todayCount` counter is already pre-seeded correctly, but the actual threat list builds from scratch.
-
-### Solution
-Pre-generate an initial batch of threats on mount using the deterministic seeded random system that already exists. This ensures the page looks populated with realistic data immediately on load.
-
-### Changes in `src/hooks/useLiveAttacks.ts`
-
-1. **Add a `generateInitialThreats()` function** that uses the seeded PRNG to create ~30-40 threats (filling the visible feed) by running `generateBurst()` backwards from the current index. This reuses the existing burst generation logic so the data looks identical to live data.
-
-2. **Initialize `useState` with pre-generated threats** instead of an empty array:
-   - Change `useState<LiveThreat[]>([])` to `useState<LiveThreat[]>(() => generateInitialThreats())`
-
-3. **Set realistic timestamps** on initial threats -- space them out over the last few minutes so timestamps in the feed look natural (not all showing the same time).
+### 2. Remove "Top Targeted Industries in Somalia" section
+Delete the entire industries block from the right panel (lines 233-248), including the separator above it, and remove the unused `INDUSTRIES` constant, `topIndustries` memo, and `defaultIndustries` variable.
 
 ### Technical Details
 
-```text
-generateInitialThreats():
-  - Start from sharedThreatIndex and work backwards ~15 bursts
-  - Each burst produces 2-3 threats (so ~30-45 total)
-  - Assign timestamps going back in time (each burst ~2-5s apart)
-  - Return the array capped at RING_BUFFER_SIZE
-```
+**File: `src/pages/ThreatMapStandalone.tsx`**
 
-This is a single-file change with no new dependencies.
-
-### File Modified
-- `src/hooks/useLiveAttacks.ts`
-
+- Change `COUNTRY_SETS` from 4 arrays of 5 to 2 arrays of 10:
+  ```
+  Set 1: Ethiopia, Indonesia, Georgia, Ukraine, Kenya, Somalia, United States, India, Pakistan, Brazil
+  Set 2: Turkey, Nigeria, South Africa, Egypt, Bangladesh, Iran, China, Philippines, Vietnam, Colombia
+  ```
+- Remove `INDUSTRIES` constant (lines 17-27)
+- Remove `topIndustries` useMemo (lines 68-79)
+- Remove `defaultIndustries` variable (line 81)
+- Remove the "Top Targeted Industries in Somalia" JSX block and its separator from the right panel
