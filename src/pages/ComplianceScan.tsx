@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip } from 'recharts';
-import { Shield, ChevronDown, Loader2, PlayCircle, CheckCircle2, XCircle, Clock, Download, ExternalLink, Flag } from 'lucide-react';
+import { Shield, ChevronDown, Loader2, PlayCircle, CheckCircle2, XCircle, Clock, Download, ExternalLink, Flag, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatET } from '@/lib/dateUtils';
 import { toast } from '@/hooks/use-toast';
@@ -176,7 +176,7 @@ const FrameworkDetailSheet: React.FC<{ state: SheetState; onClose: () => void }>
 );
 
 /* ── Scan Metadata Header ── */
-const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targetUrl: string; onDownload: () => void; downloading?: boolean }> = ({ results, orgName, targetUrl, onDownload, downloading }) => (
+const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targetUrl: string; onDownload: () => void; downloading?: boolean; onEmail: () => void; emailing?: boolean }> = ({ results, orgName, targetUrl, onDownload, downloading, onEmail, emailing }) => (
   <Card className="glass-card border-border">
     <CardContent className="py-4 flex flex-wrap items-center gap-4 justify-between">
       <div className="flex flex-col gap-1">
@@ -193,6 +193,10 @@ const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targ
         <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownload} disabled={downloading}>
           {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           {downloading ? 'Generating...' : 'Download Report'}
+        </Button>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={onEmail} disabled={emailing}>
+          {emailing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+          {emailing ? 'Sending...' : 'Email Report'}
         </Button>
       </div>
     </CardContent>
@@ -497,6 +501,19 @@ const ComplianceScan: React.FC = () => {
           setResults(data.compliance_results);
           setScanning(false);
           setPhase('');
+          // Auto-send email (fire-and-forget)
+          if (data.compliance_results) {
+            const orgN = data.organization_name || orgName;
+            const tgtUrl = data.target_url || data.target || targetUrl;
+            fetch(`${SUPABASE_URL}/functions/v1/send-pentest-email`, {
+              method: 'POST',
+              headers: apiHeaders(),
+              body: JSON.stringify({
+                type: 'compliance_report',
+                complianceData: { results: data.compliance_results, org_name: orgN, target_url: tgtUrl },
+              }),
+            }).catch(e => console.warn('[ComplianceScan] Auto email failed:', e));
+          }
         } else if (data.compliance_status === 'error') {
           clearInterval(iv);
           setError(data.error || 'Scan failed with an error.');
@@ -570,6 +587,7 @@ const ComplianceScan: React.FC = () => {
 
   /* Download report as PDF */
   const [downloading, setDownloading] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const downloadReport = async () => {
     if (!results) return;
     setDownloading(true);
@@ -606,6 +624,29 @@ const ComplianceScan: React.FC = () => {
       toast({ title: 'Fallback', description: 'PDF generation failed. Downloaded JSON instead.', variant: 'destructive' });
     } finally {
       setDownloading(false);
+    }
+  };
+
+  /* Email report */
+  const emailReport = async () => {
+    if (!results) return;
+    setEmailing(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/send-pentest-email`, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          type: 'compliance_report',
+          complianceData: { results, org_name: orgName, target_url: targetUrl },
+        }),
+      });
+      if (!res.ok) throw new Error('Email sending failed');
+      toast({ title: 'Email Sent', description: 'Compliance report emailed successfully.' });
+    } catch (err) {
+      console.error('[ComplianceScan] Email error:', err);
+      toast({ title: 'Email Failed', description: 'Could not send the compliance report email.', variant: 'destructive' });
+    } finally {
+      setEmailing(false);
     }
   };
 
@@ -704,7 +745,7 @@ const ComplianceScan: React.FC = () => {
       {results && (
         <>
           {/* Scan Metadata */}
-          <ScanMetadata results={results} orgName={orgName} targetUrl={targetUrl} onDownload={downloadReport} downloading={downloading} />
+          <ScanMetadata results={results} orgName={orgName} targetUrl={targetUrl} onDownload={downloadReport} downloading={downloading} onEmail={emailReport} emailing={emailing} />
 
           {/* Overall Score */}
           <OverallScoreCard r={results} onControlClick={handleControlClick} />
