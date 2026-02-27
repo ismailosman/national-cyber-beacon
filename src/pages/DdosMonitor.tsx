@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   ShieldAlert, ShieldCheck, Shield, ShieldX, RefreshCw, ExternalLink,
-  ChevronDown, Search, Globe, Activity, ArrowUp, ArrowDown, Minus, Loader2
+  ChevronDown, Search, Globe, Activity, ArrowUp, ArrowDown, Minus, Loader2, Play
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toETLocaleTimeString } from '@/lib/dateUtils';
@@ -559,12 +559,19 @@ const DdosMonitor: React.FC = () => {
                           </td>
                           <td className="px-4 py-3">
                             <Button
-                              size="sm" variant="outline" className="text-xs h-7"
+                              size="sm"
+                              variant={result ? "outline" : "default"}
+                              className={cn(
+                                "text-xs h-8 font-semibold",
+                                result
+                                  ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30 hover:text-emerald-300"
+                                  : "bg-primary text-primary-foreground"
+                              )}
                               disabled={recheckingOrg === org.id}
                               onClick={e => { e.stopPropagation(); recheckSingle(org); }}
                             >
-                              {recheckingOrg === org.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-                              Re-check
+                              {recheckingOrg === org.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
+                              Scan
                             </Button>
                           </td>
                         </tr>
@@ -755,8 +762,19 @@ const MobileCard: React.FC<{
               <div>Avg: {result?.response_time?.avg_ms ? `${Math.round(result.response_time.avg_ms)}ms` : '—'}</div>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1" disabled={rechecking} onClick={e => { e.stopPropagation(); onRecheck(); }}>
-                {rechecking ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />} Re-check
+              <Button
+                size="sm"
+                variant={result ? "outline" : "default"}
+                className={cn(
+                  "flex-1 font-semibold",
+                  result
+                    ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30"
+                    : "bg-primary text-primary-foreground"
+                )}
+                disabled={rechecking}
+                onClick={e => { e.stopPropagation(); onRecheck(); }}
+              >
+                {rechecking ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />} Scan
               </Button>
               {result && (
                 <Button size="sm" variant="outline" className="flex-1" onClick={onOpenDrawer}>
