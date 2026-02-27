@@ -1,77 +1,45 @@
 
 
-## Compliance Scanner PDF Report Generation
+## Add Email Delivery for Compliance Reports
 
-### Problem
-The "Download Report" button on the Compliance Scanner page currently exports raw JSON data instead of a professionally formatted PDF report.
+### Overview
+Send a branded email with the compliance PDF report attached when a scan completes or when the user downloads a report -- matching the existing security scan email pattern.
 
-### Solution
-Create a new backend function (`generate-compliance-report`) that produces a multi-page PDF with charts, tables, and branding -- matching the visual style of the existing security scan PDF reports. Then update the frontend download button to call this function.
+### Changes
 
----
+#### 1. Update `send-pentest-email` Edge Function
+Add a new email type `compliance_report` that:
+- Accepts compliance results, org name, target URL, grade, and score
+- Calls `generate-compliance-report` to get the PDF
+- Uploads the PDF to the `scan-reports` storage bucket
+- Builds a branded HTML email with:
+  - Navy header with "Compliance Assessment Complete"
+  - Compliance grade badge (A-F) with color coding
+  - Score display (e.g., 46/100)
+  - Pass/fail summary (e.g., "4 of 11 controls passed")
+  - Framework averages (NIST, ISO, GDPR, ITU) with color indicators
+  - "Download PDF Report" and "View Dashboard" buttons
+  - Standard Cyber Defense email signature
+- Sends to admin recipients (osmando@gmail.com, info@cyberdefense.so) plus optional client email
+- Attaches the PDF as a base64 email attachment
 
-### New Backend Function: `generate-compliance-report`
-
-**File:** `supabase/functions/generate-compliance-report/index.ts`
-
-A PDF generator that accepts compliance results and produces a branded, multi-page report with:
-
-**Page 1 -- Executive Summary**
-- Branded header with eagle logo (reusing `_shared/logoUtils.ts`)
-- Organization name, target URL, scan date
-- Overall compliance score with large grade badge (A-F)
-- Pass/fail summary bar (X of Y controls passed)
-- Framework averages overview: NIST CSF, ISO 27001, GDPR, ITU NCI -- each with score and color-coded bar
-
-**Page 2 -- Framework Breakdown**
-- Four framework sections, each showing category scores as horizontal bars
-- Color coding: Green (80+), Yellow (60-79), Orange (40-59), Red (below 40)
-- Category names with numeric scores
-
-**Page 3 -- Compliance Findings Table**
-- Sorted by severity (CRITICAL > HIGH > MEDIUM > LOW)
-- Columns: Severity, Control Key, Issue Detail, NIST mapping, ISO mapping, GDPR mapping
-- Color-coded severity labels
-- Remediation text for each finding
-
-**Page 4 -- Technical Evidence Summary**
-- SSL status, uptime checks, security headers grade, DDoS protection, DNS security
-- Pass/fail indicators for each check area
-
-**Every page** includes:
-- Navy header with logo and "SOMALIA CYBER DEFENCE" branding
-- Footer with confidentiality notice, date, page number
-- Consistent color scheme matching existing reports
-
----
-
-### Frontend Changes
-
-**File:** `src/pages/ComplianceScan.tsx`
-
-Update the `downloadReport` function to:
-1. Call the new `generate-compliance-report` edge function with the compliance results, org name, and target URL
-2. Receive base64 PDF data in the response
-3. Decode and trigger a browser download as `compliance-report-{orgName}.pdf`
-4. Show a loading spinner on the download button while generating
-5. Fall back to JSON download if PDF generation fails
-
----
-
-### Configuration
-
-**File:** `supabase/config.toml`
-
-Add the new function entry with `verify_jwt = false` (matching other report functions).
-
----
+#### 2. Update `src/pages/ComplianceScan.tsx`
+- Add an "Email Report" button next to the "Download Report" button in the `ScanMetadata` component
+- After a scan completes successfully, automatically send the compliance report email (same pattern as security scanner)
+- Add `emailing` state for the email button loading indicator
+- The email function call sends `{ type: "compliance_report", complianceData: { results, org_name, target_url } }` to `send-pentest-email`
 
 ### Technical Details
 
-- The PDF is built using raw PDF operators (same technique as `generate-scan-report` and `generate-report`) -- no external libraries needed
-- Logo embedding reuses the shared `fetchLogoPngData()` utility
-- Framework bar charts are rendered as colored rectangles with proportional widths
-- The function returns `{ pdf_base64: string }` for the frontend to decode
-- Severity color mapping: CRITICAL = red, HIGH = orange, MEDIUM = yellow, LOW = blue
-- Score gauge rendered as a colored box with grade letter
+**Email HTML template** will follow the same structure as `scanCompletedEmail` and `reportDeliveryEmail`:
+- 600px centered table layout
+- Navy header (#0f172a) with compliance icon
+- Grade box with color: green (A/B), yellow (C), red (D/F)
+- Framework scores shown as colored text values
+- PDF download button linking to storage URL
+- Standard email signature
+
+**PDF generation and upload** reuses the existing `generatePdfAndUpload` pattern but calls `generate-compliance-report` instead of `generate-scan-report`.
+
+**Auto-send on scan completion**: When `pollScan` detects `compliance_status === 'done'`, it will trigger the email automatically (fire-and-forget, non-blocking).
 
