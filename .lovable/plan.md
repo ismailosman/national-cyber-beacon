@@ -1,125 +1,90 @@
 
 
-## Replace Threat Intelligence Scorecards with Real Backend Data
+## Update Threat Intelligence: Single-Org Scanning with Sequential Queue
 
-Replace the simulated scorecard data (built from multiple DB tables and edge functions) with real scan results from the Kali Linux backend API, routed through the existing `security-scanner-proxy` edge function. Only the Scorecards tab changes; other tabs show a "Coming soon" placeholder.
-
-### API Integration
-
-Use the same proxy pattern as DDoS Monitor. The `security-scanner-proxy` edge function already forwards any path to the backend.
-
-| Action | Method | Proxy Path |
-|--------|--------|------------|
-| Bulk scan | POST | `/threat/scan/bulk` |
-| Single scan | POST | `/threat/scan/single` |
-| Poll result | GET | `/threat/scan/{scan_id}` |
+Replace the bulk scan approach with individual org scanning, add scan queue functionality, per-org localStorage persistence, and enhanced card UI states.
 
 ### Changes to `src/pages/ThreatIntelligence.tsx`
 
-#### 1. New Types
+#### 1. Per-Org localStorage Persistence
 
-Replace `OrgScorecard` and `BreakdownItem` with types matching the backend response:
+Replace the single `threat_intel_last_scan` key with per-org keys `threat_intel_{orgName}`. On mount, iterate through loaded orgs and restore each result from localStorage. Remove the old bulk `saveToLS`/`loadFromLS` helpers.
 
-- `ThreatScanResult` -- mirrors the single scan `result` object (score, grade, risk_level, alerts, checks with all 10 sub-objects, checked_at)
-- `BulkScanSummary` -- mirrors `summary` (total, avg_score, critical/high/medium/low counts, grade_counts, national_risk)
-- `ThreatScanRecord` -- wraps `{ org: MonitoredOrg, result: ThreatScanResult }`
+#### 2. Single-Org Scan with Mutex
 
-#### 2. Proxy Helper
+Replace `refreshSingleOrg` with a scan function that enforces one-at-a-time:
+- Track `scanningOrgId` (string or null) and `scanPhase`/`scanPercent` state
+- If a scan is running and another card's button is clicked, show toast: "Please wait -- scan in progress for {orgName}"
+- POST to `/threat/scan/single` via `proxyFetch`, poll every 4 seconds
+- While polling, update `scanPhase` and `scanPercent` from response `phase` and `percent` fields
+- On completion, update that org's result in state and save to `localStorage.setItem('threat_intel_{orgName}', ...)`
+- On error, set an `errorOrgs` set to track which orgs had failures
 
-Add `proxyFetch<T>(path, method?, body?)` using the same pattern as DDoS Monitor -- builds URL via `security-scanner-proxy?path=...`, includes apikey header.
+#### 3. Sequential Queue ("Scan All")
 
-#### 3. "Run Full Scan" Button
+Repurpose "Run Full Scan" button to "Scan All (Sequential)":
+- On click, show confirmation dialog: "This will scan all N organizations one by one. Continue?"
+- If confirmed, set `queueRunning = true`, iterate through `orgs` array
+- For each org: call the same single-scan function, wait for completion, then move to next
+- Track `queueIndex` and `queueTotal` for progress display
+- Show a progress bar at the top: "Queue: {done}/{total} -- scanning {currentOrg}..."
+- Add a "Stop Queue" button that sets a `queueCancelled` ref to true, stopping after current scan finishes
+- Each card updates individually as its scan completes
 
-- Collect all orgs (name, url, sector) from existing org state
-- POST to `/threat/scan/bulk`
-- Poll every 5s showing progress: "Scanning {phase} -- {percent}%"
-- When `status === "done"`, populate `scanResults` map and `summary` state
-- Save to localStorage key `threat_intel_last_scan`
+#### 4. Scan Status Bar
 
-#### 4. National Threat Level Banner
+Add a status bar below the National Threat Level banner:
+- When idle: "{scannedCount}/{total} organizations scanned"
+- When scanning single: "Scanning: {orgName} -- {phase} ({percent}%)"
+- When queue running: "Queue: {done}/{total} complete -- scanning {orgName}..."
 
-- Use `summary.national_risk` for level text (CRITICAL/HIGH/MEDIUM/LOW)
-- Use `summary.avg_score` for percentage display
-- Use `summary.total` for orgs assessed count
+#### 5. Card UI Updates
 
-#### 5. Grade Distribution Pills
+Each scorecard now shows these states:
 
-- Use `summary.grade_counts` object (`A+`, `A`, `B`, `C`, `D`, `F`) for the 5 grade cards
-- D/F card combines `grade_counts.D + grade_counts.F`
+**Never scanned**: Grey score circle showing "N/A", text "Not yet scanned", scan button enabled
 
-#### 6. Scorecard Grid (Real Data)
+**Scanning**: Spinning loader icon replacing the refresh button, phase text below score circle ("Checking SSL... 40%"), small progress bar on card
 
-Each card shows:
-- `ScoreGauge` using `result.score` (out of 100) and `result.grade`
-- Risk badge using `result.risk_level`
-- Score text: `{result.score}/100 pts ({result.score}%)`
-- Timestamp: `result.checked_at` formatted as "Xm ago"
-- 10 check badges at bottom, each showing pass/warn/fail:
-  - uptime: `checks.uptime.verdict === "ONLINE"` -> green; score > 0 but not 10 -> amber; else red
-  - ssl: `checks.ssl.valid && checks.ssl.days_left > 30` -> green; valid but expiring -> amber; else red
-  - ddos: `checks.ddos.protected` -> green; else red
-  - email: `checks.email.results.spf.present && checks.email.results.dmarc.present` -> green; one present -> amber; else red
-  - headers: `checks.headers.score >= 7` -> green; >= 4 -> amber; else red
-  - ports: `checks.ports.risky_count === 0` -> green; else red
-  - defacement: `!checks.defacement.defaced` -> green; else red
-  - dns: `checks.dns.zone_transfer_blocked` -> green; else red
-  - blacklist: `!checks.blacklist.listed` -> green; else red
-  - software: `checks.software.vulnerabilities.length === 0` -> green; else red
+**Scan complete**: Score gauge with grade, checked_at as "Last scanned: 5m ago", "Rescan" link under timestamp, check badges row
 
-#### 7. Detail Drawer (Sheet)
+**Scan failed**: Red "Scan failed" text with retry button
 
-Replace the current Dialog with a Sheet (slide-out). When a scorecard is clicked:
-- Overall score + grade as large display
-- All 10 checks with individual scores (0-10) as progress bars
-- Alerts list with severity badges
-- For each failed check: show `alert_msg`
-- SSL: issuer, expiry, days_left
-- DDoS: providers list or "None", evidence
-- Email: SPF/DMARC/DKIM status
-- Ports: table of `exposed_risky` (port, service, severity)
-- Software: detected tech and vulnerabilities
-- Blacklist: `listed_on` entries
-- DNS: zone transfer, DNSSEC, CAA
-- `checked_at` timestamp
+**While another scan is running**: Scan button greyed out with tooltip "Scan in progress..."
 
-#### 8. Single Org Refresh
+#### 6. State Changes
 
-Add a refresh icon button on each scorecard. On click:
-- POST `/threat/scan/single` with that org's details
-- Show spinner on that card only
-- Poll until done, update just that card's result
-- Update localStorage
+Remove:
+- `scanning` boolean (replace with `scanningOrgId`)
+- `scanStatus` string (replace with `scanPhase`)
+- `refreshingOrg` (merge into `scanningOrgId`)
+- `runBulkScan` callback
+- Bulk `saveToLS`/`loadFromLS`
 
-#### 9. localStorage Persistence
+Add:
+- `scanningOrgId: string | null` -- which org is currently scanning
+- `scanningOrgName: string` -- display name of current scan
+- `scanPhase: string` -- current phase text from poll
+- `scanPercent: number` -- current percent from poll
+- `errorOrgs: Set<string>` -- org IDs that had scan failures
+- `queueRunning: boolean` -- whether sequential queue is active
+- `queueIndex: number` -- current position in queue
+- `queueTotal: number` -- total queue size
+- `queueCancelledRef: React.MutableRefObject<boolean>` -- cancel flag
 
-- On mount, load from `localStorage.getItem('threat_intel_last_scan')`
-- Parse and restore `scanResults` map and `summary`
-- On any scan completion, save updated state
+#### 7. Confirmation Dialog
 
-#### 10. Other Tabs -- "Coming Soon"
+Add an `AlertDialog` for the "Scan All (Sequential)" confirmation. Import from existing `@/components/ui/alert-dialog`.
 
-Replace Threat Feed, Tech Stack, Phishing, and Breaches tab content with a centered "Coming soon -- real data integration in progress" message. Keep the tab structure intact.
+#### 8. Tooltip on Disabled Buttons
 
-#### 11. Code Removal
-
-Remove all old scanning logic:
-- `calculateScorecards` function and all DB queries (uptime_logs, ssl_logs, ddos_risk_logs, early_warning_logs, tech_fingerprints)
-- `runFingerprinting`, `runSecurityHeadersCheck`, `runEmailDnsCheck`, `runBlacklistCheck`, `runDefacementCheck`, `runPortsCheck` callbacks
-- `invokeWithRetry`, `logCheckError` helpers
-- `runBreachCheck`, `runPhishingCheck`, `fetchThreatFeed` callbacks
-- All realtime subscriptions and background scheduling intervals
-- `OrgScorecard`, `BreakdownItem`, `ThreatFeedData`, `TechFingerprint`, `PhishingResult`, `BreachResult` types
-- `matchLogToOrg`, `matchFirstLogToOrg`, `orgNameMatches`, `NAME_ALIASES`
-- `ConfidenceBadge` component
-- Breach detail dialog
-
-Keep: `MonitoredOrg` type, org loading from `organizations` table, `ScoreGauge` component, `gradeColor`/`gradeBg`/`severityBadge`/`timeAgo` helpers, search/filter/grade filter logic, all styling/layout.
+Use existing `Tooltip` component to show "Scan in progress..." on disabled scan buttons.
 
 ### Technical Notes
 
-- No new edge function needed -- reuses `security-scanner-proxy`
-- File will shrink from ~2132 lines to ~800-900 lines
-- Polling uses `setInterval` with ref-based cleanup, same pattern as DDoS Monitor
-- All data gracefully handles missing fields with optional chaining
-- Error handling: catch non-OK responses, show toast with error detail
+- No backend or edge function changes needed
+- All API calls use existing `proxyFetch` helper with `/threat/scan/single` and `/threat/scan/{scan_id}`
+- The sequential queue is implemented as an async loop with early-exit check on `queueCancelledRef.current`
+- Grade distribution pills and national banner will compute from loaded per-org results rather than from a bulk summary object
+- File size stays roughly the same (~730 lines)
 
