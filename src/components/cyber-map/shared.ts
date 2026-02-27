@@ -46,6 +46,7 @@ export const COUNTRY_ISO: Record<string, string> = {
   'Republic of the Congo': 'cg',
   'Democratic Republic of the Congo': 'cd',
   'United States of America': 'us',
+  'United States': 'us',
   'United Kingdom': 'gb',
   'United Arab Emirates': 'ae',
   'Czechia': 'cz',
