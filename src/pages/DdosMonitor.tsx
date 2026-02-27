@@ -8,17 +8,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   ShieldAlert, ShieldCheck, Shield, ShieldX, RefreshCw, ExternalLink,
-  ChevronDown, Search, Globe, Activity
+  ChevronDown, Search, Globe, Activity, ArrowUp, ArrowDown, Minus, Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toETLocaleTimeString } from '@/lib/dateUtils';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
-/* ─── Types ─── */
+/* ─── Types (backend response shapes) ─── */
 interface MonitoredOrg {
   id: string;
   name: string;
@@ -27,35 +27,67 @@ interface MonitoredOrg {
   is_active: boolean;
 }
 
-interface DdosProtection {
-  hasCDN: boolean;
-  cdnProvider: string | null;
-  hasRateLimiting: boolean;
-  hasWAF: boolean;
-  originExposed: boolean;
-  protectionHeaders: string[];
-  serverHeader: string | null;
+interface RiskFactor {
+  factor: string;
+  weight: number;
+  severity: string;
 }
 
-interface RiskAssessment {
-  riskLevel: 'low' | 'medium' | 'high' | 'critical';
-  protection: DdosProtection | null;
-  responseTimeSpike: boolean;
-  availabilityFlapping: boolean;
-  extendedDowntime: boolean;
-  riskFactors: string[];
-  avg1h: number | null;
-  avg24h: number | null;
-  flaps1h: number;
-  recentPings: { time: string; responseTime: number | null; status: string }[];
+interface ResponseTime {
+  avg_ms: number;
+  min_ms: number;
+  max_ms: number;
+  trend: 'stable' | 'degrading' | 'improving';
+  status: 'normal' | 'slow' | 'degraded' | 'unreachable';
+}
+
+interface ExposedPort {
+  port: number;
+  service: string;
+  risk: string;
+}
+
+interface DdosScanResult {
+  org_name: string;
+  url: string;
+  risk_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  risk_score: number;
+  risk_factors: RiskFactor[];
+  waf_cdn: string[];
+  protected: boolean;
+  primary_cdn: string | null;
+  rate_limited: boolean;
+  origin_exposed: boolean;
+  waf_evidence: string[];
+  response_time: ResponseTime;
+  exposed_ports: ExposedPort[];
+  reachable: boolean;
+  checked_at: string;
+}
+
+interface BulkSummary {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  protected: number;
+  unprotected: number;
+}
+
+interface ScanState {
+  results: Map<string, DdosScanResult>;
+  summary: BulkSummary | null;
 }
 
 /* ─── Constants ─── */
-const RISK_RECALC_INTERVAL = 60_000;
-const HEADER_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
 const SECTORS = ['All', 'Government', 'Bank', 'Telecom', 'Health', 'Education', 'Other'];
 const RISK_LEVELS = ['All', 'Low', 'Medium', 'High', 'Critical'];
 const PROTECTION_FILTERS = ['All', 'CDN Protected', 'Unprotected'];
+const LS_KEY = 'ddos_last_scan';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const riskColors: Record<string, string> = {
   low: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
@@ -73,38 +105,44 @@ const sectorColors: Record<string, string> = {
   other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
-const riskOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+const riskOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
-/* ─── Risk Calculation ─── */
-function calculateRiskLevel(
-  protection: DdosProtection | null,
-  spike: boolean,
-  flapping: boolean,
-  downtime: boolean,
-): { level: 'low' | 'medium' | 'high' | 'critical'; factors: string[] } {
-  const factors: string[] = [];
+/* ─── Proxy helper ─── */
+function proxyUrl(path: string): string {
+  return `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
+}
 
-  if (!protection?.hasCDN) factors.push('No CDN/DDoS protection');
-  if (!protection?.hasRateLimiting) factors.push('No rate limiting');
-  if (!protection?.hasWAF) factors.push('No WAF');
-  if (protection?.originExposed) factors.push('Origin IP exposed');
-  if (spike) factors.push('Response time spike (>3x baseline)');
-  if (flapping) factors.push('Availability flapping (3+ status changes/1h)');
-  if (downtime) factors.push('Extended downtime (3+ consecutive failures)');
+async function proxyFetch<T>(path: string, method = 'GET', body?: any): Promise<T> {
+  const res = await fetch(proxyUrl(path), {
+    method,
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json: any;
+  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  if (!res.ok) throw new Error(json?.detail || json?.error || res.statusText || 'API Error');
+  return json as T;
+}
 
-  const activeAttack = spike || flapping || downtime;
-  const noProtection = !protection?.hasCDN;
+/* ─── Persistence helpers ─── */
+function saveScanToLS(results: Map<string, DdosScanResult>, summary: BulkSummary | null) {
+  try {
+    const obj = { results: Object.fromEntries(results), summary, savedAt: new Date().toISOString() };
+    localStorage.setItem(LS_KEY, JSON.stringify(obj));
+  } catch { /* quota exceeded */ }
+}
 
-  if (downtime || (spike && flapping) || (activeAttack && noProtection && factors.length >= 4)) {
-    return { level: 'critical', factors };
-  }
-  if ((noProtection && protection?.originExposed) || spike || flapping || factors.length >= 3) {
-    return { level: 'high', factors };
-  }
-  if (factors.length >= 1) {
-    return { level: 'medium', factors };
-  }
-  return { level: 'low', factors };
+function loadScanFromLS(): ScanState | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      results: new Map(Object.entries(parsed.results || {})),
+      summary: parsed.summary || null,
+    };
+  } catch { return null; }
 }
 
 /* ─── Component ─── */
@@ -112,16 +150,20 @@ const DdosMonitor: React.FC = () => {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const [orgs, setOrgs] = useState<MonitoredOrg[]>([]);
-  const [risks, setRisks] = useState<Map<string, RiskAssessment>>(new Map());
+  const [scanResults, setScanResults] = useState<Map<string, DdosScanResult>>(new Map());
+  const [summary, setSummary] = useState<BulkSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [checking, setChecking] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState('');
+  const [recheckingOrg, setRecheckingOrg] = useState<string | null>(null);
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
+  const [drawerOrg, setDrawerOrg] = useState<{ org: MonitoredOrg; result: DdosScanResult } | null>(null);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState('All');
   const [sectorFilter, setSectorFilter] = useState('All');
   const [protectionFilter, setProtectionFilter] = useState('All');
   const [sortBy, setSortBy] = useState<'risk' | 'name' | 'responseTime' | 'flaps'>('risk');
-  const lastHeaderCheckRef = useRef(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /* ── Load orgs ── */
   const loadOrgs = useCallback(async () => {
@@ -138,211 +180,148 @@ const DdosMonitor: React.FC = () => {
         is_active: true,
       })));
     }
+    // Load cached results
+    const cached = loadScanFromLS();
+    if (cached) {
+      setScanResults(cached.results);
+      setSummary(cached.summary);
+    }
     setLoading(false);
   }, []);
 
-  /* ── Calculate risk from uptime_logs ── */
-  const calculateRisks = useCallback(async (orgList: MonitoredOrg[], protections: Map<string, DdosProtection>) => {
-    const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  useEffect(() => { loadOrgs(); }, [loadOrgs]);
 
-    // Fetch last 24h of uptime logs
-    const { data: logs } = await supabase
-      .from('uptime_logs')
-      .select('organization_id, status, response_time_ms, checked_at')
-      .gte('checked_at', twentyFourHoursAgo)
-      .order('checked_at', { ascending: false })
-      .limit(1000);
+  /* cleanup polling on unmount */
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-    if (!logs) return;
-
-    const newRisks = new Map<string, RiskAssessment>();
-
-    for (const org of orgList) {
-      const orgLogs = logs.filter(l => l.organization_id === org.id);
-      const logsLastHour = orgLogs.filter(l => l.checked_at >= oneHourAgo);
-      const logsLast24h = orgLogs;
-
-      // Avg response times
-      const rt1h = logsLastHour.filter(l => l.response_time_ms != null).map(l => l.response_time_ms!);
-      const rt24h = logsLast24h.filter(l => l.response_time_ms != null).map(l => l.response_time_ms!);
-      const avg1h = rt1h.length > 0 ? rt1h.reduce((a, b) => a + b, 0) / rt1h.length : null;
-      const avg24h = rt24h.length > 0 ? rt24h.reduce((a, b) => a + b, 0) / rt24h.length : null;
-
-      // Response time spike
-      const spike = avg1h != null && avg24h != null && avg24h > 0 && avg1h > 3 * avg24h;
-
-      // Availability flapping - count status changes in last hour
-      let flaps = 0;
-      const sortedHour = [...logsLastHour].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
-      for (let i = 1; i < sortedHour.length; i++) {
-        if (sortedHour[i].status !== sortedHour[i - 1].status) flaps++;
-      }
-      const flapping = flaps >= 3;
-
-      // Extended downtime - 3+ consecutive down pings (most recent)
-      let consecutiveDown = 0;
-      for (const log of orgLogs) {
-        if (log.status === 'down') consecutiveDown++;
-        else break;
-      }
-      const extendedDowntime = consecutiveDown >= 3;
-
-      const protection = protections.get(org.id) || null;
-      const { level, factors } = calculateRiskLevel(protection, spike, flapping, extendedDowntime);
-
-      // Recent pings for sparkline (last 20)
-      const recentPings = orgLogs.slice(0, 20).reverse().map(l => ({
-        time: toETLocaleTimeString(l.checked_at, { hour: '2-digit', minute: '2-digit' }),
-        responseTime: l.response_time_ms,
-        status: l.status,
-      }));
-
-      newRisks.set(org.id, {
-        riskLevel: level,
-        protection,
-        responseTimeSpike: spike,
-        availabilityFlapping: flapping,
-        extendedDowntime,
-        riskFactors: factors,
-        avg1h,
-        avg24h,
-        flaps1h: flaps,
-        recentPings,
-      });
-    }
-
-    setRisks(newRisks);
+  /* ── Match scan result to org by name/url ── */
+  const matchResultToOrg = useCallback((result: DdosScanResult, orgList: MonitoredOrg[]): string | null => {
+    const match = orgList.find(o =>
+      o.name.toLowerCase() === (result.org_name || '').toLowerCase() ||
+      o.url.replace(/\/$/, '') === (result.url || '').replace(/\/$/, '')
+    );
+    return match?.id || null;
   }, []);
 
-  /* ── Check DDoS headers ── */
-  const checkHeaders = useCallback(async (orgList: MonitoredOrg[]) => {
-    if (orgList.length === 0) return new Map<string, DdosProtection>();
-    setChecking(true);
+  /* ── Poll scan ── */
+  const pollScan = useCallback((scanId: string, orgList: MonitoredOrg[], isBulk: boolean): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        try {
+          const data = await proxyFetch<any>(`/ddos/scan/${scanId}`);
+          if (data.status === 'done') {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
 
-    try {
-      const urls = orgList.map(o => o.url);
-      const { data, error } = await supabase.functions.invoke('check-ddos-risk', { body: { urls } });
+            if (isBulk && data.result) {
+              const newResults = new Map(scanResults);
+              const orgResults: DdosScanResult[] = data.result.organizations || [];
+              for (const r of orgResults) {
+                const orgId = matchResultToOrg(r, orgList);
+                if (orgId) newResults.set(orgId, r);
+              }
+              setScanResults(newResults);
+              setSummary(data.result.summary || null);
+              saveScanToLS(newResults, data.result.summary || null);
+            } else if (!isBulk && data.result) {
+              const r = data.result as DdosScanResult;
+              const orgId = matchResultToOrg(r, orgList);
+              if (orgId) {
+                setScanResults(prev => {
+                  const next = new Map(prev);
+                  next.set(orgId, r);
+                  saveScanToLS(next, summary);
+                  return next;
+                });
+              }
+            }
+            resolve();
+          } else if (data.status === 'error') {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            reject(new Error(data.error || 'Scan failed'));
+          }
+          // else still running, keep polling
+        } catch (err) {
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          reject(err);
+        }
+      };
 
-      if (error || !data?.results) {
-        toast({ title: 'DDoS Check Failed', description: 'Could not reach the DDoS check service.', variant: 'destructive' });
-        setChecking(false);
-        return new Map<string, DdosProtection>();
-      }
-
-      const results = data.results as Array<{ url: string; ddosProtection: DdosProtection }>;
-      const urlMap = new Map(results.map(r => [r.url, r.ddosProtection]));
-
-      const protections = new Map<string, DdosProtection>();
-      for (const org of orgList) {
-        const p = urlMap.get(org.url);
-        if (p) protections.set(org.id, p);
-      }
-
-      lastHeaderCheckRef.current = Date.now();
-      toast({ title: 'DDoS Check Complete', description: `Checked ${orgList.length} organizations.` });
-      setChecking(false);
-      return protections;
-    } catch {
-      toast({ title: 'DDoS Check Error', variant: 'destructive' });
-      setChecking(false);
-      return new Map<string, DdosProtection>();
-    }
-  }, [toast]);
+      pollRef.current = setInterval(poll, 5000);
+      // also run immediately
+      poll();
+    });
+  }, [scanResults, summary, matchResultToOrg]);
 
   /* ── Check All Now ── */
-  const checkAll = useCallback(async (orgList?: MonitoredOrg[]) => {
-    const list = orgList || orgs;
-    const protections = await checkHeaders(list);
-    await calculateRisks(list, protections);
-
-    // Store to ddos_risk_logs
-    const logsToInsert = list.map(org => {
-      const r = risks.get(org.id);
-      const p = protections.get(org.id);
-      return {
-        organization_id: org.id,
-        organization_name: org.name,
-        url: org.url,
-        risk_level: r?.riskLevel || 'low',
-        has_cdn: p?.hasCDN || false,
-        cdn_provider: p?.cdnProvider || null,
-        has_rate_limiting: p?.hasRateLimiting || false,
-        has_waf: p?.hasWAF || false,
-        origin_exposed: p?.originExposed ?? true,
-        response_time_spike: r?.responseTimeSpike || false,
-        availability_flapping: r?.availabilityFlapping || false,
-        extended_downtime: r?.extendedDowntime || false,
-        risk_factors: r?.riskFactors || [],
-        protection_headers: p?.protectionHeaders || [],
-        server_header: p?.serverHeader || null,
+  const checkAll = useCallback(async () => {
+    if (orgs.length === 0) return;
+    setScanning(true);
+    setScanProgress(`Scanning ${orgs.length} organizations...`);
+    try {
+      const payload = {
+        organizations: orgs.map(o => ({ name: o.name, url: o.url, sector: o.sector })),
       };
-    });
-
-    await supabase.from('ddos_risk_logs').insert(logsToInsert);
-  }, [orgs, risks, checkHeaders, calculateRisks]);
+      const { scan_id } = await proxyFetch<{ scan_id: string; status: string; total: number }>('/ddos/scan/bulk', 'POST', payload);
+      await pollScan(scan_id, orgs, true);
+      toast({ title: 'DDoS Scan Complete', description: `Scanned ${orgs.length} organizations.` });
+    } catch (err: any) {
+      toast({ title: 'DDoS Scan Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setScanning(false);
+      setScanProgress('');
+    }
+  }, [orgs, pollScan, toast]);
 
   /* ── Re-check single ── */
   const recheckSingle = useCallback(async (org: MonitoredOrg) => {
-    const protections = await checkHeaders([org]);
-    await calculateRisks(orgs, new Map([...Array.from(risks.entries()).map(([k, v]) => [k, v.protection] as [string, DdosProtection | null]), ...protections.entries()].filter(([, v]) => v != null) as [string, DdosProtection][]));
-  }, [orgs, risks, checkHeaders, calculateRisks]);
-
-  /* ── Init ── */
-  useEffect(() => { loadOrgs(); }, [loadOrgs]);
-
-  useEffect(() => {
-    if (orgs.length > 0 && !loading) {
-      checkAll(orgs);
+    setRecheckingOrg(org.id);
+    try {
+      const { scan_id } = await proxyFetch<{ scan_id: string; status: string }>('/ddos/scan/single', 'POST', {
+        name: org.name, url: org.url, sector: org.sector,
+      });
+      await pollScan(scan_id, orgs, false);
+      toast({ title: 'Re-check Complete', description: `${org.name} updated.` });
+    } catch (err: any) {
+      toast({ title: 'Re-check Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setRecheckingOrg(null);
     }
-  }, [orgs.length, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orgs, pollScan, toast]);
 
-  /* ── Recalculate risk every 60s ── */
-  useEffect(() => {
-    if (orgs.length === 0 || loading) return;
-    const interval = setInterval(() => {
-      const protections = new Map<string, DdosProtection>();
-      risks.forEach((r, id) => { if (r.protection) protections.set(id, r.protection); });
-      calculateRisks(orgs, protections);
-    }, RISK_RECALC_INTERVAL);
-    return () => clearInterval(interval);
-  }, [orgs, loading, risks, calculateRisks]);
+  /* ── Build display rows ── */
+  const riskEntries = orgs.map(org => ({ org, result: scanResults.get(org.id) || null }));
 
-  /* ── Filter & Sort ── */
-  const riskEntries = orgs.map(org => ({ org, risk: risks.get(org.id) }));
-
-  const filtered = riskEntries.filter(({ org, risk }) => {
+  const filtered = riskEntries.filter(({ org, result }) => {
     if (search && !org.name.toLowerCase().includes(search.toLowerCase()) && !org.url.toLowerCase().includes(search.toLowerCase())) return false;
-    if (riskFilter !== 'All' && risk?.riskLevel !== riskFilter.toLowerCase()) return false;
+    if (riskFilter !== 'All' && (result?.risk_level || '').toLowerCase() !== riskFilter.toLowerCase()) return false;
     if (sectorFilter !== 'All' && org.sector.toLowerCase() !== sectorFilter.toLowerCase()) return false;
-    if (protectionFilter === 'CDN Protected' && !risk?.protection?.hasCDN) return false;
-    if (protectionFilter === 'Unprotected' && risk?.protection?.hasCDN) return false;
+    if (protectionFilter === 'CDN Protected' && !result?.protected) return false;
+    if (protectionFilter === 'Unprotected' && result?.protected) return false;
     return true;
   });
 
   filtered.sort((a, b) => {
     switch (sortBy) {
-      case 'risk': return (riskOrder[a.risk?.riskLevel || 'low'] ?? 3) - (riskOrder[b.risk?.riskLevel || 'low'] ?? 3);
+      case 'risk': return (riskOrder[(a.result?.risk_level || 'LOW').toLowerCase()] ?? 3) - (riskOrder[(b.result?.risk_level || 'LOW').toLowerCase()] ?? 3);
       case 'name': return a.org.name.localeCompare(b.org.name);
-      case 'responseTime': return (a.risk?.avg1h || 99999) - (b.risk?.avg1h || 99999);
-      case 'flaps': return (b.risk?.flaps1h || 0) - (a.risk?.flaps1h || 0);
+      case 'responseTime': return (a.result?.response_time?.avg_ms || 99999) - (b.result?.response_time?.avg_ms || 99999);
+      case 'flaps': return (b.result?.exposed_ports?.length || 0) - (a.result?.exposed_ports?.length || 0);
       default: return 0;
     }
   });
 
   /* ── Stats ── */
-  const stats = {
+  const stats = summary || {
     total: orgs.length,
-    low: riskEntries.filter(e => e.risk?.riskLevel === 'low').length,
-    medium: riskEntries.filter(e => e.risk?.riskLevel === 'medium').length,
-    high: riskEntries.filter(e => e.risk?.riskLevel === 'high').length,
-    critical: riskEntries.filter(e => e.risk?.riskLevel === 'critical').length,
-    cdnProtected: riskEntries.filter(e => e.risk?.protection?.hasCDN).length,
+    critical: riskEntries.filter(e => e.result?.risk_level === 'CRITICAL').length,
+    high: riskEntries.filter(e => e.result?.risk_level === 'HIGH').length,
+    medium: riskEntries.filter(e => e.result?.risk_level === 'MEDIUM').length,
+    low: riskEntries.filter(e => e.result?.risk_level === 'LOW').length,
+    protected: riskEntries.filter(e => e.result?.protected).length,
+    unprotected: riskEntries.filter(e => e.result && !e.result.protected).length,
   };
 
-  const criticalOrgs = riskEntries.filter(e => e.risk?.riskLevel === 'critical').map(e => e.org.name);
-  const highCount = stats.high;
+  const criticalOrgs = riskEntries.filter(e => e.result?.risk_level === 'CRITICAL').map(e => e.org.name);
 
   if (loading) {
     return (
@@ -366,9 +345,9 @@ const DdosMonitor: React.FC = () => {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Real-time DDoS risk assessment for monitored organizations</p>
         </div>
-        <Button onClick={() => checkAll()} disabled={checking} className="gap-2">
-          <RefreshCw className={cn('w-4 h-4', checking && 'animate-spin')} />
-          {checking ? 'Checking...' : 'Check All Now'}
+        <Button onClick={checkAll} disabled={scanning} className="gap-2">
+          <RefreshCw className={cn('w-4 h-4', scanning && 'animate-spin')} />
+          {scanning ? scanProgress || 'Scanning...' : 'Check All Now'}
         </Button>
       </div>
 
@@ -412,7 +391,7 @@ const DdosMonitor: React.FC = () => {
         <Card className="border-cyan-500/30 bg-cyan-500/5">
           <CardContent className="p-4 text-center">
             <ShieldCheck className="w-5 h-5 text-cyan-400 mx-auto mb-1" />
-            <div className="text-2xl font-bold text-cyan-400">{stats.cdnProtected}</div>
+            <div className="text-2xl font-bold text-cyan-400">{stats.protected}</div>
             <div className="text-xs text-muted-foreground">CDN Protected</div>
           </CardContent>
         </Card>
@@ -424,20 +403,20 @@ const DdosMonitor: React.FC = () => {
           <ShieldX className="w-4 h-4 text-red-400" />
           <AlertTitle className="text-red-400">⚠ CRITICAL</AlertTitle>
           <AlertDescription className="text-red-300">
-            {criticalOrgs.join(', ')} may be under active DDoS attack — Extended downtime detected with no DDoS protection
+            {criticalOrgs.join(', ')} — Critical DDoS risk detected
           </AlertDescription>
         </Alert>
       )}
-      {criticalOrgs.length === 0 && highCount > 0 && (
+      {criticalOrgs.length === 0 && stats.high > 0 && (
         <Alert className="border-orange-500/50 bg-orange-500/10">
           <ShieldAlert className="w-4 h-4 text-orange-400" />
           <AlertTitle className="text-orange-400">⚠ HIGH RISK</AlertTitle>
           <AlertDescription className="text-orange-300">
-            {highCount} organization{highCount > 1 ? 's have' : ' has'} elevated DDoS risk
+            {stats.high} organization{stats.high > 1 ? 's have' : ' has'} elevated DDoS risk
           </AlertDescription>
         </Alert>
       )}
-      {criticalOrgs.length === 0 && highCount === 0 && (
+      {criticalOrgs.length === 0 && stats.high === 0 && scanResults.size > 0 && (
         <Alert className="border-emerald-500/50 bg-emerald-500/10">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
           <AlertTitle className="text-emerald-400">✓ All Clear</AlertTitle>
@@ -469,7 +448,7 @@ const DdosMonitor: React.FC = () => {
             <SelectItem value="risk">Sort: Risk Level</SelectItem>
             <SelectItem value="name">Sort: Name</SelectItem>
             <SelectItem value="responseTime">Sort: Response Time</SelectItem>
-            <SelectItem value="flaps">Sort: Flap Count</SelectItem>
+            <SelectItem value="flaps">Sort: Exposed Ports</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -477,8 +456,17 @@ const DdosMonitor: React.FC = () => {
       {/* Main Table / Cards */}
       {isMobile ? (
         <div className="space-y-3">
-          {filtered.map(({ org, risk }) => (
-            <MobileCard key={org.id} org={org} risk={risk} expanded={expandedOrg === org.id} onToggle={() => setExpandedOrg(expandedOrg === org.id ? null : org.id)} onRecheck={() => recheckSingle(org)} />
+          {filtered.map(({ org, result }) => (
+            <MobileCard
+              key={org.id}
+              org={org}
+              result={result}
+              expanded={expandedOrg === org.id}
+              onToggle={() => setExpandedOrg(expandedOrg === org.id ? null : org.id)}
+              onRecheck={() => recheckSingle(org)}
+              rechecking={recheckingOrg === org.id}
+              onOpenDrawer={() => result && setDrawerOrg({ org, result })}
+            />
           ))}
         </div>
       ) : (
@@ -498,85 +486,93 @@ const DdosMonitor: React.FC = () => {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Origin</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Resp. Trend</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">1h Avg</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">24h Avg</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Flaps</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Exposed Ports</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Risk Factors</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(({ org, risk }) => (
-                    <React.Fragment key={org.id}>
-                      <tr className="border-b border-border/50 hover:bg-muted/30 cursor-pointer" onClick={() => setExpandedOrg(expandedOrg === org.id ? null : org.id)}>
-                        <td className="px-4 py-3">
-                          <Badge className={cn('text-xs font-mono', riskColors[risk?.riskLevel || 'low'], risk?.riskLevel === 'critical' && 'animate-pulse')}>
-                            {(risk?.riskLevel || 'unknown').toUpperCase()}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 font-medium">{org.name}</td>
-                        <td className="px-4 py-3">
-                          <a href={org.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-400 hover:underline" onClick={e => e.stopPropagation()}>
-                            {new URL(org.url).hostname} <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector.toLowerCase()])}>{org.sector}</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {risk?.protection?.hasCDN ? (
-                            <span className="text-emerald-400 text-xs">✓ {risk.protection.cdnProvider}</span>
-                          ) : (
-                            <span className="text-red-400 text-xs">✗ No Protection</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {risk?.protection?.hasWAF ? <span className="text-emerald-400 text-xs">✓ Active</span> : <span className="text-red-400 text-xs">✗ None</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {risk?.protection?.hasRateLimiting ? <span className="text-emerald-400 text-xs">✓ Active</span> : <span className="text-red-400 text-xs">✗ None</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {risk?.protection?.originExposed ? <span className="text-red-400 text-xs">⚠ Exposed</span> : <span className="text-emerald-400 text-xs">✓ Hidden</span>}
-                        </td>
-                        <td className="px-4 py-3 w-[120px]">
-                          <MiniSparkline data={risk?.recentPings || []} spike={risk?.responseTimeSpike} />
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs">
-                          {risk?.avg1h != null ? `${Math.round(risk.avg1h)}ms` : '—'}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs">
-                          {risk?.avg24h != null ? `${Math.round(risk.avg24h)}ms` : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn('font-mono text-xs', (risk?.flaps1h || 0) === 0 ? 'text-emerald-400' : (risk?.flaps1h || 0) < 3 ? 'text-yellow-400' : 'text-red-400')}>
-                            {risk?.flaps1h ?? 0}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1 max-w-[200px]">
-                            {(risk?.riskFactors || []).slice(0, 2).map((f, i) => (
-                              <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">{f.split('(')[0].trim()}</Badge>
-                            ))}
-                            {(risk?.riskFactors?.length || 0) > 2 && <Badge variant="outline" className="text-[10px] px-1.5 py-0">+{risk!.riskFactors.length - 2}</Badge>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Button size="sm" variant="outline" className="text-xs h-7" onClick={e => { e.stopPropagation(); recheckSingle(org); }}>
-                            <RefreshCw className="w-3 h-3 mr-1" /> Re-check
-                          </Button>
-                        </td>
-                      </tr>
-                      {expandedOrg === org.id && (
-                        <tr>
-                          <td colSpan={14} className="p-0">
-                            <DetailPanel org={org} risk={risk} />
+                  {filtered.map(({ org, result }) => {
+                    const rl = (result?.risk_level || 'LOW').toLowerCase();
+                    return (
+                      <React.Fragment key={org.id}>
+                        <tr
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          onClick={() => result ? setDrawerOrg({ org, result }) : undefined}
+                        >
+                          <td className="px-4 py-3">
+                            <Badge className={cn('text-xs font-mono', riskColors[rl], rl === 'critical' && 'animate-pulse')}>
+                              {result?.risk_level || '—'}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 font-medium">{org.name}</td>
+                          <td className="px-4 py-3">
+                            <a href={org.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-400 hover:underline" onClick={e => e.stopPropagation()}>
+                              {new URL(org.url).hostname} <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="outline" className={cn('text-xs', sectorColors[org.sector.toLowerCase()])}>{org.sector}</Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            {result?.protected ? (
+                              <span className="text-emerald-400 text-xs">✓ {result.primary_cdn || result.waf_cdn?.[0] || 'Protected'}</span>
+                            ) : result ? (
+                              <span className="text-red-400 text-xs">✗ No Protection</span>
+                            ) : <span className="text-muted-foreground text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {result?.waf_cdn && result.waf_cdn.length > 0 ? (
+                              <span className="text-emerald-400 text-xs">✓ {result.waf_cdn[0]}</span>
+                            ) : result ? (
+                              <span className="text-red-400 text-xs">✗ None</span>
+                            ) : <span className="text-muted-foreground text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {result ? (
+                              result.rate_limited ? <span className="text-emerald-400 text-xs">✓</span> : <span className="text-red-400 text-xs">✗ None</span>
+                            ) : <span className="text-muted-foreground text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {result ? (
+                              result.origin_exposed ? <span className="text-red-400 text-xs">⚠ Exposed</span> : <span className="text-emerald-400 text-xs">✓ Hidden</span>
+                            ) : <span className="text-muted-foreground text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <TrendIndicator trend={result?.response_time?.trend} />
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs">
+                            {result?.response_time?.avg_ms != null ? `${Math.round(result.response_time.avg_ms)}ms` : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={cn('font-mono text-xs', (result?.exposed_ports?.length || 0) === 0 ? 'text-emerald-400' : 'text-red-400')}>
+                              {result ? result.exposed_ports?.length || 0 : '—'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1 max-w-[200px]">
+                              {(result?.risk_factors || []).slice(0, 2).map((f, i) => (
+                                <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">{f.factor}</Badge>
+                              ))}
+                              {(result?.risk_factors?.length || 0) > 2 && <Badge variant="outline" className="text-[10px] px-1.5 py-0">+{result!.risk_factors.length - 2}</Badge>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Button
+                              size="sm" variant="outline" className="text-xs h-7"
+                              disabled={recheckingOrg === org.id}
+                              onClick={e => { e.stopPropagation(); recheckSingle(org); }}
+                            >
+                              {recheckingOrg === org.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                              Re-check
+                            </Button>
                           </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">No organizations match the current filters</td></tr>
+                    <tr><td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">No organizations match the current filters</td></tr>
                   )}
                 </tbody>
               </table>
@@ -584,95 +580,128 @@ const DdosMonitor: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Detail Drawer */}
+      <Sheet open={!!drawerOrg} onOpenChange={open => !open && setDrawerOrg(null)}>
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+          {drawerOrg && <DetailDrawer org={drawerOrg.org} result={drawerOrg.result} />}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };
 
-/* ─── Mini Sparkline ─── */
-const MiniSparkline: React.FC<{ data: { responseTime: number | null }[]; spike?: boolean }> = ({ data, spike }) => {
-  if (data.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
-  return (
-    <ResponsiveContainer width={100} height={24}>
-      <LineChart data={data}>
-        <Line type="monotone" dataKey="responseTime" stroke={spike ? '#ef4444' : '#22c55e'} strokeWidth={1.5} dot={false} />
-      </LineChart>
-    </ResponsiveContainer>
-  );
+/* ─── Trend Indicator ─── */
+const TrendIndicator: React.FC<{ trend?: string }> = ({ trend }) => {
+  if (!trend) return <span className="text-muted-foreground text-xs">—</span>;
+  switch (trend) {
+    case 'improving': return <span className="text-emerald-400 text-xs flex items-center gap-1"><ArrowDown className="w-3 h-3" /> Improving</span>;
+    case 'degrading': return <span className="text-red-400 text-xs flex items-center gap-1"><ArrowUp className="w-3 h-3" /> Degrading</span>;
+    default: return <span className="text-yellow-400 text-xs flex items-center gap-1"><Minus className="w-3 h-3" /> Stable</span>;
+  }
 };
 
-/* ─── Detail Panel ─── */
-const DetailPanel: React.FC<{ org: MonitoredOrg; risk?: RiskAssessment }> = ({ org, risk }) => {
-  const baseline = risk?.avg24h || 0;
-  const chartData = (risk?.recentPings || []).map(p => ({
-    ...p,
-    baseline,
-  }));
+/* ─── Detail Drawer ─── */
+const DetailDrawer: React.FC<{ org: MonitoredOrg; result: DdosScanResult }> = ({ org, result }) => {
+  const rl = result.risk_level.toLowerCase();
+  const scoreColor = rl === 'critical' ? 'text-red-400' : rl === 'high' ? 'text-orange-400' : rl === 'medium' ? 'text-yellow-400' : 'text-emerald-400';
 
   return (
-    <div className="bg-muted/20 border-t border-border p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Risk Factors */}
-        <div>
-          <h4 className="text-sm font-semibold mb-3">Risk Factors</h4>
-          <div className="space-y-2">
-            {(risk?.riskFactors || []).map((f, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <span className="text-red-400 mt-0.5">•</span>
-                <span>{f}</span>
-              </div>
-            ))}
-            {(risk?.riskFactors?.length || 0) === 0 && <span className="text-muted-foreground text-sm">No active risk factors</span>}
-          </div>
-        </div>
+    <div className="space-y-6 py-4">
+      <SheetHeader>
+        <SheetTitle className="flex items-center gap-2">
+          <ShieldAlert className="w-5 h-5 text-orange-400" /> {org.name}
+        </SheetTitle>
+        <SheetDescription>{org.url}</SheetDescription>
+      </SheetHeader>
 
-        {/* Protection Recommendations */}
-        <div>
-          <h4 className="text-sm font-semibold mb-3">Recommendations</h4>
-          <div className="space-y-2 text-sm text-muted-foreground">
-            {!risk?.protection?.hasCDN && <p>• Enable Cloudflare (free tier) or AWS Shield for volumetric DDoS protection</p>}
-            {!risk?.protection?.hasRateLimiting && <p>• Implement rate limiting on public endpoints</p>}
-            {!risk?.protection?.hasWAF && <p>• Enable a Web Application Firewall to filter malicious traffic</p>}
-            {risk?.protection?.originExposed && <p>• Route traffic through a CDN to hide the origin IP</p>}
-            {risk?.protection?.hasCDN && risk?.protection?.hasWAF && risk?.protection?.hasRateLimiting && !risk?.protection?.originExposed && (
-              <p className="text-emerald-400">✓ All protection measures in place</p>
-            )}
-          </div>
+      {/* Risk Score */}
+      <div className="text-center">
+        <div className={cn('text-6xl font-black', scoreColor)}>{result.risk_score}</div>
+        <Badge className={cn('mt-2 text-sm', riskColors[rl])}>{result.risk_level}</Badge>
+        <p className="text-xs text-muted-foreground mt-2">Checked: {new Date(result.checked_at).toLocaleString()}</p>
+      </div>
+
+      {/* Risk Factors */}
+      <div>
+        <h4 className="text-sm font-semibold mb-3">Risk Factors</h4>
+        <div className="space-y-2">
+          {result.risk_factors.map((f, i) => (
+            <div key={i} className="flex items-center justify-between text-sm border border-border/50 rounded-lg px-3 py-2">
+              <span>{f.factor}</span>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className={cn('text-[10px]', riskColors[f.severity?.toLowerCase() || 'low'])}>{f.severity}</Badge>
+                <span className="text-xs text-muted-foreground font-mono">w:{f.weight}</span>
+              </div>
+            </div>
+          ))}
+          {result.risk_factors.length === 0 && <span className="text-muted-foreground text-sm">No risk factors</span>}
         </div>
       </div>
 
-      {/* Response Time Chart */}
-      {chartData.length > 0 && (
+      {/* WAF Evidence */}
+      {result.waf_evidence && result.waf_evidence.length > 0 && (
         <div>
-          <h4 className="text-sm font-semibold mb-3">Response Time (Last {chartData.length} Pings)</h4>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
-              <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
-              <ReferenceLine y={baseline} stroke="#f59e0b" strokeDasharray="5 5" label={{ value: 'Baseline', fill: '#f59e0b', fontSize: 10 }} />
-              {baseline > 0 && <ReferenceLine y={baseline * 3} stroke="#ef4444" strokeDasharray="3 3" label={{ value: '3x Baseline', fill: '#ef4444', fontSize: 10 }} />}
-              <Line type="monotone" dataKey="responseTime" stroke="#22c55e" strokeWidth={2} dot={{ r: 2 }} />
-            </LineChart>
-          </ResponsiveContainer>
+          <h4 className="text-sm font-semibold mb-3">WAF Evidence</h4>
+          <div className="space-y-1">
+            {result.waf_evidence.map((e, i) => (
+              <div key={i} className="text-xs font-mono text-muted-foreground bg-muted/30 px-3 py-1.5 rounded">{e}</div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Headers & Server */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <h4 className="text-sm font-semibold mb-2">Detected Headers</h4>
-          <div className="flex flex-wrap gap-1">
-            {(risk?.protection?.protectionHeaders || []).map((h, i) => (
-              <Badge key={i} variant="outline" className="text-xs font-mono">{h}</Badge>
-            ))}
-            {(risk?.protection?.protectionHeaders?.length || 0) === 0 && <span className="text-muted-foreground text-xs">No protection headers detected</span>}
+      {/* Response Time */}
+      <div>
+        <h4 className="text-sm font-semibold mb-3">Response Time</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="border border-border/50 rounded-lg p-3 text-center">
+            <div className="text-lg font-bold">{Math.round(result.response_time?.avg_ms || 0)}ms</div>
+            <div className="text-xs text-muted-foreground">Average</div>
+          </div>
+          <div className="border border-border/50 rounded-lg p-3 text-center">
+            <div className="text-lg font-bold">{Math.round(result.response_time?.min_ms || 0)}ms</div>
+            <div className="text-xs text-muted-foreground">Min</div>
+          </div>
+          <div className="border border-border/50 rounded-lg p-3 text-center">
+            <div className="text-lg font-bold">{Math.round(result.response_time?.max_ms || 0)}ms</div>
+            <div className="text-xs text-muted-foreground">Max</div>
+          </div>
+          <div className="border border-border/50 rounded-lg p-3 text-center">
+            <TrendIndicator trend={result.response_time?.trend} />
+            <div className="text-xs text-muted-foreground mt-1">Status: {result.response_time?.status || '—'}</div>
           </div>
         </div>
-        <div>
-          <h4 className="text-sm font-semibold mb-2">Server</h4>
-          <span className="text-xs font-mono text-muted-foreground">{risk?.protection?.serverHeader || '—'}</span>
-        </div>
       </div>
+
+      {/* Exposed Ports */}
+      {result.exposed_ports && result.exposed_ports.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold mb-3">Exposed Ports ({result.exposed_ports.length})</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Port</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Service</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.exposed_ports.map((p, i) => (
+                  <tr key={i} className="border-b border-border/30">
+                    <td className="px-3 py-2 font-mono text-xs">{p.port}</td>
+                    <td className="px-3 py-2 text-xs">{p.service}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className={cn('text-[10px]', riskColors[p.risk?.toLowerCase() || 'medium'])}>{p.risk}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -680,51 +709,66 @@ const DetailPanel: React.FC<{ org: MonitoredOrg; risk?: RiskAssessment }> = ({ o
 /* ─── Mobile Card ─── */
 const MobileCard: React.FC<{
   org: MonitoredOrg;
-  risk?: RiskAssessment;
+  result: DdosScanResult | null;
   expanded: boolean;
   onToggle: () => void;
   onRecheck: () => void;
-}> = ({ org, risk, expanded, onToggle, onRecheck }) => (
-  <Collapsible open={expanded} onOpenChange={onToggle}>
-    <Card className={cn(risk?.riskLevel === 'critical' && 'border-red-500/50 animate-pulse')}>
-      <CollapsibleTrigger asChild>
-        <CardContent className="p-4 cursor-pointer">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Badge className={cn('text-xs font-mono', riskColors[risk?.riskLevel || 'low'])}>
-                {(risk?.riskLevel || '?').toUpperCase()}
-              </Badge>
-              <div>
-                <div className="font-medium text-sm">{org.name}</div>
-                <div className="text-xs text-muted-foreground">{new URL(org.url).hostname}</div>
+  rechecking: boolean;
+  onOpenDrawer: () => void;
+}> = ({ org, result, expanded, onToggle, onRecheck, rechecking, onOpenDrawer }) => {
+  const rl = (result?.risk_level || 'LOW').toLowerCase();
+  return (
+    <Collapsible open={expanded} onOpenChange={onToggle}>
+      <Card className={cn(rl === 'critical' && 'border-red-500/50 animate-pulse')}>
+        <CollapsibleTrigger asChild>
+          <CardContent className="p-4 cursor-pointer">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Badge className={cn('text-xs font-mono', riskColors[rl])}>
+                  {result?.risk_level || '—'}
+                </Badge>
+                <div>
+                  <div className="font-medium text-sm">{org.name}</div>
+                  <div className="text-xs text-muted-foreground">{new URL(org.url).hostname}</div>
+                </div>
               </div>
+              <ChevronDown className={cn('w-4 h-4 transition-transform', expanded && 'rotate-180')} />
             </div>
-            <ChevronDown className={cn('w-4 h-4 transition-transform', expanded && 'rotate-180')} />
+            <div className="flex flex-wrap gap-2 mt-2">
+              {result?.protected ? (
+                <span className="text-emerald-400 text-xs">✓ {result.primary_cdn || 'Protected'}</span>
+              ) : result ? (
+                <span className="text-red-400 text-xs">✗ No CDN</span>
+              ) : null}
+              {(result?.risk_factors || []).slice(0, 2).map((f, i) => (
+                <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">{f.factor}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t border-border px-4 py-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>WAF: {result?.waf_cdn?.length ? <span className="text-emerald-400">✓ {result.waf_cdn[0]}</span> : <span className="text-red-400">✗</span>}</div>
+              <div>Rate Limit: {result?.rate_limited ? <span className="text-emerald-400">✓</span> : <span className="text-red-400">✗</span>}</div>
+              <div>Origin: {result?.origin_exposed ? <span className="text-red-400">⚠ Exposed</span> : <span className="text-emerald-400">✓ Hidden</span>}</div>
+              <div>Avg: {result?.response_time?.avg_ms ? `${Math.round(result.response_time.avg_ms)}ms` : '—'}</div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="flex-1" disabled={rechecking} onClick={e => { e.stopPropagation(); onRecheck(); }}>
+                {rechecking ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />} Re-check
+              </Button>
+              {result && (
+                <Button size="sm" variant="outline" className="flex-1" onClick={onOpenDrawer}>
+                  Details
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {risk?.protection?.hasCDN ? (
-              <span className="text-emerald-400 text-xs">✓ {risk.protection.cdnProvider}</span>
-            ) : (
-              <span className="text-red-400 text-xs">✗ No CDN</span>
-            )}
-            {(risk?.riskFactors || []).slice(0, 2).map((f, i) => (
-              <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">{f.split('(')[0].trim()}</Badge>
-            ))}
-          </div>
-        </CardContent>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border-t border-border">
-          <DetailPanel org={org} risk={risk} />
-          <div className="px-4 pb-4">
-            <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); onRecheck(); }} className="w-full">
-              <RefreshCw className="w-3 h-3 mr-1" /> Re-check
-            </Button>
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Card>
-  </Collapsible>
-);
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+};
 
 export default DdosMonitor;
