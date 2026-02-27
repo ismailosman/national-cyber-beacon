@@ -23,6 +23,12 @@ const MALWARE_TYPES = [
 
 function rnd(a: number, b: number) { return Math.random() * (b - a) + a; }
 
+function countryBaseCount(name: string): number {
+  let hash = 0;
+  for (const ch of name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+  return 800 + Math.abs(hash) % 14200;
+}
+
 const ThreatMapStandalone: React.FC = () => {
   const liveOn = true;
   const [somaliaPanel, setSomaliaPanel] = useState(false);
@@ -46,6 +52,13 @@ const ThreatMapStandalone: React.FC = () => {
   // Compute per-country attack counts
   const countMap = useMemo(() => {
     const m: Record<string, number> = {};
+    // Seed every country with a realistic baseline
+    for (const set of COUNTRY_SETS) {
+      for (const name of set) {
+        if (!m[name]) m[name] = countryBaseCount(name);
+      }
+    }
+    // Add live feed counts on top
     for (const t of threats) {
       const c = t.target?.country;
       if (c) m[c] = (m[c] || 0) + 1;
