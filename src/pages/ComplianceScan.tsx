@@ -18,7 +18,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const proxyUrl = (path: string) =>
-  `${SUPABASE_URL}/functions/v1/compliance-scan-proxy?path=${encodeURIComponent(path)}`;
+  `${SUPABASE_URL}/functions/v1/security-scanner-proxy?path=${encodeURIComponent(path)}`;
 
 const apiHeaders = () => ({
   'Content-Type': 'application/json',
