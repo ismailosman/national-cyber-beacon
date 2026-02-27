@@ -176,7 +176,7 @@ const FrameworkDetailSheet: React.FC<{ state: SheetState; onClose: () => void }>
 );
 
 /* ── Scan Metadata Header ── */
-const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targetUrl: string; onDownload: () => void }> = ({ results, orgName, targetUrl, onDownload }) => (
+const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targetUrl: string; onDownload: () => void; downloading?: boolean }> = ({ results, orgName, targetUrl, onDownload, downloading }) => (
   <Card className="glass-card border-border">
     <CardContent className="py-4 flex flex-wrap items-center gap-4 justify-between">
       <div className="flex flex-col gap-1">
@@ -190,8 +190,9 @@ const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targ
       </div>
       <div className="flex items-center gap-4">
         <span className={cn('text-5xl font-bold font-mono px-3 py-1 rounded border', gradeColor(results.grade))}>{results.grade}</span>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownload}>
-          <Download className="w-4 h-4" /> Download Report
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownload} disabled={downloading}>
+          {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          {downloading ? 'Generating...' : 'Download Report'}
         </Button>
       </div>
     </CardContent>
@@ -567,16 +568,45 @@ const ComplianceScan: React.FC = () => {
     }
   };
 
-  /* Download report */
-  const downloadReport = () => {
+  /* Download report as PDF */
+  const [downloading, setDownloading] = useState(false);
+  const downloadReport = async () => {
     if (!results) return;
-    const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `compliance-report-${orgName || 'scan'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setDownloading(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-compliance-report`, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({ results, org_name: orgName, target_url: targetUrl }),
+      });
+      if (!res.ok) throw new Error('PDF generation failed');
+      const data = await res.json();
+      if (!data.pdf_base64) throw new Error('No PDF data returned');
+      const binary = atob(data.pdf_base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `compliance-report-${orgName || 'scan'}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Report Downloaded', description: 'Compliance PDF report generated successfully.' });
+    } catch (err) {
+      console.error('[ComplianceScan] PDF download error:', err);
+      // Fallback to JSON
+      const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `compliance-report-${orgName || 'scan'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Fallback', description: 'PDF generation failed. Downloaded JSON instead.', variant: 'destructive' });
+    } finally {
+      setDownloading(false);
+    }
   };
 
   /* Open sheet for a framework bar click */
@@ -674,7 +704,7 @@ const ComplianceScan: React.FC = () => {
       {results && (
         <>
           {/* Scan Metadata */}
-          <ScanMetadata results={results} orgName={orgName} targetUrl={targetUrl} onDownload={downloadReport} />
+          <ScanMetadata results={results} orgName={orgName} targetUrl={targetUrl} onDownload={downloadReport} downloading={downloading} />
 
           {/* Overall Score */}
           <OverallScoreCard r={results} onControlClick={handleControlClick} />
