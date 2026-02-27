@@ -1,41 +1,81 @@
 
 
-## Make Country Attack Counts Look Realistic
+## Update Organization Scan System to Use Verified Backend Data
 
-### Problem
-The "Top Targeted Countries" list shows **0** for most countries because `countMap` only counts threats from the small live feed buffer (~40 threats). Since the simulated feed only covers a handful of countries per burst, most countries in the rotation never appear and show 0.
+### Overview
+Restructure the scan pipeline so the backend returns structured `verified_findings` and `verified_checks` objects, and the frontend uses ONLY these verified results for alerts, radar chart scores, and status display.
 
-### Solution
-Generate seeded baseline attack counts for every country in `COUNTRY_SETS` so they always display realistic, non-zero numbers. The seeded counts will be deterministic (based on the country name) so they stay consistent within a session, and the live feed counts will be added on top.
+### 1. Update Backend Edge Function (`supabase/functions/run-security-checks/index.ts`)
 
-### Changes in `src/pages/ThreatMapStandalone.tsx`
-
-1. **Add a `seededCountryCounts` constant** using a simple string hash to generate a realistic base count for each country (range: ~800 to ~15,000). Countries like the US, China, Russia, and India get higher base values to look realistic.
-
-2. **Update the `countMap` useMemo** to merge seeded base counts with live feed counts:
-   ```
-   finalCount = seededBase[country] + liveFeedCount[country]
-   ```
-
-This way every country always shows a plausible number (e.g., Japan: 3,847, Germany: 5,212) and the numbers slowly increment as live threats come in.
-
-### Technical Details
+**Build `verified_findings` array** from each check result (lines 436-522 area). Instead of generating alerts inline, collect structured findings:
 
 ```text
-// Seeded count generation (deterministic per country name)
-function countryBaseCount(name: string): number {
-  let hash = 0;
-  for (const ch of name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
-  return 800 + Math.abs(hash) % 14200;  // range 800-15000
-}
+verified_findings = [
+  {
+    category: "Uptime" | "DDoS Protection" | "SSL" | "Security Headers" | "DNS Security",
+    title: string,
+    severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
+    message: string,
+    evidence: string[],
+    verified_by: string (e.g. "HEAD probe", "DNS-over-HTTPS", "TLS handshake"),
+    verified: true
+  }
+]
 ```
 
-The merge in `countMap`:
-```text
-for each country in all COUNTRY_SETS:
-  m[country] = countryBaseCount(country)
-then add live feed counts on top
-```
+**Build `verified_checks` object** from each check's raw details:
 
-### File Modified
-- `src/pages/ThreatMapStandalone.tsx`
+- `uptime`: `{ verdict, checks: [{method, online, detail, status_code}] }`
+- `ddos_protection`: `{ verdict, providers, evidence }`
+- `ssl`: `{ valid, days_until_expiry, issuer, common_name }` (enhance `checkSSL` to extract cert metadata via TLS connection details)
+- `headers`: `{ score, grade, missing }` (compute score as % of required headers present)
+- `dns_security`: `{ results: { spf: {present}, dmarc: {present}, zone_transfer: {allowed} } }` (add SPF/DMARC lookups to `checkDNS`)
+
+**Return both** in the response JSON alongside existing fields. Also store `verified_findings` as the source for alert generation (replace current hardcoded alert logic).
+
+### 2. Enhance DNS Check for SPF/DMARC
+
+Add two additional DNS lookups in `checkDNS`:
+- Query `_spf.{domain}` or parse TXT records for SPF
+- Query `_dmarc.{domain}` for DMARC record
+- Return these in `details.spf_present`, `details.dmarc_present`
+
+### 3. Update Frontend OrgDetail Page (`src/pages/OrgDetail.tsx`)
+
+**New state**: After `handleRunScan`, store the scan response (which now includes `verified_findings` and `verified_checks`).
+
+**Replace alert display (lines 643-673)**:
+- If `verified_findings` is empty: show green banner with checkmark icon and "All security checks passed"
+- If findings exist: render each as a card with:
+  - Green "Verified" badge (checkmark icon + text)
+  - Severity badge (existing styling)
+  - Title and message
+  - "Source: {verified_by}" in small grey text
+  - Collapsible "Evidence" section using the Collapsible component, showing each evidence string
+
+**Update Radar Chart (lines 243-250)**:
+Replace `latestCheck()` calls with scores derived from `verified_checks`:
+- SSL: `ssl.valid ? Math.max(0, 100 - Math.max(0, 30 - ssl.days_until_expiry) * 3) : 0`
+- Headers: `headers.score`
+- DDoS: `ddos_protection.verdict === "PROTECTED" ? 100 : 0`
+- DNS: Score based on SPF + DMARC presence and zone transfer status
+- Uptime: `uptime.verdict === "ONLINE" ? 100 : 0`
+- WAF: keep existing `latestCheck('waf')` as fallback
+
+**Remove auto-generated frontend alert logic**: The backend is now the single source of truth for findings.
+
+### 4. Files Modified
+
+| File | Change |
+|------|--------|
+| `supabase/functions/run-security-checks/index.ts` | Add verified_findings + verified_checks to response; enhance DNS for SPF/DMARC; enhance SSL for cert metadata; compute header score/grade |
+| `src/pages/OrgDetail.tsx` | Store scan response; replace alert section with verified findings cards (with badges, evidence collapsible, source line); update radar chart to use verified_checks scores; add green banner for zero findings |
+
+### 5. Technical Details
+
+- The `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` components from `@radix-ui/react-collapsible` are already available
+- Edge function DNS enhancement uses Cloudflare DNS-over-HTTPS (`type=TXT`) for SPF/DMARC lookups
+- SSL cert metadata extraction is limited in Deno's `fetch` -- will use available response data and mark fields as best-effort
+- Header score: `(found.length / total_required.length) * 100`, grade mapped A/B/C/F from score ranges
+- All existing styling, layout, and card structure preserved
+
