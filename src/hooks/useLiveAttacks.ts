@@ -468,6 +468,26 @@ const initialIndex = calculateCurrentIndex();
 let sharedTodayCount = BASE_COUNT + initialIndex * 3;
 let sharedThreatIndex = initialIndex;
 
+// Pre-generate initial threats so the page never starts empty
+function generateInitialThreats(): LiveThreat[] {
+  const burstsToGenerate = 15;
+  const startIndex = Math.max(0, sharedThreatIndex - burstsToGenerate);
+  const now = Date.now();
+  const allThreats: LiveThreat[] = [];
+
+  for (let i = startIndex; i < sharedThreatIndex; i++) {
+    const burst = generateBurst(i);
+    // Stagger timestamps backwards so the feed looks natural
+    const age = (sharedThreatIndex - i) * 3500; // ~3.5s apart
+    burst.forEach(t => { t.timestamp = now - age; });
+    allThreats.push(...burst);
+  }
+
+  return allThreats.slice(0, RING_BUFFER_SIZE);
+}
+
+const prePopulatedThreats = generateInitialThreats();
+
 const todayListeners = new Set<React.Dispatch<React.SetStateAction<number>>>();
 
 function incrementSharedCountBy(n: number) {
@@ -476,7 +496,7 @@ function incrementSharedCountBy(n: number) {
 }
 
 export function useLiveAttacks(enabled: boolean) {
-  const [threats, setThreats] = useState<LiveThreat[]>([]);
+  const [threats, setThreats] = useState<LiveThreat[]>(prePopulatedThreats);
   const [todayCount, setTodayCount] = useState(sharedTodayCount);
   const lastRealEventRef = useRef<number>(0);
 
