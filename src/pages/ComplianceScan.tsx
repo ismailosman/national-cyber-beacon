@@ -172,6 +172,7 @@ const ComplianceScan: React.FC = () => {
   const [results, setResults] = useState<ComplianceResults | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   /* Fetch history on mount */
   useEffect(() => {
@@ -181,8 +182,19 @@ const ComplianceScan: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           setHistory(Array.isArray(data) ? data : data.scans || []);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          const msg = data.detail || data.error || `API returned ${res.status}`;
+          console.warn('[ComplianceScan] History fetch failed:', res.status, data);
+          if (res.status === 404) {
+            setError('Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed.');
+          } else {
+            setError(msg);
+          }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.error('[ComplianceScan] History fetch error:', err);
+      }
       setLoadingHistory(false);
     })();
   }, [results]);
@@ -192,12 +204,27 @@ const ComplianceScan: React.FC = () => {
     const iv = setInterval(async () => {
       try {
         const res = await fetch(proxyUrl(`/compliance/scan/${scanId}`), { headers: apiHeaders() });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.warn('[ComplianceScan] Poll error:', res.status, data);
+          if (res.status === 404) {
+            clearInterval(iv);
+            setError('Compliance scanning API is not available. The backend compliance endpoints may not be deployed yet.');
+            setScanning(false);
+            setPhase('');
+          }
+          return;
+        }
         const data = await res.json();
         setPhase(data.compliance_phase || '');
         if (data.compliance_status === 'done') {
           clearInterval(iv);
           setResults(data.compliance_results);
+          setScanning(false);
+          setPhase('');
+        } else if (data.compliance_status === 'error') {
+          clearInterval(iv);
+          setError(data.error || 'Scan failed with an error.');
           setScanning(false);
           setPhase('');
         }
@@ -210,6 +237,7 @@ const ComplianceScan: React.FC = () => {
     if (!orgName.trim() || !targetUrl.trim()) return;
     setScanning(true);
     setResults(null);
+    setError(null);
     setPhase('Initiating scan…');
     try {
       const res = await fetch(proxyUrl('/compliance/scan'), {
@@ -217,17 +245,30 @@ const ComplianceScan: React.FC = () => {
         headers: apiHeaders(),
         body: JSON.stringify({ target_url: targetUrl.trim(), organization_name: orgName.trim() }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const msg = data.detail || data.error || `API returned ${res.status}`;
+        console.error('[ComplianceScan] Start scan failed:', res.status, data);
+        setScanning(false);
+        setPhase('');
+        setError(res.status === 404
+          ? 'Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed.'
+          : msg);
+        return;
+      }
       const data = await res.json();
       if (data.scan_id) {
         const iv = pollScan(data.scan_id);
         return () => clearInterval(iv);
       } else {
         setScanning(false);
-        setPhase('Error starting scan');
+        setPhase('');
+        setError(data.detail || data.error || 'No scan ID returned');
       }
     } catch {
       setScanning(false);
       setPhase('Network error');
+      setError('Network error – could not reach the compliance API.');
     }
   };
 
@@ -261,6 +302,19 @@ const ComplianceScan: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Error */}
+      {error && (
+        <Card className="border-destructive/50 bg-destructive/5">
+          <CardContent className="py-4 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-destructive">{error}</p>
+              <p className="text-xs text-muted-foreground">Check the browser console for details.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Results */}
       {results && (
