@@ -440,8 +440,13 @@ serve(async (req) => {
     const logoData = await fetchLogoPngData();
     const pdfBytes = generateCompliancePDF(results, org_name || 'Unknown', target_url || '', logoData);
 
-    // Encode as base64
-    const base64 = btoa(String.fromCharCode(...pdfBytes));
+    // Encode as base64 (chunked to avoid stack overflow)
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < pdfBytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...pdfBytes.subarray(i, i + chunkSize));
+    }
+    const base64 = btoa(binary);
 
     return new Response(JSON.stringify({ pdf_base64: base64 }), {
       status: 200,
