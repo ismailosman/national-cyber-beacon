@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Zap, Pause, Play, ChevronUp, ChevronDown } from 'lucide-react';
+import { Zap, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLiveAttacks, type AttackType } from '@/hooks/useLiveAttacks';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
 import SomaliaPanel from '@/components/cyber-map/SomaliaPanel';
@@ -35,11 +35,11 @@ const MALWARE_TYPES = [
 function rnd(a: number, b: number) { return Math.random() * (b - a) + a; }
 
 const ThreatMapStandalone: React.FC = () => {
-  const [liveOn, setLiveOn] = useState(true);
+  const liveOn = true;
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [rotationIndex, setRotationIndex] = useState(0);
-  const [mobileStatsOpen, setMobileStatsOpen] = useState(false);
+  const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
 
   const { threats, todayCount } = useLiveAttacks(liveOn);
 
@@ -53,6 +53,16 @@ const ThreatMapStandalone: React.FC = () => {
 
   const chartBars = useRef(Array.from({ length: 30 }, () => Math.floor(rnd(3e6, 18e6))));
   const maxBar = Math.max(...chartBars.current, 1);
+
+  // Compute per-country attack counts
+  const countMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of threats) {
+      const c = t.target?.country;
+      if (c) m[c] = (m[c] || 0) + 1;
+    }
+    return m;
+  }, [threats]);
 
   // Compute top industries
   const topIndustries = useMemo(() => {
@@ -102,18 +112,6 @@ const ThreatMapStandalone: React.FC = () => {
             <p className="text-lg font-mono font-bold" style={{ color: '#f472b6' }}>{todayCount.toLocaleString()}</p>
             <p className="text-[8px] tracking-[0.2em] text-slate-500 uppercase">ATTACKS ON THIS DAY</p>
           </div>
-          <button
-            onClick={() => setLiveOn(v => !v)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
-            style={{
-              background: liveOn ? 'rgba(34,211,238,0.12)' : 'rgba(0,0,0,0.5)',
-              border: `1px solid ${liveOn ? 'rgba(34,211,238,0.5)' : 'rgba(255,255,255,0.15)'}`,
-              color: liveOn ? '#22d3ee' : '#94a3b8',
-            }}
-          >
-            {liveOn ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-            {liveOn ? 'PAUSE' : 'RESUME'}
-          </button>
         </div>
       </div>
 
@@ -223,6 +221,7 @@ const ThreatMapStandalone: React.FC = () => {
                     onClick={() => handleCountryClick(name)}>
                     <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
                     <span className="text-xs text-slate-300 font-mono">{name}</span>
+                    <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{countMap[name] || 0}</span>
                   </div>
                 );
               })}
@@ -297,6 +296,7 @@ const ThreatMapStandalone: React.FC = () => {
                   onClick={() => handleCountryClick(name)}>
                   <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
                   <span className="text-xs text-slate-300 font-mono">{name}</span>
+                  <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{countMap[name] || 0}</span>
                 </div>
               );
             })}
