@@ -1,34 +1,36 @@
-## Rotate "Top Targeted Countries" with Somalia Every 30 Seconds
 
-### Problem
 
-The Top Targeted Countries list appears static because `topCountries` is recomputed from the same threat buffer and the ranking barely changes. Somalia either always appears or never appears, making it look frozen.
+## Three Changes to Threat Map
 
-### Solution
+### 1. Add live attack count badges next to each country
 
-Add a rotating country list that cycles through different sets of countries every 30 seconds. Somalia will appear in one specific rotation slot, ensuring it shows once per cycle (roughly every 30 seconds).
+Compute per-country attack counts from the `threats` array using `useMemo`. Display a small colored badge (pill) next to each country name showing the count of attacks targeting that country.
 
-### Changes in `src/pages/ThreatMapStandalone.tsx`
+**In `src/pages/ThreatMapStandalone.tsx`:**
+- Add a `useMemo` that builds a `Record<string, number>` of `target.country` counts from `threats`
+- In both the desktop right panel country list and the mobile bottom panel country list, add a badge after the country name:
+  ```
+  <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full"
+    style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
+    {countMap[name] || 0}
+  </span>
+  ```
 
-1. **Create multiple country rotation sets** -- define 3-4 preset groups of 5 countries each, with Somalia included in exactly one group. Examples:
-  - Set 0: Ethiopia, Indonesia, Georgia, Ukraine, Kenya
-  - Set 1: **Somalia**, United States, India, Pakistan, Brazil
-  - Set 2: Turkey, Nigeria, South Africa, Egypt, Bangladesh
-  - Set 3: Iran, China, Philippines, Vietnam, Colombia
-2. **Add a `rotationIndex` state** that increments every 30 seconds via `useEffect` with `setInterval`, cycling through the sets.
-3. **Replace the static `defaultCountries` and `topCountries` logic** -- instead of computing from threats (which barely changes), use the current rotation set as the displayed list. This makes the list visibly cycle, with Somalia appearing once every ~2 minutes (every 4th rotation at 30s each).
-4. **Add a subtle fade transition** using CSS opacity/transition on the country list so entries animate smoothly when the set changes.
+### 2. Make Top Targeted Countries visible on mobile/tablet
 
-### Technical Details
+The mobile bottom panel currently exists but is collapsed by default (`mobileStatsOpen` starts as `false`). Change the initial state to `true` so mobile and tablet users see the countries immediately without needing to tap.
 
-- `useState(0)` for `rotationIndex`
-- `useEffect` with 30-second `setInterval` incrementing `rotationIndex` modulo number of sets
-- Render `COUNTRY_SETS[rotationIndex]` instead of `topCountries`/`defaultCountries`
-- Each set is an array of country name strings
-- Add `transition: opacity 0.5s` for smooth visual swap
+**Change:** `const [mobileStatsOpen, setMobileStatsOpen] = useState(true);`
 
-### File Modified
+### 3. Remove the PAUSE/RESUME button
 
-- `src/pages/ThreatMapStandalone.tsx`  
-  
-`Add TOP TARGETED COUNTRIES in MOBILE USERS. Now only map is visible for mobile device users`
+Delete the pause/resume button from the header entirely and remove the `liveOn` state (hardcode it to always be `true`).
+
+**Changes:**
+- Remove `const [liveOn, setLiveOn] = useState(true)` -- replace with `const liveOn = true`
+- Remove the `<button>` block (lines 105-116) for PAUSE/RESUME from the header
+- Remove `Pause` and `Play` from the lucide-react import
+
+### File modified
+- `src/pages/ThreatMapStandalone.tsx`
+
