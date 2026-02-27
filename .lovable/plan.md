@@ -1,77 +1,41 @@
 
 
-## Add Compliance Scanning Panel
+## Fix: Compliance API Returns 404
 
-### Overview
-Create a new backend proxy edge function and a dedicated Compliance Scanning page that connects to the external compliance scan API. Add a "Run Compliance" button to each org card on the dashboard, and add a navigation entry in the sidebar.
+### Root Cause
 
-### 1. New Edge Function: `compliance-scan-proxy`
+The compliance scan proxy edge function is **working correctly**. The 404 error is coming from the **upstream backend API** itself -- the `/compliance/scans` and `/compliance/scan` endpoints do not exist at the configured `SECURITY_API_URL` backend (which serves the "CyberSomalia Pentest API").
 
-Create `supabase/functions/compliance-scan-proxy/index.ts` following the same pattern as `security-scanner-proxy`. It will:
-- Accept a `path` query parameter (e.g., `/compliance/scan`, `/compliance/scan/{id}`, `/compliance/scans`)
-- Forward requests to `SECURITY_API_URL` (already configured) with `SECURITY_API_KEY` header
-- Handle CORS, JSON validation, and error responses
+I confirmed this by calling the same path through the already-working `security-scanner-proxy` edge function and getting the identical 404 response. The backend health endpoint responds fine (`/health` returns 200), but the compliance endpoints have not been deployed to that server.
 
-### 2. New Page: `src/pages/ComplianceScan.tsx`
+### What Needs to Happen
 
-A full-featured page with these sections:
+Since the backend API doesn't have compliance endpoints, there are two options:
 
-**Scan Form** (top)
-- Organization name + Target URL fields (pre-filled if navigated from org card via URL params)
-- "Run Compliance Scan" button
-- Live phase indicator showing `compliance_phase` during polling
+**Option A (Recommended): Add debug logging and a user-friendly error message**
+- Update `ComplianceScan.tsx` to catch 404 errors specifically and show a clear message: "Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed."
+- Add error state handling so users aren't left with a blank screen
+- Add console logging of the actual error response for debugging
 
-**Overall Score Card** (large, centered)
-- Big score number (0-100) color-coded: green >= 75, yellow >= 50, red < 50
-- Grade letter (A/B/C/D/F)
-- Passed/Failed counts with "X of Y controls passed" progress bar
+**Option B: If you have a different URL for the compliance API**
+- If the compliance endpoints live at a different base URL than the security scanner (e.g., a separate service), we need to configure a separate secret (e.g., `COMPLIANCE_API_URL`) and update the proxy to use it
+- This would require you to provide the correct URL
 
-**Four Framework Cards** (side by side grid)
-- NIST CSF 2.0: mini bar chart per function (Govern/Identify/Protect/Detect/Respond/Recover)
-- ISO 27001: average score + top failing domains
-- GDPR: score per article (Art.5/25/32/33/35)
-- ITU NCI: score per pillar as bars
+### Proposed Changes (Option A)
 
-**Findings Table**
-- Columns: Severity, Control, Issue, NIST, ISO, GDPR, Remediation
-- Sorted by severity (CRITICAL first)
-- Each row expandable via Collapsible to show full remediation
-- Color coded: red=CRITICAL, orange=HIGH, yellow=MEDIUM
+**File: `src/pages/ComplianceScan.tsx`**
+- Add an `error` state variable to display API errors
+- In `startScan`, catch non-OK responses and show `data.detail` or `data.error` message
+- In the history fetch, catch 404 gracefully and show "Compliance API not available" instead of silently failing
+- In `pollScan`, handle error status from the API response
+- Display error messages in a red-bordered card with clear text
 
-**History Table** (bottom)
-- Lists past scans from `/compliance/scans` endpoint
-- Shows org name, URL, overall score, grade, date scanned
+This way, when the backend compliance endpoints become available, everything will work automatically without frontend changes.
 
-**Polling Logic**: After starting a scan, poll `GET /compliance/scan/{scan_id}` every 5 seconds until `compliance_status === "done"`, then display results.
+### Technical Details
 
-### 3. Update OrgCard Component
-
-Add a "Run Compliance" button to `src/components/dashboard/OrgCard.tsx`:
-- Small button at the bottom of each card
-- On click, navigates to `/compliance-scan?org={name}&url={domain}` with org details as query params
-- Uses `e.stopPropagation()` to prevent the card's default navigation
-
-### 4. Update Routing and Navigation
-
-**`src/App.tsx`**: Add route `/compliance-scan` pointing to the new `ComplianceScan` page.
-
-**`src/components/layout/Sidebar.tsx`**: Add "Compliance Scan" nav item with `Search` or `CheckSquare` icon, placed near the existing Compliance entry.
-
-### Files to Create/Modify
-
-| File | Action |
-|------|--------|
-| `supabase/functions/compliance-scan-proxy/index.ts` | Create -- proxy for compliance API |
-| `src/pages/ComplianceScan.tsx` | Create -- full scan UI with form, results, findings, history |
-| `src/components/dashboard/OrgCard.tsx` | Modify -- add "Run Compliance" button |
-| `src/App.tsx` | Modify -- add `/compliance-scan` route |
-| `src/components/layout/Sidebar.tsx` | Modify -- add nav item |
-
-### Technical Notes
-
-- The edge function reuses existing `SECURITY_API_URL` and `SECURITY_API_KEY` secrets (already configured)
-- Polling uses `setInterval` with cleanup in a `useEffect`, checking `compliance_status` field
-- Framework score visualizations use Recharts (BarChart for NIST/ITU/GDPR, already a dependency)
-- The Collapsible component from Radix UI is already available for expandable finding rows
-- URL query params (`useSearchParams`) pre-fill the form when navigating from an org card
+- The edge function `compliance-scan-proxy` does NOT need changes -- it correctly proxies to the upstream API
+- The `security-scanner-proxy` is confirmed working (200 on `/health`)
+- Both proxies use the same `SECURITY_API_URL` and `SECURITY_API_KEY` secrets
+- The 404 `{"detail":"Not Found"}` is a FastAPI-style response from the upstream server
 
