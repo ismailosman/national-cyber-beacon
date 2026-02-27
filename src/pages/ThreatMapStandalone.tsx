@@ -10,6 +10,9 @@ import logoSrc from '@/assets/logo.png';
 const COUNTRY_SETS = [
   ['Ethiopia', 'Indonesia', 'Georgia', 'Ukraine', 'Kenya', 'Somalia', 'United States', 'India', 'Pakistan', 'Brazil'],
   ['Turkey', 'Nigeria', 'South Africa', 'Egypt', 'Bangladesh', 'Iran', 'China', 'Philippines', 'Vietnam', 'Colombia'],
+  ['Russia', 'Japan', 'Germany', 'France', 'United Kingdom', 'Mexico', 'Saudi Arabia', 'Australia', 'Canada', 'Israel'],
+  ['Thailand', 'Malaysia', 'Poland', 'Romania', 'Argentina', 'Morocco', 'Algeria', 'Sweden', 'Netherlands', 'Iraq'],
+  ['Somalia', 'United States', 'China', 'India', 'Brazil', 'Russia', 'Nigeria', 'Turkey', 'Iran', 'Kenya'],
 ];
 
 const MALWARE_TYPES = [
