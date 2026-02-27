@@ -52,6 +52,18 @@ const sevBadge = (s: string) => {
   return <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border', c)}>{s}</span>;
 };
 
+/* Normalize controls: API returns {key: {detail}} object or array */
+const normalizeControls = (raw: any): ControlItem[] => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  return Object.entries(raw).map(([key, val]: [string, any]) => ({
+    control_key: key,
+    detail: typeof val === 'object' ? val?.detail : String(val),
+    severity: typeof val === 'object' ? val?.severity : undefined,
+    remediation: typeof val === 'object' ? val?.remediation : undefined,
+  }));
+};
+
 /* ── types ── */
 interface ControlItem {
   control_key: string;
@@ -67,11 +79,11 @@ interface ControlItem {
 }
 
 interface RawCheck {
-  uptime?: Array<{ method: string; status: string; detail: string }>;
-  ssl?: { valid: boolean; common_name?: string; issuer?: string; expires?: string; days_until_expiry?: number };
-  headers?: { grade?: string; present?: string[]; missing?: string[] };
-  ddos?: { verdict?: string; providers?: string[]; evidence?: string[] };
-  dns?: { spf?: boolean; dmarc?: boolean; zone_transfer_blocked?: boolean };
+  uptime?: { checks?: Array<{ method: string; online: boolean; detail: string }>; verdict?: string; [k: string]: any };
+  ssl?: { valid: boolean; common_name?: string; issuer?: string; expires?: string; days_until_expiry?: number; [k: string]: any };
+  headers?: { grade?: string; present?: Record<string, string>; missing?: Record<string, any>; [k: string]: any };
+  ddos?: { verdict?: string; providers?: string[]; evidence?: string[]; [k: string]: any };
+  dns?: { results?: { spf?: { present: boolean }; dmarc?: { present: boolean }; zone_transfer?: { allowed: boolean } }; [k: string]: any };
 }
 
 interface FrameworkScores { scores: Record<string, number>; average: number }
@@ -82,8 +94,8 @@ interface ComplianceResults {
   failed: number;
   total_controls: number;
   checked_at?: string;
-  passed_controls?: ControlItem[];
-  failed_controls?: ControlItem[];
+  passed_controls?: any;
+  failed_controls?: any;
   raw_checks?: RawCheck;
   frameworks: {
     nist_csf: FrameworkScores;
@@ -109,10 +121,13 @@ interface ComplianceResults {
 interface ScanRecord {
   scan_id: string;
   organization_name: string;
-  target_url: string;
+  target_url?: string;
+  target?: string;
   compliance_status: string;
   compliance_phase: string;
   compliance_results: ComplianceResults | null;
+  overall_score?: number;
+  grade?: string;
   created_at: string;
 }
 
@@ -184,7 +199,10 @@ const ScanMetadata: React.FC<{ results: ComplianceResults; orgName: string; targ
 );
 
 /* ── Overall Score Card with breakdown ── */
-const OverallScoreCard: React.FC<{ r: ComplianceResults; onControlClick: (c: ControlItem) => void }> = ({ r, onControlClick }) => (
+const OverallScoreCard: React.FC<{ r: ComplianceResults; onControlClick: (c: ControlItem) => void }> = ({ r, onControlClick }) => {
+  const passedList = normalizeControls(r.passed_controls);
+  const failedList = normalizeControls(r.failed_controls);
+  return (
   <Card className="glass-card border-border">
     <CardContent className="flex flex-col items-center py-8 gap-3">
       <span className={cn('text-6xl font-bold font-mono', scoreColor(r.overall_score))}>{r.overall_score}</span>
@@ -199,34 +217,35 @@ const OverallScoreCard: React.FC<{ r: ComplianceResults; onControlClick: (c: Con
       </div>
 
       {/* Passed / Failed breakdown */}
-      {((r.passed_controls?.length || 0) > 0 || (r.failed_controls?.length || 0) > 0) && (
+      {(passedList.length > 0 || failedList.length > 0) && (
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <div className="space-y-1">
             <h4 className="text-xs font-mono text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Passed Controls</h4>
-            {(r.passed_controls || []).map((c, i) => (
+            {passedList.map((c, i) => (
               <button key={i} onClick={() => onControlClick(c)} className="w-full text-left rounded border border-green-500/20 bg-green-500/5 p-2 hover:bg-green-500/10 transition-colors">
                 <span className="font-mono text-[11px] text-green-400">{c.control_key}</span>
                 {c.name && <span className="text-[10px] text-muted-foreground ml-1.5">— {c.name}</span>}
               </button>
             ))}
-            {(!r.passed_controls || r.passed_controls.length === 0) && <p className="text-xs text-muted-foreground">—</p>}
+            {passedList.length === 0 && <p className="text-xs text-muted-foreground">—</p>}
           </div>
           <div className="space-y-1">
             <h4 className="text-xs font-mono text-red-400 flex items-center gap-1"><XCircle className="w-3 h-3" /> Failed Controls</h4>
-            {(r.failed_controls || []).map((c, i) => (
+            {failedList.map((c, i) => (
               <button key={i} onClick={() => onControlClick(c)} className="w-full text-left rounded border border-red-500/20 bg-red-500/5 p-2 hover:bg-red-500/10 transition-colors">
                 <span className="font-mono text-[11px] text-red-400">{c.control_key}</span>
                 {c.name && <span className="text-[10px] text-muted-foreground ml-1.5">— {c.name}</span>}
                 {c.detail && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.detail}</p>}
               </button>
             ))}
-            {(!r.failed_controls || r.failed_controls.length === 0) && <p className="text-xs text-muted-foreground">—</p>}
+            {failedList.length === 0 && <p className="text-xs text-muted-foreground">—</p>}
           </div>
         </div>
       )}
     </CardContent>
   </Card>
-);
+  );
+};
 
 /* ── Framework Bar Card ── */
 const FrameworkBarCard: React.FC<{
@@ -336,13 +355,14 @@ const TechnicalEvidence: React.FC<{ raw: RawCheck }> = ({ raw }) => {
         {raw.uptime && (
           <Section title="Uptime Checks">
             <div className="space-y-1">
-              {raw.uptime.map((u, i) => (
+              {(raw.uptime.checks || []).map((u, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs">
-                  {u.status === 'up' || u.status === 'pass' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+                  {u.online ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
                   <span className="font-mono">{u.method}</span>
                   <span className="text-muted-foreground">{u.detail}</span>
                 </div>
               ))}
+              {raw.uptime.verdict && <p className="text-xs mt-1 text-muted-foreground">Verdict: {raw.uptime.verdict}</p>}
             </div>
           </Section>
         )}
@@ -365,10 +385,10 @@ const TechnicalEvidence: React.FC<{ raw: RawCheck }> = ({ raw }) => {
         {raw.headers && (
           <Section title={`Security Headers ${raw.headers.grade ? `(Grade: ${raw.headers.grade})` : ''}`}>
             <div className="flex flex-wrap gap-1.5">
-              {(raw.headers.present || []).map((h, i) => (
+              {Object.keys(raw.headers.present || {}).map((h, i) => (
                 <span key={i} className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">{h}</span>
               ))}
-              {(raw.headers.missing || []).map((h, i) => (
+              {Object.keys(raw.headers.missing || {}).map((h, i) => (
                 <span key={i} className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">{h}</span>
               ))}
             </div>
@@ -393,14 +413,14 @@ const TechnicalEvidence: React.FC<{ raw: RawCheck }> = ({ raw }) => {
           <Section title="DNS Security">
             <div className="grid grid-cols-2 gap-2 text-xs">
               <span className="text-muted-foreground">SPF</span>
-              <span className={raw.dns.spf ? 'text-green-400' : 'text-red-400'}>{raw.dns.spf ? '✅ Present' : '❌ Missing'}</span>
+              <span className={raw.dns.results?.spf?.present ? 'text-green-400' : 'text-red-400'}>{raw.dns.results?.spf?.present ? '✅ Present' : '❌ Missing'}</span>
               <span className="text-muted-foreground">DMARC</span>
-              <span className={raw.dns.dmarc ? 'text-green-400' : 'text-red-400'}>{raw.dns.dmarc ? '✅ Present' : '❌ Missing'}</span>
-              {raw.dns.zone_transfer_blocked != null && (
+              <span className={raw.dns.results?.dmarc?.present ? 'text-green-400' : 'text-red-400'}>{raw.dns.results?.dmarc?.present ? '✅ Present' : '❌ Missing'}</span>
+              {raw.dns.results?.zone_transfer != null && (
                 <>
                   <span className="text-muted-foreground">Zone Transfer</span>
-                  <span className={raw.dns.zone_transfer_blocked ? 'text-green-400' : 'text-red-400'}>
-                    {raw.dns.zone_transfer_blocked ? '✅ Blocked' : '❌ Allowed'}
+                  <span className={!raw.dns.results.zone_transfer.allowed ? 'text-green-400' : 'text-red-400'}>
+                    {!raw.dns.results.zone_transfer.allowed ? '✅ Blocked' : '❌ Allowed'}
                   </span>
                 </>
               )}
@@ -531,7 +551,7 @@ const ComplianceScan: React.FC = () => {
   const loadHistoryScan = async (h: ScanRecord) => {
     setSelectedScanId(h.scan_id);
     setOrgName(h.organization_name);
-    setTargetUrl(h.target_url);
+    setTargetUrl(h.target_url || h.target || '');
     if (h.compliance_results) {
       setResults(h.compliance_results);
       return;
@@ -562,8 +582,8 @@ const ComplianceScan: React.FC = () => {
   /* Open sheet for a framework bar click */
   const handleBarClick = (framework: string, category: string, score: number) => {
     const findings = results?.compliance_findings || [];
-    const failed = results?.failed_controls || [];
-    const passed = results?.passed_controls || [];
+    const failed = normalizeControls(results?.failed_controls);
+    const passed = normalizeControls(results?.passed_controls);
 
     // Build controls for the category by matching findings/controls
     const catLower = category.toLowerCase();
@@ -737,20 +757,20 @@ const ComplianceScan: React.FC = () => {
                       onClick={() => loadHistoryScan(h)}
                     >
                       <TableCell className="font-mono text-xs">{h.organization_name}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">{h.target_url}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">{h.target_url || h.target}</TableCell>
                       <TableCell>
-                        {h.compliance_results ? (
-                          <span className={cn('font-bold font-mono', scoreColor(h.compliance_results.overall_score))}>
-                            {h.compliance_results.overall_score}
+                        {(h.compliance_results?.overall_score ?? h.overall_score) != null ? (
+                          <span className={cn('font-bold font-mono', scoreColor(h.compliance_results?.overall_score ?? h.overall_score ?? 0))}>
+                            {h.compliance_results?.overall_score ?? h.overall_score}
                           </span>
                         ) : (
                           <span className="text-muted-foreground text-xs">{h.compliance_status}</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        {h.compliance_results?.grade && (
-                          <span className={cn('text-xs font-bold font-mono px-1.5 py-0.5 rounded border', gradeColor(h.compliance_results.grade))}>
-                            {h.compliance_results.grade}
+                        {(h.compliance_results?.grade || h.grade) && (
+                          <span className={cn('text-xs font-bold font-mono px-1.5 py-0.5 rounded border', gradeColor(h.compliance_results?.grade || h.grade || ''))}>
+                            {h.compliance_results?.grade || h.grade}
                           </span>
                         )}
                       </TableCell>
