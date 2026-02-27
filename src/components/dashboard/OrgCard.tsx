@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { ShieldCheck, ShieldX, Check, X } from 'lucide-react';
+import { ShieldCheck, ShieldX, Check, X, ScanSearch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { formatET } from '@/lib/dateUtils';
@@ -169,6 +169,18 @@ const OrgCard: React.FC<OrgCardProps> = ({
           </span>
         ))}
       </div>
+
+      {/* Run Compliance button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          navigate(`/compliance-scan?org=${encodeURIComponent(name)}&url=${encodeURIComponent(domain)}`);
+        }}
+        className="mt-2 w-full flex items-center justify-center gap-1.5 text-[10px] font-mono px-2 py-1.5 rounded border border-neon-cyan/30 text-neon-cyan bg-neon-cyan/5 hover:bg-neon-cyan/15 transition-colors"
+      >
+        <ScanSearch className="w-3 h-3" />
+        Run Compliance
+      </button>
     </div>
   );
 };
