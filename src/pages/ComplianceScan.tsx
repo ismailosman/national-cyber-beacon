@@ -488,7 +488,7 @@ const ComplianceScan: React.FC = () => {
   }, []);
 
   const startScan = async () => {
-    if (!orgName.trim() || !targetUrl.trim()) return;
+    if (!(orgName || '').trim() || !(targetUrl || '').trim()) return;
     setScanning(true);
     setResults(null);
     setError(null);
@@ -623,7 +623,7 @@ const ComplianceScan: React.FC = () => {
           <div className="flex flex-col sm:flex-row gap-3">
             <Input placeholder="Organization name" value={orgName} onChange={e => setOrgName(e.target.value)} className="flex-1" />
             <Input placeholder="https://example.com" value={targetUrl} onChange={e => setTargetUrl(e.target.value)} className="flex-1" />
-            <Button onClick={startScan} disabled={scanning || !orgName.trim() || !targetUrl.trim()} className="gap-2">
+            <Button onClick={startScan} disabled={scanning || !(orgName || '').trim() || !(targetUrl || '').trim()} className="gap-2">
               {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />}
               {scanning ? 'Scanning…' : 'Run Compliance Scan'}
             </Button>
