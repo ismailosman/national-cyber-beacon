@@ -1,45 +1,18 @@
 
 
-## Add Email Delivery for Compliance Reports
+## Add Prominent Per-Site Scan Button to DDoS Monitor
 
-### Overview
-Send a branded email with the compliance PDF report attached when a scan completes or when the user downloads a report -- matching the existing security scan email pattern.
+### What's Changing
+Make the per-site scan button more visible and prominent in the DDoS Monitor table. Currently there's a small "Re-check" button in the Actions column that may be hard to spot. We'll make it stand out better.
 
 ### Changes
 
-#### 1. Update `send-pentest-email` Edge Function
-Add a new email type `compliance_report` that:
-- Accepts compliance results, org name, target URL, grade, and score
-- Calls `generate-compliance-report` to get the PDF
-- Uploads the PDF to the `scan-reports` storage bucket
-- Builds a branded HTML email with:
-  - Navy header with "Compliance Assessment Complete"
-  - Compliance grade badge (A-F) with color coding
-  - Score display (e.g., 46/100)
-  - Pass/fail summary (e.g., "4 of 11 controls passed")
-  - Framework averages (NIST, ISO, GDPR, ITU) with color indicators
-  - "Download PDF Report" and "View Dashboard" buttons
-  - Standard Cyber Defense email signature
-- Sends to admin recipients (osmando@gmail.com, info@cyberdefense.so) plus optional client email
-- Attaches the PDF as a base64 email attachment
+**File: `src/pages/DdosMonitor.tsx`**
 
-#### 2. Update `src/pages/ComplianceScan.tsx`
-- Add an "Email Report" button next to the "Download Report" button in the `ScanMetadata` component
-- After a scan completes successfully, automatically send the compliance report email (same pattern as security scanner)
-- Add `emailing` state for the email button loading indicator
-- The email function call sends `{ type: "compliance_report", complianceData: { results, org_name, target_url } }` to `send-pentest-email`
+1. Rename the "Re-check" button to "Scan" with a play/scan icon for better visibility
+2. Style the button with a more prominent color (green/cyan accent) so it stands out from the table
+3. For rows with no scan results yet, show a primary-colored "Scan" button instead of "Re-check" to indicate first-time scanning
+4. On mobile cards, add a visible "Scan" button as well (the `MobileCard` component)
 
-### Technical Details
-
-**Email HTML template** will follow the same structure as `scanCompletedEmail` and `reportDeliveryEmail`:
-- 600px centered table layout
-- Navy header (#0f172a) with compliance icon
-- Grade box with color: green (A/B), yellow (C), red (D/F)
-- Framework scores shown as colored text values
-- PDF download button linking to storage URL
-- Standard email signature
-
-**PDF generation and upload** reuses the existing `generatePdfAndUpload` pattern but calls `generate-compliance-report` instead of `generate-scan-report`.
-
-**Auto-send on scan completion**: When `pollScan` detects `compliance_status === 'done'`, it will trigger the email automatically (fire-and-forget, non-blocking).
+The existing `recheckSingle()` function already handles single-site scanning via the `/ddos/scan/single` API endpoint, so no backend changes are needed -- just UI improvements to make the button more discoverable.
 
