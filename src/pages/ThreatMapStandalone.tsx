@@ -33,6 +33,7 @@ const ThreatMapStandalone: React.FC = () => {
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<'map' | 'kaspersky'>('map');
 
   /* ── Arc queue system ─────────────────────────────────────────────── */
   const arcQueueRef = useRef<typeof events>([]);
@@ -156,6 +157,24 @@ const ThreatMapStandalone: React.FC = () => {
             <p className="text-[9px] text-slate-500 tracking-widest uppercase">LIVE CYBER THREAT MAP</p>
           </div>
         </div>
+        <div className="flex items-center gap-1 mx-4">
+          <button
+            onClick={() => setActiveTab('map')}
+            className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
+              activeTab === 'map'
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >Live Map</button>
+          <button
+            onClick={() => setActiveTab('kaspersky')}
+            className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
+              activeTab === 'kaspersky'
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >Kaspersky Feed</button>
+        </div>
         <div className="flex items-center gap-3">
           {/* LIVE indicator */}
           <div className="flex items-center gap-1.5">
@@ -188,6 +207,24 @@ const ThreatMapStandalone: React.FC = () => {
         </div>
       </div>
 
+      {activeTab === 'kaspersky' ? (
+        <div className="flex-1 flex flex-col overflow-y-auto" style={{ background: '#0a0a14' }}>
+          <div className="p-6">
+            <h2 className="text-xl font-bold text-white font-mono mb-1">🛡 Kaspersky Global Threat Intelligence Feed</h2>
+            <p className="text-sm text-slate-400 font-mono mb-4">Live data from Kaspersky Security Network (KSN)</p>
+          </div>
+          <div className="flex-1 px-6 pb-6">
+            <iframe
+              src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
+              width="100%"
+              style={{ border: 'none', borderRadius: 8, height: 'calc(100vh - 160px)' }}
+              title="Kaspersky Cyberthreat Live Map"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      ) : (
+      <>
       {/* ── Body: Three columns ───────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
@@ -437,6 +474,8 @@ const ThreatMapStandalone: React.FC = () => {
           </div>
         )}
       </div>
+      </>
+      )}
 
       <style>{`
         ::-webkit-scrollbar { width: 3px; }
