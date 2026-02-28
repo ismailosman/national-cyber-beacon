@@ -99,6 +99,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seenIds = useRef(new Set<string>());
+  const consecutiveFailsRef = useRef(0);
 
   const fetchData = useCallback(async (force = false) => {
     try {
@@ -114,11 +115,12 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       });
       clearTimeout(timeout);
       if (!res.ok) {
-        // Don't throw on 504 — just log and keep the map visible
-        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry next poll`);
+        consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
+        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry next poll (backoff ${consecutiveFailsRef.current})`);
         setLoading(false);
         return;
       }
+      consecutiveFailsRef.current = 0; // reset on success
       const data = await res.json();
       if (data._not_found || !data.events) {
         setLoading(false);
@@ -139,7 +141,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       if (data.stats) setStats(data.stats);
       if (data.top_attackers) {
         setTopAttackers(data.top_attackers);
-        setTopCountries(data.top_attackers); // backward compat
+        setTopCountries(data.top_attackers);
       } else if (data.top_countries) {
         setTopCountries(data.top_countries);
         setTopAttackers(data.top_countries);
@@ -151,6 +153,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       if (data.refreshed_at) setRefreshedAt(data.refreshed_at);
       setError(null);
     } catch (err: any) {
+      consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -160,8 +163,16 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   useEffect(() => {
     if (isPaused) return;
     fetchData();
-    const iv = setInterval(() => fetchData(), 8000);
-    return () => clearInterval(iv);
+    // Base 15s, doubles per consecutive fail up to ~960s max
+    const getInterval = () => 15000 * Math.pow(2, consecutiveFailsRef.current);
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        fetchData().then(schedule);
+      }, getInterval());
+    };
+    schedule();
+    return () => clearTimeout(timer);
   }, [isPaused, fetchData]);
 
   const togglePause = useCallback(() => setIsPaused(p => !p), []);
