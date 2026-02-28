@@ -147,7 +147,13 @@ const ThreatMapStandalone: React.FC = () => {
 
   const maxTypeCount = Math.max(1, ...typeBarData.map(t => t.count));
 
-  const displayAttackers = useMemo(() => (topAttackers.length > 0 ? topAttackers : topCountries).slice(0, 10), [topAttackers, topCountries]);
+  const [countrySearch, setCountrySearch] = useState('');
+  const allCountries = useMemo(() => (topAttackers.length > 0 ? topAttackers : topCountries), [topAttackers, topCountries]);
+  const displayAttackers = useMemo(() => {
+    if (!countrySearch.trim()) return allCountries.slice(0, 10);
+    const q = countrySearch.toLowerCase();
+    return allCountries.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
+  }, [allCountries, countrySearch]);
   const displayTargets = useMemo(() => topTargets.slice(0, 10), [topTargets]);
   const maxAttackerCount = Math.max(1, ...displayAttackers.map(c => c.count));
   const maxTargetCount = Math.max(1, ...displayTargets.map(c => c.count));
@@ -247,7 +253,23 @@ const ThreatMapStandalone: React.FC = () => {
 
               {/* Top countries */}
               <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP 10 COUNTRIES BY EVENTS</p>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-2">
+                  {countrySearch ? 'TOP COUNTRIES BY EVENTS' : 'TOP 10 COUNTRIES BY EVENTS'}
+                </p>
+                <div className="relative mb-2">
+                  <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-600" />
+                  <input
+                    type="text"
+                    value={countrySearch}
+                    onChange={e => setCountrySearch(e.target.value)}
+                    placeholder="Search countries..."
+                    className="w-full bg-transparent border rounded pl-6 pr-6 py-1 text-[10px] font-mono text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-slate-500"
+                    style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                  />
+                  {countrySearch && (
+                    <button onClick={() => setCountrySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-[10px]">✕</button>
+                  )}
+                </div>
                 {displayAttackers.length > 0 ? (() => {
                   const maxC = displayAttackers[0]?.count ?? 1;
                   return displayAttackers.map(c => {
