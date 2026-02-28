@@ -157,12 +157,16 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const seenIds = useRef(new Set<string>());
   const consecutiveFailsRef = useRef(0);
 
+  const useCombinedRef = useRef(true);
+
   const fetchData = useCallback(async (force = false) => {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 25000);
-      const path = force ? '/threat/map/combined?force=true' : '/threat/map/combined';
-      const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(path)}`, {
+      const primaryPath = useCombinedRef.current
+        ? (force ? '/threat/map/combined?force=true' : '/threat/map/combined')
+        : (force ? '/threat/map/live?force=true' : '/threat/map/live');
+      const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(primaryPath)}`, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           'Content-Type': 'application/json',
@@ -170,15 +174,30 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
         signal: controller.signal,
       });
       clearTimeout(timeout);
+
       if (!res.ok) {
+        if (useCombinedRef.current) {
+          console.warn('[ThreatAPI] /combined unavailable, falling back to /threat/map/live');
+          useCombinedRef.current = false;
+          return fetchData(force);
+        }
         consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
-        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry next poll (backoff ${consecutiveFailsRef.current})`);
+        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry (backoff ${consecutiveFailsRef.current})`);
         setLoading(false);
         return;
       }
       consecutiveFailsRef.current = 0;
       const data = await res.json();
-      if (data._not_found || !data.events) {
+      if (data._not_found) {
+        if (useCombinedRef.current) {
+          console.warn('[ThreatAPI] /combined not found, falling back to /threat/map/live');
+          useCombinedRef.current = false;
+          return fetchData(force);
+        }
+        setLoading(false);
+        return;
+      }
+      if (!data.events) {
         setLoading(false);
         return;
       }
