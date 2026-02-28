@@ -33,7 +33,7 @@ export interface KasperskySubsystem {
 
 export interface KasperskyData {
   subsystems: Record<string, KasperskySubsystem>;
-  top_threats: { name: string; count: number; severity: string }[];
+  top_threats: string[];
   quota_remaining: number;
   api_key_active: boolean;
 }
