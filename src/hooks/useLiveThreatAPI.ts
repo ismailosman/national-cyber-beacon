@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import type { LiveThreat, AttackType, Severity } from '@/hooks/useLiveAttacks';
 
 /* ── IP masking ─────────────────────────────────────────────────────── */
@@ -7,7 +6,7 @@ export function maskIP(ip: string): string {
   if (!ip) return 'x.x.x.x';
   const parts = ip.split('.');
   if (parts.length === 4) return `${parts[0]}.${parts[1]}.x.x`;
-  return ip; // IPv6 or other
+  return ip;
 }
 
 /* ── Type mapping ───────────────────────────────────────────────────── */
@@ -21,6 +20,30 @@ const TYPE_MAP: Record<string, AttackType> = {
 
 function mapType(raw: string): AttackType {
   return TYPE_MAP[raw] ?? 'exploit';
+}
+
+/* ── Kaspersky types ────────────────────────────────────────────────── */
+export interface KasperskySubsystem {
+  label: string;
+  total: number;
+  color: string;
+  severity: string;
+  countries?: Record<string, number>;
+}
+
+export interface KasperskyData {
+  subsystems: Record<string, KasperskySubsystem>;
+  top_threats: { name: string; count: number; severity: string }[];
+  quota_remaining: number;
+  api_key_active: boolean;
+}
+
+export interface IndicatorCheckResult {
+  zone: 'Red' | 'Yellow' | 'Green';
+  categories: string[];
+  threat_name: string;
+  cc: string;
+  isp: string;
 }
 
 /* ── API event shape ────────────────────────────────────────────────── */
@@ -38,6 +61,12 @@ interface APIEvent {
   source_api: string;
   pulse_name?: string;
   malware_url?: string;
+  // Kaspersky-specific
+  subsystem?: string;
+  subsystem_label?: string;
+  kaspersky_zone?: string;
+  threat_name?: string;
+  verified?: boolean;
 }
 
 interface APIStats {
@@ -48,10 +77,29 @@ interface APIStats {
 
 interface TopCountry { cc: string; name: string; count: number; coords: { lat: number; lng: number } }
 interface TopType { type: string; count: number; label: string; color: string }
-interface SourcesActive { abuseipdb: boolean; alienvault: boolean; urlhaus: boolean; firewall: boolean }
+interface SourcesActive {
+  abuseipdb: boolean;
+  alienvault: boolean;
+  urlhaus: boolean;
+  firewall: boolean;
+  kaspersky_ksn?: boolean;
+  kaspersky_tip?: boolean;
+}
+
+export interface LiveThreatEvent extends LiveThreat {
+  color?: string;
+  source_ip?: string;
+  source_api?: string;
+  label?: string;
+  subsystem?: string;
+  subsystem_label?: string;
+  kaspersky_zone?: string;
+  threat_name?: string;
+  verified?: boolean;
+}
 
 export interface LiveThreatAPIState {
-  events: (LiveThreat & { color?: string; source_ip?: string; source_api?: string; label?: string })[];
+  events: LiveThreatEvent[];
   stats: APIStats | null;
   topCountries: TopCountry[];
   topAttackers: TopCountry[];
@@ -65,11 +113,13 @@ export interface LiveThreatAPIState {
   forceRefresh: () => void;
   loading: boolean;
   error: string | null;
+  kaspersky: KasperskyData | null;
+  checkIndicator: (indicator: string) => Promise<IndicatorCheckResult | null>;
 }
 
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
-function mapEvent(e: APIEvent): LiveThreat & { color?: string; source_ip?: string; source_api?: string; label?: string } {
+function mapEvent(e: APIEvent): LiveThreatEvent {
   return {
     id: e.id,
     name: e.label,
@@ -82,11 +132,16 @@ function mapEvent(e: APIEvent): LiveThreat & { color?: string; source_ip?: strin
     source_ip: e.source_ip,
     source_api: e.source_api,
     label: e.label,
+    subsystem: e.subsystem,
+    subsystem_label: e.subsystem_label,
+    kaspersky_zone: e.kaspersky_zone,
+    threat_name: e.threat_name,
+    verified: e.verified,
   };
 }
 
 export function useLiveThreatAPI(): LiveThreatAPIState {
-  const [events, setEvents] = useState<LiveThreatAPIState['events']>([]);
+  const [events, setEvents] = useState<LiveThreatEvent[]>([]);
   const [stats, setStats] = useState<APIStats | null>(null);
   const [topCountries, setTopCountries] = useState<TopCountry[]>([]);
   const [topAttackers, setTopAttackers] = useState<TopCountry[]>([]);
@@ -98,6 +153,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const [isPaused, setIsPaused] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [kaspersky, setKaspersky] = useState<KasperskyData | null>(null);
   const seenIds = useRef(new Set<string>());
   const consecutiveFailsRef = useRef(0);
 
@@ -105,7 +161,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 25000);
-      const path = force ? '/threat/map/live?force=true' : '/threat/map/live';
+      const path = force ? '/threat/map/combined?force=true' : '/threat/map/combined';
       const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(path)}`, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -120,7 +176,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
         setLoading(false);
         return;
       }
-      consecutiveFailsRef.current = 0; // reset on success
+      consecutiveFailsRef.current = 0;
       const data = await res.json();
       if (data._not_found || !data.events) {
         setLoading(false);
@@ -151,6 +207,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       if (data.sources_active) setSourcesActive(data.sources_active);
       if (data.home) setHome(data.home);
       if (data.refreshed_at) setRefreshedAt(data.refreshed_at);
+      if (data.kaspersky) setKaspersky(data.kaspersky);
       setError(null);
     } catch (err: any) {
       consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
@@ -163,7 +220,6 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   useEffect(() => {
     if (isPaused) return;
     fetchData();
-    // Base 15s, doubles per consecutive fail up to ~960s max
     const getInterval = () => 15000 * Math.pow(2, consecutiveFailsRef.current);
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -178,5 +234,28 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const togglePause = useCallback(() => setIsPaused(p => !p), []);
   const forceRefresh = useCallback(() => fetchData(true), [fetchData]);
 
-  return { events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive, home, refreshedAt, isPaused, togglePause, forceRefresh, loading, error };
+  const checkIndicator = useCallback(async (indicator: string): Promise<IndicatorCheckResult | null> => {
+    try {
+      const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent('/kaspersky/check')}`, {
+        method: 'POST',
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ indicator, type: 'auto' }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data._not_found) return null;
+      return data as IndicatorCheckResult;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  return {
+    events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
+    home, refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
+    kaspersky, checkIndicator,
+  };
 }

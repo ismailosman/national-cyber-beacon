@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap } from 'lucide-react';
+import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap, Search, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
 import { useLiveThreatAPI, maskIP } from '@/hooks/useLiveThreatAPI';
+import type { LiveThreatEvent, KasperskySubsystem, IndicatorCheckResult } from '@/hooks/useLiveThreatAPI';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
 import SomaliaPanel from '@/components/cyber-map/SomaliaPanel';
 import CountryPanel from '@/components/cyber-map/CountryPanel';
@@ -24,16 +25,40 @@ const SourceDot: React.FC<{ name: string; active: boolean }> = ({ name, active }
   </div>
 );
 
+/* ── Feed event prefix ────────────────────────────────────────────── */
+function feedPrefix(e: LiveThreatEvent): React.ReactNode {
+  if (e.source_api === 'Kaspersky KSN Stats') return <span className="text-teal-400 font-bold">[KSN] </span>;
+  if (e.source_api === 'Kaspersky TIP') return <span className="text-amber-400 font-bold">[TIP] </span>;
+  return null;
+}
+
+const SUBSYSTEM_ORDER = ['OAS', 'ODS', 'WAV', 'MAV', 'IDS', 'VUL', 'KAS', 'RMW'];
+
 const ThreatMapStandalone: React.FC = () => {
   const {
     events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
     refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
+    kaspersky, checkIndicator,
   } = useLiveThreatAPI();
 
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'map' | 'kaspersky'>('map');
+  const [activeTab, setActiveTab] = useState<'map' | 'ksn'>('map');
+
+  /* ── Indicator lookup state ───────────────────────────────────────── */
+  const [indicatorInput, setIndicatorInput] = useState('');
+  const [indicatorResult, setIndicatorResult] = useState<IndicatorCheckResult | null>(null);
+  const [indicatorLoading, setIndicatorLoading] = useState(false);
+
+  const handleCheckIndicator = async () => {
+    if (!indicatorInput.trim()) return;
+    setIndicatorLoading(true);
+    setIndicatorResult(null);
+    const result = await checkIndicator(indicatorInput.trim());
+    setIndicatorResult(result);
+    setIndicatorLoading(false);
+  };
 
   /* ── Arc queue system ─────────────────────────────────────────────── */
   const arcQueueRef = useRef<typeof events>([]);
@@ -41,7 +66,6 @@ const ThreatMapStandalone: React.FC = () => {
   const prevEventsRef = useRef<Set<string>>(new Set());
   const recentArcTimestamps = useRef<number[]>([]);
 
-  // Push new API events into the queue
   useEffect(() => {
     const newEvents = events.filter(e => !prevEventsRef.current.has(e.id));
     if (newEvents.length > 0) {
@@ -50,7 +74,6 @@ const ThreatMapStandalone: React.FC = () => {
     prevEventsRef.current = new Set(events.map(e => e.id));
   }, [events]);
 
-  // Ticker: pop from queue or recycle — every 800ms
   useEffect(() => {
     if (isPaused) return;
     const ticker = setInterval(() => {
@@ -61,7 +84,6 @@ const ThreatMapStandalone: React.FC = () => {
         recentArcTimestamps.current.push(Date.now());
         setDisplayThreats(prev => [next, ...prev].slice(0, 30));
       } else if (events.length > 0) {
-        // Recycle a random existing event with a new ID
         const src = events[Math.floor(Math.random() * Math.min(events.length, 20))];
         if (src) {
           const recycled = { ...src, id: `${src.id}_r_${Date.now()}` };
@@ -93,7 +115,7 @@ const ThreatMapStandalone: React.FC = () => {
     return () => clearInterval(timer);
   }, [targetCount]);
 
-  /* ── Attack rate (arcs in last 60s) ───────────────────────────────── */
+  /* ── Attack rate ──────────────────────────────────────────────────── */
   const [attackRate, setAttackRate] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => {
@@ -104,11 +126,9 @@ const ThreatMapStandalone: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // Derive todayCount and rate (keep rate as fallback)
   const todayCount = displayCount;
   const rate = attackRate;
 
-  // Top 5 attack types bar chart data
   const typeBarData = useMemo(() => {
     if (topTypes.length > 0) return topTypes.slice(0, 5);
     if (!stats?.by_type) return [];
@@ -120,26 +140,27 @@ const ThreatMapStandalone: React.FC = () => {
 
   const maxTypeCount = Math.max(1, ...typeBarData.map(t => t.count));
 
-  // Top attackers and targets for right sidebar
   const displayAttackers = useMemo(() => (topAttackers.length > 0 ? topAttackers : topCountries).slice(0, 10), [topAttackers, topCountries]);
   const displayTargets = useMemo(() => topTargets.slice(0, 10), [topTargets]);
   const maxAttackerCount = Math.max(1, ...displayAttackers.map(c => c.count));
   const maxTargetCount = Math.max(1, ...displayTargets.map(c => c.count));
 
-  // Derive CCs for map highlighting
   const topAttackerCCs = useMemo(() => displayAttackers.slice(0, 3).map(c => c.cc?.toUpperCase()).filter(Boolean), [displayAttackers]);
   const topTargetCCs = useMemo(() => displayTargets.slice(0, 3).map(c => c.cc?.toUpperCase()).filter(Boolean), [displayTargets]);
 
-  const handleCountryClick = (country: string) => {
-    setSomaliaPanel(false);
-    setSelectedCountry(country);
-  };
-  const handleSomaliaClick = () => {
-    setSelectedCountry(null);
-    setSomaliaPanel(true);
-  };
+  const handleCountryClick = (country: string) => { setSomaliaPanel(false); setSelectedCountry(country); };
+  const handleSomaliaClick = () => { setSelectedCountry(null); setSomaliaPanel(true); };
 
   const hasData = events.length > 0;
+
+  /* ── KSN subsystem bar data ───────────────────────────────────────── */
+  const subsystemBarData = useMemo(() => {
+    if (!kaspersky?.subsystems) return [];
+    return SUBSYSTEM_ORDER
+      .filter(k => kaspersky.subsystems[k])
+      .map(k => ({ key: k, ...kaspersky.subsystems[k] }));
+  }, [kaspersky]);
+  const maxSubTotal = Math.max(1, ...subsystemBarData.map(s => s.total));
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden" style={{ background: '#0a0a14' }}>
@@ -158,25 +179,15 @@ const ThreatMapStandalone: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-1 mx-4">
-          <button
-            onClick={() => setActiveTab('map')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
-              activeTab === 'map'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >Live Map</button>
-          <button
-            onClick={() => setActiveTab('kaspersky')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
-              activeTab === 'kaspersky'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >Kaspersky Feed</button>
+          {(['map', 'ksn'] as const).map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
+                activeTab === tab ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >{tab === 'map' ? 'Live Map' : 'KSN Data'}</button>
+          ))}
         </div>
         <div className="flex items-center gap-3">
-          {/* LIVE indicator */}
           <div className="flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
@@ -184,43 +195,113 @@ const ThreatMapStandalone: React.FC = () => {
             </span>
             <span className="text-[10px] font-mono font-bold text-red-400 tracking-widest">LIVE</span>
           </div>
-
           <div className="hidden sm:block text-right">
             <p className="text-lg font-mono font-bold" style={{ color: '#f472b6' }}>{todayCount.toLocaleString()}</p>
             <p className="text-[8px] tracking-[0.2em] text-slate-500 uppercase">TOTAL ATTACKS</p>
           </div>
-
           {refreshedAt && (
             <span className="hidden md:block text-[9px] text-slate-600 font-mono">
               {new Date(refreshedAt).toLocaleTimeString()}
             </span>
           )}
-
-          <button onClick={togglePause}
-            className="p-1.5 rounded hover:bg-white/10 transition-colors" title={isPaused ? 'Resume' : 'Pause'}>
+          <button onClick={togglePause} className="p-1.5 rounded hover:bg-white/10 transition-colors" title={isPaused ? 'Resume' : 'Pause'}>
             {isPaused ? <Play className="w-3.5 h-3.5 text-cyan-400" /> : <Pause className="w-3.5 h-3.5 text-slate-400" />}
           </button>
-          <button onClick={forceRefresh}
-            className="p-1.5 rounded hover:bg-white/10 transition-colors" title="Refresh Now">
+          <button onClick={forceRefresh} className="p-1.5 rounded hover:bg-white/10 transition-colors" title="Refresh Now">
             <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
           </button>
         </div>
       </div>
 
-      {activeTab === 'kaspersky' ? (
+      {/* ── KSN Data Tab ───────────────────────────────────────────────── */}
+      {activeTab === 'ksn' ? (
         <div className="flex-1 flex flex-col overflow-y-auto" style={{ background: '#0a0a14' }}>
           <div className="p-6">
-            <h2 className="text-xl font-bold text-white font-mono mb-1">🛡 Kaspersky Global Threat Intelligence Feed</h2>
-            <p className="text-sm text-slate-400 font-mono mb-4">Live data from Kaspersky Security Network (KSN)</p>
-          </div>
-          <div className="flex-1 px-6 pb-6">
-            <iframe
-              src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
-              width="100%"
-              style={{ border: 'none', borderRadius: 8, height: 'calc(100vh - 160px)' }}
-              title="Kaspersky Cyberthreat Live Map"
-              allowFullScreen
-            />
+            <h2 className="text-xl font-bold text-white font-mono mb-1">🛡 Kaspersky Global Threat Intelligence</h2>
+            <p className="text-sm text-slate-400 font-mono mb-6">Live data from Kaspersky Security Network (KSN)</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {/* Subsystem bar chart */}
+              <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">DETECTIONS BY SUBSYSTEM</p>
+                {subsystemBarData.length > 0 ? subsystemBarData.map(s => (
+                  <div key={s.key} className="flex items-center gap-2 py-1.5">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                    <span className="text-[10px] font-mono text-slate-400 w-8">{s.key}</span>
+                    <span className="text-[9px] font-mono text-slate-500 w-28 truncate">{s.label}</span>
+                    <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                      <div className="h-full rounded-full transition-all" style={{ width: `${(s.total / maxSubTotal) * 100}%`, background: s.color }} />
+                    </div>
+                    <span className="text-[10px] font-mono text-white w-12 text-right">{s.total.toLocaleString()}</span>
+                  </div>
+                )) : <p className="text-[10px] text-slate-600 font-mono">Waiting for KSN data…</p>}
+              </div>
+
+              {/* Top countries */}
+              <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP 10 COUNTRIES BY DETECTIONS</p>
+                {kaspersky?.subsystems ? (() => {
+                  const countryTotals: Record<string, number> = {};
+                  Object.values(kaspersky.subsystems).forEach(sub => {
+                    if (sub.countries) {
+                      Object.entries(sub.countries).forEach(([cc, count]) => {
+                        countryTotals[cc] = (countryTotals[cc] || 0) + count;
+                      });
+                    }
+                  });
+                  const sorted = Object.entries(countryTotals).sort(([,a],[,b]) => b - a).slice(0, 10);
+                  const max = sorted[0]?.[1] ?? 1;
+                  return sorted.map(([cc, count]) => (
+                    <div key={cc} className="flex items-center gap-2 py-1">
+                      <img src={`https://flagcdn.com/w20/${cc.toLowerCase()}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />
+                      <span className="text-[10px] font-mono text-slate-400 w-8 uppercase">{cc}</span>
+                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${(count / max) * 100}%`, background: '#ef4444' }} />
+                      </div>
+                      <span className="text-[9px] font-mono text-slate-500 w-10 text-right">{count.toLocaleString()}</span>
+                    </div>
+                  ));
+                })() : <p className="text-[10px] text-slate-600 font-mono">Waiting for data…</p>}
+              </div>
+
+              {/* Top threats */}
+              <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP THREATS</p>
+                {kaspersky?.top_threats?.length ? kaspersky.top_threats.slice(0, 10).map((t, i) => (
+                  <div key={i} className="flex items-center gap-2 py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span className="text-[9px] font-mono text-slate-600 w-4">{i + 1}</span>
+                    <span className="text-[10px] font-mono text-slate-300 flex-1 truncate">{t.name}</span>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full ${
+                      t.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                      t.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                      'bg-yellow-500/20 text-yellow-400'
+                    }`}>{t.count}</span>
+                  </div>
+                )) : <p className="text-[10px] text-slate-600 font-mono">No threat data yet</p>}
+              </div>
+            </div>
+
+            {/* Quota info */}
+            {kaspersky && (
+              <div className="mt-4 flex items-center gap-2">
+                <span className="text-[10px] font-mono text-slate-500">API Quota:</span>
+                <span className={`text-[10px] font-mono font-bold ${
+                  kaspersky.quota_remaining > 500 ? 'text-green-400' :
+                  kaspersky.quota_remaining > 100 ? 'text-yellow-400' : 'text-red-400'
+                }`}>{kaspersky.quota_remaining}/2000 remaining today</span>
+              </div>
+            )}
+
+            {/* Kaspersky iframe widget */}
+            <div className="mt-6">
+              <iframe
+                src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
+                width="100%"
+                style={{ border: 'none', borderRadius: 8, height: 500 }}
+                title="Kaspersky Cyberthreat Live Map"
+                allowFullScreen
+              />
+            </div>
           </div>
         </div>
       ) : (
@@ -265,9 +346,40 @@ const ThreatMapStandalone: React.FC = () => {
             <SourceDot name="URLhaus" active={sourcesActive.urlhaus} />
             <SourceDot name="AlienVault OTX" active={sourcesActive.alienvault} />
             <SourceDot name="Firewall Log" active={sourcesActive.firewall} />
+            <SourceDot name="Kaspersky KSN" active={!!sourcesActive.kaspersky_ksn} />
+            <SourceDot name="Kaspersky TIP" active={!!sourcesActive.kaspersky_tip} />
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* Kaspersky KSN subsystems */}
+          {kaspersky?.subsystems && (
+            <>
+              <div className="p-3">
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-teal-400 mb-2 font-mono">━━━ KASPERSKY KSN ━━━</p>
+                {SUBSYSTEM_ORDER.map(key => {
+                  const sub = kaspersky.subsystems[key];
+                  if (!sub) return null;
+                  return (
+                    <div key={key} className="flex items-center gap-1.5 py-0.5">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: sub.color }} />
+                      <span className="text-[10px] font-mono text-slate-300 w-7">{key}</span>
+                      <span className="text-[9px] font-mono text-slate-500 flex-1 truncate">{sub.label}</span>
+                      <span className="text-[9px] font-mono text-slate-400">{sub.total.toLocaleString()}</span>
+                    </div>
+                  );
+                })}
+                <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span className="text-[9px] font-mono text-slate-500">API Quota: </span>
+                  <span className={`text-[9px] font-mono font-bold ${
+                    kaspersky.quota_remaining > 500 ? 'text-green-400' :
+                    kaspersky.quota_remaining > 100 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>{kaspersky.quota_remaining}/2000</span>
+                </div>
+              </div>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+            </>
+          )}
 
           {/* Live feed */}
           <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
@@ -278,7 +390,10 @@ const ThreatMapStandalone: React.FC = () => {
               <div key={a.id} className="flex items-start gap-2 px-3 py-2 feed-item" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <div className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: a.color || ATTACK_COLORS[a.attack_type] }} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-white font-mono truncate">{a.label || ATTACK_LABELS[a.attack_type]}</p>
+                  <p className="text-[11px] text-white font-mono truncate">
+                    {feedPrefix(a)}{a.label || ATTACK_LABELS[a.attack_type]}
+                    {a.verified && <span className="text-amber-400 ml-1">✓</span>}
+                  </p>
                   <p className="text-[9px] text-slate-500 font-mono truncate">
                     {timeAgo(a.timestamp)} · {a.source.country} → {a.target.country}
                   </p>
@@ -300,7 +415,6 @@ const ThreatMapStandalone: React.FC = () => {
             topTargetCCs={topTargetCCs}
           />
 
-          {/* Fallback overlay */}
           {!hasData && !loading && (
             <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
               <div className="text-center px-6 py-4 rounded-xl" style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -311,7 +425,6 @@ const ThreatMapStandalone: React.FC = () => {
             </div>
           )}
 
-          {/* Panel overlays */}
           {somaliaPanel && !selectedCountry && (
             <SomaliaPanel threats={events} onClose={() => setSomaliaPanel(false)} />
           )}
@@ -319,7 +432,6 @@ const ThreatMapStandalone: React.FC = () => {
             <CountryPanel country={selectedCountry} threats={events} onClose={() => setSelectedCountry(null)} />
           )}
 
-          {/* Legend */}
           <div className="absolute bottom-3 left-3 z-10 flex items-center gap-3 px-3 py-1.5 rounded-lg"
             style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.08)' }}>
             {(Object.entries(ATTACK_LABELS) as [AttackType, string][]).map(([type, label]) => (
@@ -397,7 +509,7 @@ const ThreatMapStandalone: React.FC = () => {
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
-          {/* Live feed with masked IPs */}
+          {/* Recent events with KSN/TIP prefixes */}
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">RECENT EVENTS</p>
             {events.slice(0, 10).map(e => (
@@ -405,9 +517,10 @@ const ThreatMapStandalone: React.FC = () => {
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
                   <span className="text-[10px] text-slate-500 font-mono">{timeAgo(e.timestamp)}</span>
+                  {e.verified && <span className="text-[9px] text-amber-400">✓</span>}
                 </div>
                 <p className="text-[11px] text-slate-300 font-mono truncate mt-0.5">
-                  {e.label || ATTACK_LABELS[e.attack_type]} from {e.source.country} → {e.target.country}
+                  {feedPrefix(e)}{e.label || ATTACK_LABELS[e.attack_type]} from {e.source.country} → {e.target.country}
                 </p>
                 {e.source_ip && (
                   <p className="text-[9px] text-slate-600 font-mono">{maskIP(e.source_ip)}</p>
@@ -422,7 +535,6 @@ const ThreatMapStandalone: React.FC = () => {
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
           {/* Live Statistics */}
-          {/* Active Threats */}
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">LIVE STATISTICS</p>
             {[
@@ -435,6 +547,50 @@ const ThreatMapStandalone: React.FC = () => {
                 <span className="text-sm font-mono font-bold" style={{ color: s.color }}>{s.value}</span>
               </div>
             ))}
+          </div>
+
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* ── Indicator Lookup ──────────────────────────────────────── */}
+          <div className="p-3">
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">CHECK INDICATOR</p>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={indicatorInput}
+                onChange={e => setIndicatorInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleCheckIndicator()}
+                placeholder="IP, domain, or hash…"
+                className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] font-mono text-white placeholder:text-slate-600 outline-none focus:border-cyan-500/50"
+              />
+              <button onClick={handleCheckIndicator} disabled={indicatorLoading}
+                className="px-2 py-1 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors disabled:opacity-50">
+                {indicatorLoading ? '…' : <Search className="w-3 h-3" />}
+              </button>
+            </div>
+            {indicatorResult && (
+              <div className="mt-2 p-2 rounded" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  {indicatorResult.zone === 'Red' ? (
+                    <><ShieldX className="w-3.5 h-3.5 text-red-400" /><span className="text-[10px] font-mono font-bold text-red-400">MALICIOUS</span></>
+                  ) : indicatorResult.zone === 'Yellow' ? (
+                    <><ShieldAlert className="w-3.5 h-3.5 text-yellow-400" /><span className="text-[10px] font-mono font-bold text-yellow-400">SUSPICIOUS</span></>
+                  ) : (
+                    <><ShieldCheck className="w-3.5 h-3.5 text-green-400" /><span className="text-[10px] font-mono font-bold text-green-400">CLEAN</span></>
+                  )}
+                </div>
+                {indicatorResult.threat_name && (
+                  <p className="text-[9px] font-mono text-slate-300">{indicatorResult.threat_name}</p>
+                )}
+                {indicatorResult.categories?.length > 0 && (
+                  <p className="text-[9px] font-mono text-slate-400">{indicatorResult.categories[0]}</p>
+                )}
+                <div className="flex gap-3 mt-1">
+                  {indicatorResult.isp && <span className="text-[9px] font-mono text-slate-500">ISP: {indicatorResult.isp}</span>}
+                  {indicatorResult.cc && <span className="text-[9px] font-mono text-slate-500">{indicatorResult.cc}</span>}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -466,7 +622,7 @@ const ThreatMapStandalone: React.FC = () => {
               <div key={e.id} className="flex items-center gap-2 py-1 px-1">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
                 <span className="text-[10px] text-slate-400 font-mono truncate flex-1">
-                  {e.label || ATTACK_LABELS[e.attack_type]} · {e.source.country} → {e.target.country}
+                  {feedPrefix(e)}{e.label || ATTACK_LABELS[e.attack_type]} · {e.source.country} → {e.target.country}
                 </span>
                 <span className="text-[9px] text-slate-600 font-mono">{timeAgo(e.timestamp)}</span>
               </div>
