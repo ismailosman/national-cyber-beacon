@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap } from 'lucide-react';
 import { useLiveThreatAPI, maskIP } from '@/hooks/useLiveThreatAPI';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
@@ -34,15 +34,78 @@ const ThreatMapStandalone: React.FC = () => {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
 
-  // Derive todayCount and rate
-  const todayCount = stats?.total ?? events.length;
-  const rate = useMemo(() => {
-    if (events.length < 2) return 0;
-    const newest = events[0]?.timestamp ?? Date.now();
-    const oldest = events[Math.min(events.length - 1, 9)]?.timestamp ?? newest;
-    const spanMin = Math.max(0.5, (newest - oldest) / 60000);
-    return Math.round(Math.min(events.length, 10) / spanMin);
+  /* ── Arc queue system ─────────────────────────────────────────────── */
+  const arcQueueRef = useRef<typeof events>([]);
+  const [displayThreats, setDisplayThreats] = useState<typeof events>([]);
+  const prevEventsRef = useRef<Set<string>>(new Set());
+  const recentArcTimestamps = useRef<number[]>([]);
+
+  // Push new API events into the queue
+  useEffect(() => {
+    const newEvents = events.filter(e => !prevEventsRef.current.has(e.id));
+    if (newEvents.length > 0) {
+      arcQueueRef.current = [...arcQueueRef.current, ...newEvents].slice(-100);
+    }
+    prevEventsRef.current = new Set(events.map(e => e.id));
   }, [events]);
+
+  // Ticker: pop from queue or recycle — every 800ms
+  useEffect(() => {
+    if (isPaused) return;
+    const ticker = setInterval(() => {
+      const queue = arcQueueRef.current;
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        arcQueueRef.current = rest;
+        recentArcTimestamps.current.push(Date.now());
+        setDisplayThreats(prev => [next, ...prev].slice(0, 30));
+      } else if (events.length > 0) {
+        // Recycle a random existing event with a new ID
+        const src = events[Math.floor(Math.random() * Math.min(events.length, 20))];
+        if (src) {
+          const recycled = { ...src, id: `${src.id}_r_${Date.now()}` };
+          recentArcTimestamps.current.push(Date.now());
+          setDisplayThreats(prev => [recycled, ...prev].slice(0, 30));
+        }
+      }
+    }, 800);
+    return () => clearInterval(ticker);
+  }, [isPaused, events]);
+
+  /* ── Animated counter ─────────────────────────────────────────────── */
+  const targetCount = stats?.total ?? events.length;
+  const [displayCount, setDisplayCount] = useState(0);
+
+  useEffect(() => {
+    if (targetCount <= displayCount) {
+      if (targetCount < displayCount) setDisplayCount(targetCount);
+      return;
+    }
+    const step = Math.max(1, Math.ceil((targetCount - displayCount) / 10));
+    const timer = setInterval(() => {
+      setDisplayCount(prev => {
+        const next = prev + step;
+        if (next >= targetCount) { clearInterval(timer); return targetCount; }
+        return next;
+      });
+    }, 50);
+    return () => clearInterval(timer);
+  }, [targetCount]);
+
+  /* ── Attack rate (arcs in last 60s) ───────────────────────────────── */
+  const [attackRate, setAttackRate] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const cutoff = Date.now() - 60000;
+      recentArcTimestamps.current = recentArcTimestamps.current.filter(t => t > cutoff);
+      setAttackRate(recentArcTimestamps.current.length);
+    }, 2000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Derive todayCount and rate (keep rate as fallback)
+  const todayCount = displayCount;
+  const rate = attackRate;
 
   // Top 5 attack types bar chart data
   const typeBarData = useMemo(() => {
@@ -135,8 +198,8 @@ const ThreatMapStandalone: React.FC = () => {
           {/* Attack counter + rate */}
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">ATTACKS</p>
-            <p className="text-2xl font-mono font-bold mt-1" style={{ color: '#22d3ee' }}>{events.length}</p>
-            <p className="text-[9px] text-slate-500 font-mono mt-1">⏱ {rate} events/min</p>
+            <p className="text-2xl font-mono font-bold mt-1" style={{ color: '#22d3ee' }}>{displayThreats.length}</p>
+            <p className="text-[9px] text-slate-500 font-mono mt-1">⚡ {rate} arcs/min</p>
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
@@ -175,7 +238,7 @@ const ThreatMapStandalone: React.FC = () => {
               <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">LIVE FEED</p>
             </div>
             {events.slice(0, 30).map(a => (
-              <div key={a.id} className="flex items-start gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div key={a.id} className="flex items-start gap-2 px-3 py-2 feed-item" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <div className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: a.color || ATTACK_COLORS[a.attack_type] }} />
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] text-white font-mono truncate">{a.label || ATTACK_LABELS[a.attack_type]}</p>
@@ -191,7 +254,7 @@ const ThreatMapStandalone: React.FC = () => {
         {/* ── CENTER MAP ─────────────────────────────────────────────── */}
         <div className="relative flex-1 min-w-0">
           <ThreatMapEngine
-            threats={events}
+            threats={displayThreats}
             todayCount={todayCount}
             liveOn={!isPaused}
             onCountryClick={handleCountryClick}
@@ -322,11 +385,12 @@ const ThreatMapStandalone: React.FC = () => {
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
           {/* Live Statistics */}
+          {/* Active Threats */}
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">LIVE STATISTICS</p>
             {[
-              { label: 'Active Threats', value: events.length, color: '#ff0066' },
-              { label: 'Attack Rate/min', value: rate, color: '#f97316' },
+              { label: 'Active Arcs', value: displayThreats.length, color: '#ff0066' },
+              { label: 'Arcs/min', value: rate, color: '#f97316' },
               { label: 'Total', value: todayCount.toLocaleString(), color: '#a855f7' },
             ].map(s => (
               <div key={s.label} className="flex items-center justify-between py-1.5">
@@ -378,6 +442,11 @@ const ThreatMapStandalone: React.FC = () => {
         ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-track { background: #0d0d18; }
         ::-webkit-scrollbar-thumb { background: #1c1c30; border-radius: 2px; }
+        @keyframes feedSlideIn {
+          from { opacity: 0; transform: translateY(-6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .feed-item { animation: feedSlideIn 0.3s ease-out; }
       `}</style>
     </div>
   );
