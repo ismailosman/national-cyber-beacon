@@ -1,46 +1,38 @@
 
 
-## Fix KSN Data Tab — Empty Panels
+## Add Country Search to "TOP 10 COUNTRIES BY EVENTS" Panel
 
-### Root Cause
-
-The API at `/threat/map/combined` returns a `kaspersky` object, but with empty data:
-
-```text
-kaspersky: {
-  api_key_active: false,
-  quota_remaining: 2000,
-  subsystems: {},       <-- empty
-  top_threats: []       <-- empty
-}
-```
-
-The Kaspersky API key on the backend is not active (`api_key_active: false`), so no subsystem or threat data is returned. The frontend code is correct but has nothing to display.
-
-### Solution
-
-Add client-side fallback/demo data when the Kaspersky API key is inactive or subsystems are empty. This ensures the KSN Data tab always shows meaningful information.
+### Overview
+Add a compact search/filter input to the KSN Data tab's country panel so users can search for specific countries beyond the top 10.
 
 ### Changes
 
-**File: `src/hooks/useLiveThreatAPI.ts`**
-
-- Add a `FALLBACK_KASPERSKY` constant containing the sample subsystem and top_threats data (from the user's previous message)
-- In `fetchData`, after receiving `data.kaspersky`, check if `api_key_active` is false or `subsystems` is empty
-- If so, merge the fallback data into the kaspersky state, preserving the real `quota_remaining` value
-- This keeps the UI populated while clearly sourced from fallback data
-
 **File: `src/pages/ThreatMapStandalone.tsx`**
 
-- Add a small "(demo)" indicator next to "DETECTIONS BY SUBSYSTEM" header when `kaspersky.api_key_active` is false, so it's transparent that fallback data is shown
-- No other UI changes needed — existing rendering logic already handles the data correctly
+1. Add a new `useState` for the country search query (e.g., `countrySearch`)
+2. Replace the hardcoded `.slice(0, 10)` with filtered logic:
+   - When search is empty: show top 10 as before
+   - When search has text: filter ALL `topAttackers`/`topCountries` by name match (case-insensitive), show up to 20 results
+3. Add a small search input above the country list inside the panel:
+   - Compact input with a search icon, matching the dark theme (`bg-transparent`, border `rgba(255,255,255,0.1)`)
+   - Placeholder: "Search countries..."
+   - `text-[10px]` font size to match existing panel style
+4. Update the header to say "TOP COUNTRIES BY EVENTS" (drop the "10" when searching)
+
+### UI Layout
+```text
++------------------------------------+
+| TOP COUNTRIES BY EVENTS            |
+| [🔍 Search countries...         ]  |
+| 🇨🇳 China          ████████  205  |
+| 🇷🇺 Russia         ███████   200  |
+| ...                                |
++------------------------------------+
+```
 
 ### Technical Details
-
-The fallback data constant will contain:
-- 8 subsystems (OAS, IDS, WAV, ODS, VUL, KAS, MAV, RMW) with labels, totals, colors, severity
-- 10 top threat names as strings
-- Preserves real `quota_remaining` and `api_key_active` from the API
-
-This approach means no backend changes are needed, and the KSN tab will display data immediately.
-
+- The `displayAttackers` memo already combines `topAttackers` and `topCountries` but slices to 10
+- We'll create a new filtered memo that applies the search filter before slicing
+- The search input will be styled consistently with the dark cyber theme
+- The max bar width will recalculate based on the filtered set's top value
+- Clear button (x) appears when search text is present
