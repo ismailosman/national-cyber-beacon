@@ -231,7 +231,7 @@ const ThreatMapStandalone: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {/* Subsystem bar chart */}
               <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">DETECTIONS BY SUBSYSTEM</p>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">DETECTIONS BY SUBSYSTEM{kaspersky && !kaspersky.api_key_active && <span className="ml-2 text-[8px] text-yellow-500/70">(demo)</span>}</p>
                 {subsystemBarData.length > 0 ? subsystemBarData.map(s => (
                   <div key={s.key} className="flex items-center gap-2 py-1.5">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.color }} />

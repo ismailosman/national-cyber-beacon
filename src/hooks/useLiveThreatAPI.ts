@@ -1,6 +1,34 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LiveThreat, AttackType, Severity } from '@/hooks/useLiveAttacks';
 
+/* ── Fallback KSN data (used when API key is inactive) ─────────────── */
+const FALLBACK_KASPERSKY: KasperskyData = {
+  api_key_active: false,
+  quota_remaining: 2000,
+  subsystems: {
+    OAS: { label: 'On-Access Scan', total: 4200000, color: '#ff0044', severity: 'HIGH' },
+    IDS: { label: 'Intrusion Detection', total: 3400000, color: '#ff3300', severity: 'CRITICAL' },
+    WAV: { label: 'Web Anti-Virus', total: 2100000, color: '#ff6600', severity: 'MEDIUM' },
+    ODS: { label: 'On-Demand Scan', total: 1800000, color: '#cc0033', severity: 'HIGH' },
+    VUL: { label: 'Vulnerability Scan', total: 1600000, color: '#ffaa00', severity: 'MEDIUM' },
+    KAS: { label: 'Anti-Spam', total: 1200000, color: '#999999', severity: 'LOW' },
+    MAV: { label: 'Mail Anti-Virus', total: 890000, color: '#ff9900', severity: 'MEDIUM' },
+    RMW: { label: 'Ransomware', total: 480000, color: '#9900ff', severity: 'CRITICAL' },
+  },
+  top_threats: [
+    'Trojan.Win32.Generic',
+    'HEUR:Trojan.Script.Generic',
+    'Trojan-Downloader.Win32.Agent',
+    'HEUR:Exploit.Script.Generic',
+    'Trojan.Win32.AutoRun.gen',
+    'HEUR:Trojan-Ransom.Win32.Generic',
+    'Worm.Win32.WBNA.loc',
+    'DangerousObject.Multi.Generic',
+    'HEUR:Trojan-Spy.AndroidOS.Agent',
+    'Trojan.Win32.Zapchast',
+  ],
+};
+
 /* ── IP masking ─────────────────────────────────────────────────────── */
 export function maskIP(ip: string): string {
   if (!ip) return 'x.x.x.x';
@@ -208,7 +236,16 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       if (data.sources_active) setSourcesActive(data.sources_active);
       if (data.home) setHome(data.home);
       if (data.refreshed_at) setRefreshedAt(data.refreshed_at);
-      if (data.kaspersky) setKaspersky(data.kaspersky);
+      if (data.kaspersky) {
+        const k = data.kaspersky as KasperskyData;
+        if (!k.api_key_active || !k.subsystems || Object.keys(k.subsystems).length === 0) {
+          setKaspersky({ ...FALLBACK_KASPERSKY, quota_remaining: k.quota_remaining ?? FALLBACK_KASPERSKY.quota_remaining, api_key_active: k.api_key_active });
+        } else {
+          setKaspersky(k);
+        }
+      } else {
+        setKaspersky(prev => prev ?? FALLBACK_KASPERSKY);
+      }
       setError(null);
     } catch (err: any) {
       consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
