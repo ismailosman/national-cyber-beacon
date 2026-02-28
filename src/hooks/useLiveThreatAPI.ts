@@ -98,14 +98,23 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
 
   const fetchData = useCallback(async (force = false) => {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25000);
       const path = force ? '/threat/map/live?force=true' : '/threat/map/live';
       const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(path)}`, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      clearTimeout(timeout);
+      if (!res.ok) {
+        // Don't throw on 504 — just log and keep the map visible
+        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry next poll`);
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
       if (data._not_found || !data.events) {
         setLoading(false);
