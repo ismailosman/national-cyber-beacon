@@ -1,72 +1,67 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Zap, ChevronUp, ChevronDown } from 'lucide-react';
-import { useLiveAttacks, type AttackType } from '@/hooks/useLiveAttacks';
+import React, { useState, useMemo } from 'react';
+import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap } from 'lucide-react';
+import { useLiveThreatAPI, maskIP } from '@/hooks/useLiveThreatAPI';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
 import SomaliaPanel from '@/components/cyber-map/SomaliaPanel';
 import CountryPanel from '@/components/cyber-map/CountryPanel';
-import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS, seededRand } from '@/components/cyber-map/shared';
+import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS } from '@/components/cyber-map/shared';
+import type { AttackType } from '@/hooks/useLiveAttacks';
 import logoSrc from '@/assets/logo.png';
 
-const COUNTRY_SETS = [
-  ['Ethiopia', 'Indonesia', 'Georgia', 'Ukraine', 'Kenya', 'Somalia', 'United States', 'India', 'Pakistan', 'Brazil'],
-  ['Turkey', 'Nigeria', 'South Africa', 'Egypt', 'Bangladesh', 'Iran', 'China', 'Philippines', 'Vietnam', 'Colombia'],
-  ['Russia', 'Japan', 'Germany', 'France', 'United Kingdom', 'Mexico', 'Saudi Arabia', 'Australia', 'Canada', 'Israel'],
-  ['Thailand', 'Malaysia', 'Poland', 'Romania', 'Argentina', 'Morocco', 'Algeria', 'Sweden', 'Netherlands', 'Iraq'],
-  ['Somalia', 'United States', 'China', 'India', 'Brazil', 'Russia', 'Nigeria', 'Turkey', 'Iran', 'Kenya'],
-];
-
-const MALWARE_TYPES = [
-  { name: 'Mobile', icon: '📱', color: '#ef4444' },
-  { name: 'Adware', icon: '⚙️', color: '#f97316' },
-  { name: 'Phishing', icon: '🎣', color: '#a855f7' },
-];
-
-function rnd(a: number, b: number) { return Math.random() * (b - a) + a; }
-
-function countryBaseCount(name: string): number {
-  let hash = 0;
-  for (const ch of name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
-  return 800 + Math.abs(hash) % 14200;
+/* ── Relative time helper ─────────────────────────────────────────── */
+function timeAgo(ts: number): string {
+  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
 }
 
+/* ── Source status dot ────────────────────────────────────────────── */
+const SourceDot: React.FC<{ name: string; active: boolean }> = ({ name, active }) => (
+  <div className="flex items-center gap-1.5 py-0.5">
+    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: active ? '#22c55e' : '#475569' }} />
+    <span className="text-[10px] font-mono text-slate-400">{name}</span>
+  </div>
+);
+
 const ThreatMapStandalone: React.FC = () => {
-  const liveOn = true;
+  const {
+    events, stats, topCountries, topTypes, sourcesActive,
+    refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
+  } = useLiveThreatAPI();
+
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [rotationIndex, setRotationIndex] = useState(0);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
 
-  const { threats, todayCount } = useLiveAttacks(liveOn);
+  // Derive todayCount and rate
+  const todayCount = stats?.total ?? events.length;
+  const rate = useMemo(() => {
+    if (events.length < 2) return 0;
+    const newest = events[0]?.timestamp ?? Date.now();
+    const oldest = events[Math.min(events.length - 1, 9)]?.timestamp ?? newest;
+    const spanMin = Math.max(0.5, (newest - oldest) / 60000);
+    return Math.round(Math.min(events.length, 10) / spanMin);
+  }, [events]);
 
-  // Rotate country sets every 30s
-  useEffect(() => {
-    const iv = setInterval(() => setRotationIndex(i => (i + 1) % COUNTRY_SETS.length), 30000);
-    return () => clearInterval(iv);
-  }, []);
+  // Top 5 attack types bar chart data
+  const typeBarData = useMemo(() => {
+    if (topTypes.length > 0) return topTypes.slice(0, 5);
+    if (!stats?.by_type) return [];
+    return Object.entries(stats.by_type)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([type, count]) => ({ type, count, label: type, color: ATTACK_COLORS[type as AttackType] ?? '#64748b' }));
+  }, [topTypes, stats]);
 
-  const currentCountries = COUNTRY_SETS[rotationIndex];
+  const maxTypeCount = Math.max(1, ...typeBarData.map(t => t.count));
 
-  const chartBars = useRef(Array.from({ length: 30 }, () => Math.floor(rnd(3e6, 18e6))));
-  const maxBar = Math.max(...chartBars.current, 1);
-
-  // Compute per-country attack counts
-  const countMap = useMemo(() => {
-    const m: Record<string, number> = {};
-    // Seed every country with a realistic baseline
-    for (const set of COUNTRY_SETS) {
-      for (const name of set) {
-        if (!m[name]) m[name] = countryBaseCount(name);
-      }
-    }
-    // Add live feed counts on top
-    for (const t of threats) {
-      const c = t.target?.country;
-      if (c) m[c] = (m[c] || 0) + 1;
-    }
-    return m;
-  }, [threats]);
-
-  const rate = Math.max(1, Math.floor(threats.length / 3));
+  // Top countries for right sidebar
+  const displayCountries = useMemo(() => {
+    if (topCountries.length > 0) return topCountries.slice(0, 10);
+    return [];
+  }, [topCountries]);
+  const maxCountryCount = Math.max(1, ...displayCountries.map(c => c.count));
 
   const handleCountryClick = (country: string) => {
     setSomaliaPanel(false);
@@ -77,6 +72,8 @@ const ThreatMapStandalone: React.FC = () => {
     setSomaliaPanel(true);
   };
 
+  const hasData = events.length > 0;
+
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden" style={{ background: '#0a0a14' }}>
 
@@ -86,18 +83,42 @@ const ThreatMapStandalone: React.FC = () => {
         <div className="flex items-center gap-2">
           <img src={logoSrc} alt="Logo" className="w-7 h-7 object-contain" />
           <div>
-            <p className="text-white font-bold text-xs tracking-[0.12em] uppercase font-mono">CYBERSOMALIA</p>
-            <p className="text-[9px] text-slate-500 tracking-widest uppercase">NATIONAL THREAT INTELLIGENCE</p>
+            <div className="flex items-center gap-2">
+              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+              <p className="text-white font-bold text-xs tracking-[0.12em] uppercase font-mono">Global Threat Intelligence</p>
+            </div>
+            <p className="text-[9px] text-slate-500 tracking-widest uppercase">LIVE CYBER THREAT MAP</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-1">
-            <span className="text-[10px] font-mono text-slate-500 tracking-widest uppercase">LIVE CYBER THREAT MAP</span>
+          {/* LIVE indicator */}
+          <div className="flex items-center gap-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+            </span>
+            <span className="text-[10px] font-mono font-bold text-red-400 tracking-widest">LIVE</span>
           </div>
-          <div className="text-right">
+
+          <div className="hidden sm:block text-right">
             <p className="text-lg font-mono font-bold" style={{ color: '#f472b6' }}>{todayCount.toLocaleString()}</p>
-            <p className="text-[8px] tracking-[0.2em] text-slate-500 uppercase">ATTACKS ON THIS DAY</p>
+            <p className="text-[8px] tracking-[0.2em] text-slate-500 uppercase">TOTAL ATTACKS</p>
           </div>
+
+          {refreshedAt && (
+            <span className="hidden md:block text-[9px] text-slate-600 font-mono">
+              {new Date(refreshedAt).toLocaleTimeString()}
+            </span>
+          )}
+
+          <button onClick={togglePause}
+            className="p-1.5 rounded hover:bg-white/10 transition-colors" title={isPaused ? 'Resume' : 'Pause'}>
+            {isPaused ? <Play className="w-3.5 h-3.5 text-cyan-400" /> : <Pause className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
+          <button onClick={forceRefresh}
+            className="p-1.5 rounded hover:bg-white/10 transition-colors" title="Refresh Now">
+            <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+          </button>
         </div>
       </div>
 
@@ -106,77 +127,91 @@ const ThreatMapStandalone: React.FC = () => {
 
         {/* ── LEFT PANEL ─────────────────────────────────────────────── */}
         <div className="hidden lg:flex w-[220px] flex-shrink-0 flex-col overflow-y-auto"
-          style={{ background: '#07070f', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+          style={{ background: '#07070f', borderRight: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
 
-          {/* Daily attacks chart */}
+          {/* Attack counter + rate */}
           <div className="p-3">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">RECENT DAILY ATTACKS</p>
-            <div className="flex items-end gap-[2px] h-[60px]">
-              {chartBars.current.map((v, i) => {
-                const h = Math.max(2, (v / maxBar) * 54);
-                return (
-                  <div key={i} className="flex-1 rounded-sm" style={{ height: h, background: 'rgba(34,211,238,0.5)' }} />
-                );
-              })}
-            </div>
-            <div className="flex justify-between mt-1">
-              {['0', '5M', '10M', '15M', '20M'].map(l => (
-                <span key={l} className="text-[8px] text-slate-600 font-mono">{l}</span>
-              ))}
-            </div>
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">ATTACKS</p>
+            <p className="text-2xl font-mono font-bold mt-1" style={{ color: '#22d3ee' }}>{events.length}</p>
+            <p className="text-[9px] text-slate-500 font-mono mt-1">⏱ {rate} events/min</p>
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
-          {/* Attack rate */}
-          <div className="p-3 text-center">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">ATTACKS</p>
-            <p className="text-[9px] text-slate-500 mb-1">⏱ Current rate</p>
-            <div className="flex items-center justify-center gap-3">
-              <span className="text-slate-600 text-xs">—</span>
-              <span className="text-xl font-mono font-bold" style={{ color: '#22d3ee' }}>{rate}</span>
-              <span className="text-slate-600 text-xs">+</span>
-            </div>
+          {/* Attack types bar chart */}
+          <div className="p-3">
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">ATTACKS BY TYPE</p>
+            {typeBarData.map(t => (
+              <div key={t.type} className="flex items-center gap-2 py-1">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
+                <span className="text-[10px] text-slate-400 font-mono w-16 truncate">{t.label}</span>
+                <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                  <div className="h-full rounded-full" style={{ width: `${(t.count / maxTypeCount) * 100}%`, background: t.color }} />
+                </div>
+                <span className="text-[9px] text-slate-500 font-mono w-8 text-right">{t.count}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* Data sources */}
+          <div className="p-3">
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-1 font-mono">DATA SOURCES</p>
+            <SourceDot name="AbuseIPDB" active={sourcesActive.abuseipdb} />
+            <SourceDot name="URLhaus" active={sourcesActive.urlhaus} />
+            <SourceDot name="AlienVault OTX" active={sourcesActive.alienvault} />
+            <SourceDot name="Firewall Log" active={sourcesActive.firewall} />
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
           {/* Live feed */}
           <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
-            {threats.slice(0, 40).map(a => {
-              const ts = new Date(a.timestamp);
-              const timeStr = `${ts.getHours().toString().padStart(2, '0')}:${ts.getMinutes().toString().padStart(2, '0')}:${ts.getSeconds().toString().padStart(2, '0')}`;
-              return (
-                <div key={a.id} className="flex items-start gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <div className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: ATTACK_COLORS[a.attack_type] }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] text-white font-mono truncate">{ATTACK_LABELS[a.attack_type]}</p>
-                    <p className="text-[9px] text-slate-500 font-mono truncate">
-                      {timeStr} {a.source.country} → {a.target.country}
-                    </p>
-                  </div>
+            <div className="p-3 pb-1">
+              <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">LIVE FEED</p>
+            </div>
+            {events.slice(0, 30).map(a => (
+              <div key={a.id} className="flex items-start gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: a.color || ATTACK_COLORS[a.attack_type] }} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-white font-mono truncate">{a.label || ATTACK_LABELS[a.attack_type]}</p>
+                  <p className="text-[9px] text-slate-500 font-mono truncate">
+                    {timeAgo(a.timestamp)} · {a.source.country}
+                  </p>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </div>
 
         {/* ── CENTER MAP ─────────────────────────────────────────────── */}
         <div className="relative flex-1 min-w-0">
           <ThreatMapEngine
-            threats={threats}
+            threats={events}
             todayCount={todayCount}
-            liveOn={liveOn}
+            liveOn={!isPaused}
             onCountryClick={handleCountryClick}
             onSomaliaClick={handleSomaliaClick}
           />
 
-          {/* Panel overlays on the map */}
+          {/* Fallback overlay */}
+          {!hasData && !loading && (
+            <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+              <div className="text-center px-6 py-4 rounded-xl" style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <Zap className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
+                <p className="text-sm text-slate-300 font-mono">Collecting threat intelligence...</p>
+                <p className="text-[10px] text-slate-500 mt-1">Waiting for live feed data</p>
+              </div>
+            </div>
+          )}
+
+          {/* Panel overlays */}
           {somaliaPanel && !selectedCountry && (
-            <SomaliaPanel threats={threats} onClose={() => setSomaliaPanel(false)} />
+            <SomaliaPanel threats={events} onClose={() => setSomaliaPanel(false)} />
           )}
           {selectedCountry && (
-            <CountryPanel country={selectedCountry} threats={threats} onClose={() => setSelectedCountry(null)} />
+            <CountryPanel country={selectedCountry} threats={events} onClose={() => setSelectedCountry(null)} />
           )}
 
           {/* Legend */}
@@ -193,40 +228,67 @@ const ThreatMapStandalone: React.FC = () => {
 
         {/* ── RIGHT PANEL ────────────────────────────────────────────── */}
         <div className="hidden lg:flex w-[240px] flex-shrink-0 flex-col overflow-y-auto"
-          style={{ background: '#07070f', borderLeft: '1px solid rgba(255,255,255,0.08)' }}>
+          style={{ background: '#07070f', borderLeft: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
 
-          {/* Top Targeted Countries */}
+          {/* Top Attacking Countries */}
           <div className="p-3">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED COUNTRIES</p>
-            <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks per organization in the last day.</p>
-            <div style={{ transition: 'opacity 0.5s ease' }} key={rotationIndex}>
-              {currentCountries.map((name) => {
-                const iso = COUNTRY_ISO[name] ?? 'un';
-                return (
-                  <div key={name} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
-                    onClick={() => handleCountryClick(name)}>
-                    <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
-                    <span className="text-xs text-slate-300 font-mono">{name}</span>
-                    <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{countMap[name] || 0}</span>
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP ATTACKING COUNTRIES</p>
+            <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks in the last poll.</p>
+            {displayCountries.map((c) => {
+              const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
+              return (
+                <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
+                  onClick={() => handleCountryClick(c.name)}>
+                  <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                  <span className="text-xs text-slate-300 font-mono flex-1 truncate">{c.name}</span>
+                  <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                    <div className="h-full rounded-full" style={{ width: `${(c.count / maxCountryCount) * 100}%`, background: '#ef4444' }} />
                   </div>
-                );
-              })}
-            </div>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{c.count}</span>
+                </div>
+              );
+            })}
+            {displayCountries.length === 0 && (
+              <p className="text-[10px] text-slate-600 font-mono py-2">Waiting for data…</p>
+            )}
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
-          {/* Top Malware Types */}
+          {/* Top Attack Types */}
           <div className="p-3">
-            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP MALWARE TYPES</p>
-            <p className="text-[9px] text-slate-600 mb-2">Malware types with the highest global impact in the last day.</p>
-            {MALWARE_TYPES.map(m => (
-              <div key={m.name} className="flex items-center gap-2 py-1.5 px-1">
-                <span>{m.icon}</span>
-                <span className="text-xs text-slate-300 font-mono">{m.name}</span>
-                <div className="ml-auto w-1.5 h-1.5 rounded-full" style={{ background: m.color }} />
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP ATTACK TYPES</p>
+            {topTypes.slice(0, 5).map(t => (
+              <div key={t.type} className="flex items-center gap-2 py-1.5 px-1">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
+                <span className="text-xs text-slate-300 font-mono flex-1">{t.label}</span>
+                <span className="text-[9px] font-mono text-slate-500">{t.count}</span>
               </div>
             ))}
+          </div>
+
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* Live feed with masked IPs */}
+          <div className="p-3">
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">RECENT EVENTS</p>
+            {events.slice(0, 10).map(e => (
+              <div key={e.id} className="py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
+                  <span className="text-[10px] text-slate-500 font-mono">{timeAgo(e.timestamp)}</span>
+                </div>
+                <p className="text-[11px] text-slate-300 font-mono truncate mt-0.5">
+                  {e.label || ATTACK_LABELS[e.attack_type]} from {e.source.country}
+                </p>
+                {e.source_ip && (
+                  <p className="text-[9px] text-slate-600 font-mono">{maskIP(e.source_ip)}</p>
+                )}
+              </div>
+            ))}
+            {events.length === 0 && (
+              <p className="text-[10px] text-slate-600 font-mono py-2">Waiting for events…</p>
+            )}
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
@@ -235,9 +297,9 @@ const ThreatMapStandalone: React.FC = () => {
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">LIVE STATISTICS</p>
             {[
-              { label: 'Active Threats', value: threats.length, color: '#ff0066' },
-              { label: 'Attack Rate/min', value: `${rate * 12}`, color: '#f97316' },
-              { label: 'Total Today', value: todayCount.toLocaleString(), color: '#a855f7' },
+              { label: 'Active Threats', value: events.length, color: '#ff0066' },
+              { label: 'Attack Rate/min', value: rate, color: '#f97316' },
+              { label: 'Total', value: todayCount.toLocaleString(), color: '#a855f7' },
             ].map(s => (
               <div key={s.label} className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] text-slate-500 font-mono">{s.label}</span>
@@ -248,32 +310,40 @@ const ThreatMapStandalone: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Mobile Top Targeted Countries ─────────────────────────────── */}
+      {/* ── Mobile bottom panel ───────────────────────────────────────── */}
       <div className="lg:hidden flex-shrink-0 px-3 py-2"
         style={{ background: '#07070f', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         <button onClick={() => setMobileStatsOpen(v => !v)}
           className="w-full flex items-center justify-between py-1">
-          <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">TOP TARGETED COUNTRIES</span>
+          <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">
+            LIVE STATS · {todayCount.toLocaleString()} attacks
+          </span>
           {mobileStatsOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronUp className="w-3.5 h-3.5 text-slate-500" />}
         </button>
         {mobileStatsOpen && (
-          <div className="pt-1 pb-1" style={{ transition: 'opacity 0.5s ease' }} key={rotationIndex}>
-            {currentCountries.map((name) => {
-              const iso = COUNTRY_ISO[name] ?? 'un';
+          <div className="pt-1 pb-1 max-h-48 overflow-y-auto">
+            {displayCountries.slice(0, 5).map(c => {
+              const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
               return (
-                <div key={name} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1"
-                  onClick={() => handleCountryClick(name)}>
+                <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1"
+                  onClick={() => handleCountryClick(c.name)}>
                   <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
-                  <span className="text-xs text-slate-300 font-mono">{name}</span>
-                  <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{countMap[name] || 0}</span>
+                  <span className="text-xs text-slate-300 font-mono">{c.name}</span>
+                  <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{c.count}</span>
                 </div>
               );
             })}
+            {events.slice(0, 3).map(e => (
+              <div key={e.id} className="flex items-center gap-2 py-1 px-1">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
+                <span className="text-[10px] text-slate-400 font-mono truncate flex-1">{e.label || ATTACK_LABELS[e.attack_type]}</span>
+                <span className="text-[9px] text-slate-600 font-mono">{timeAgo(e.timestamp)}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Scrollbar styling */}
       <style>{`
         ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-track { background: #0d0d18; }

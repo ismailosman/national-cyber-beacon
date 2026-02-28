@@ -88,7 +88,7 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
       canvasArcsRef.current.push({
         id: threat.id, srcLng: threat.source.lng, srcLat: threat.source.lat,
         dstLng: threat.target.lng, dstLat: threat.target.lat,
-        color: ATTACK_COLORS[threat.attack_type],
+        color: (threat as any).color || ATTACK_COLORS[threat.attack_type],
         progress: 0, phase: 'animating', fadeOpacity: 1, lastFrame: performance.now(),
       });
     }
