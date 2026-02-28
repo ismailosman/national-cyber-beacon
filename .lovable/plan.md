@@ -1,57 +1,27 @@
 
 
-## Make the Threat Map Feel Continuously Alive
+## Add Kaspersky Feed Tab to Global Threat Map
 
-### Problem
-The map has 30-second gaps between API polls where no new arcs appear, making it look static.
+### Changes to `src/pages/ThreatMapStandalone.tsx`
 
-### Solution: 3 changes across 2 files
+**1. Add tab state** (after existing state declarations, ~line 35):
+- Add `const [activeTab, setActiveTab] = useState<'map' | 'kaspersky'>('map');`
 
-#### 1. Faster Polling + Arc Recycling (`src/hooks/useLiveThreatAPI.ts`)
+**2. Add tab buttons in the header** (after the logo/title div, before the controls div, ~line 158):
+- Insert two tab buttons styled with the existing dark theme:
+  - "Live Map" tab (active by default) with cyan bottom border when active
+  - "Kaspersky Feed" tab
+- Styled as inline buttons with `font-mono`, matching the page's dark aesthetic
 
-- Reduce poll interval from 30s to 8s (5s is too aggressive for the backend that already 504s)
-- Expose a new `onNewEvents` callback ref so the page can react to fresh arrivals
-- Keep the existing 25s AbortController timeout and 504 resilience
-
-#### 2. Client-Side Arc Queue in `src/pages/ThreatMapStandalone.tsx`
-
-Add an arc queue system that keeps the map alive between polls:
-
-- **Arc queue**: When new API events arrive, push them into a queue
-- **Ticker** (every 800ms): Pop the next event from the queue and feed it to `ThreatMapEngine` as a "display threat"
-- **Recycling**: When the queue is empty, recycle random existing events with new IDs so arcs keep flowing (the map never goes static)
-- **Display threats** = real API events drip-fed via the queue, so the engine's existing canvas animation handles everything -- no SVG overlay needed
-- Feed the `displayThreats` array (instead of raw `events`) to `ThreatMapEngine`
-- Cap at 30 active display threats; oldest auto-expire
-
-This keeps the existing high-performance canvas arc engine intact -- we just control the *timing* of when threats are fed into it.
-
-#### 3. Animated Counter + Feed Fade (`src/pages/ThreatMapStandalone.tsx`)
-
-- **Animated total counter**: `displayCount` state that smoothly increments toward `stats.total` using a `setInterval` stepping by `ceil(diff/10)` every 50ms
-- **Attack rate**: Track timestamps of recently displayed arcs in a ref, count those within last 60s
-- **Feed fade animation**: Add a CSS `@keyframes fadeSlideIn` animation to new feed items
+**3. Wrap existing body in conditional** (~lines 191-439):
+- When `activeTab === 'map'`: render all existing content (left panel, map engine, right panel, mobile panel) -- zero changes to existing markup
+- When `activeTab === 'kaspersky'`: render a new full-width panel containing:
+  - Heading with shield emoji: "Kaspersky Global Threat Intelligence Feed"
+  - Subtitle: "Live data from Kaspersky Security Network (KSN)"
+  - The iframe embed: `https://cybermap.kaspersky.com/en/widget/dynamic/dark` at 100% width, filling available viewport height
+  - Dark background (`#0a0a14`) matching the existing page
 
 ### What stays the same
-- The entire `ThreatMapEngine` component (canvas arcs, Mapbox layers, country highlighting) -- unchanged
-- All sidebar panels, legend, header controls
-- The `api-proxy` edge function -- no backend changes
-- Mobile layout
-
-### Technical Details
-
-```text
-useLiveThreatAPI.ts:
-  - Change: setInterval 30000 -> 8000
-  - No other changes
-
-ThreatMapStandalone.tsx:
-  - Add state: arcQueue, displayThreats, displayCount
-  - Add ref: recentArcTimestamps (for rate calc)
-  - Add useEffect: ticker interval (800ms) that pops from queue or recycles
-  - Add useEffect: animated counter toward stats.total
-  - Add useEffect: when events change, push new ones to arcQueue
-  - Change: pass displayThreats to ThreatMapEngine instead of events
-  - Add CSS keyframe for feed item fade-in
-```
-
+- All existing map functionality, arc queue, sidebars, mobile panel -- completely untouched
+- No new files or dependencies
+- Single file change only
