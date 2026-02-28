@@ -160,7 +160,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   useEffect(() => {
     if (isPaused) return;
     fetchData();
-    const iv = setInterval(() => fetchData(), 30000);
+    const iv = setInterval(() => fetchData(), 8000);
     return () => clearInterval(iv);
   }, [isPaused, fetchData]);
 
