@@ -34,6 +34,13 @@ function feedPrefix(e: LiveThreatEvent): React.ReactNode {
 
 const SUBSYSTEM_ORDER = ['OAS', 'ODS', 'WAV', 'MAV', 'IDS', 'VUL', 'KAS', 'RMW'];
 
+/* ── Number formatting ────────────────────────────────────────────── */
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
 const ThreatMapStandalone: React.FC = () => {
   const {
     events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
@@ -158,7 +165,8 @@ const ThreatMapStandalone: React.FC = () => {
     if (!kaspersky?.subsystems) return [];
     return SUBSYSTEM_ORDER
       .filter(k => kaspersky.subsystems[k])
-      .map(k => ({ key: k, ...kaspersky.subsystems[k] }));
+      .map(k => ({ key: k, ...kaspersky.subsystems[k] }))
+      .sort((a, b) => b.total - a.total);
   }, [kaspersky]);
   const maxSubTotal = Math.max(1, ...subsystemBarData.map(s => s.total));
 
@@ -232,7 +240,7 @@ const ThreatMapStandalone: React.FC = () => {
                     <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                       <div className="h-full rounded-full transition-all" style={{ width: `${(s.total / maxSubTotal) * 100}%`, background: s.color }} />
                     </div>
-                    <span className="text-[10px] font-mono text-white w-12 text-right">{s.total.toLocaleString()}</span>
+                    <span className="text-[10px] font-mono text-white w-12 text-right">{formatCount(s.total)}</span>
                   </div>
                 )) : <p className="text-[10px] text-slate-600 font-mono">Waiting for KSN data…</p>}
               </div>
@@ -240,27 +248,21 @@ const ThreatMapStandalone: React.FC = () => {
               {/* Top countries */}
               <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP 10 COUNTRIES BY DETECTIONS</p>
-                {kaspersky?.subsystems ? (() => {
-                  const countryTotals: Record<string, number> = {};
-                  Object.values(kaspersky.subsystems).forEach(sub => {
-                    if (sub.countries) {
-                      Object.entries(sub.countries).forEach(([cc, count]) => {
-                        countryTotals[cc] = (countryTotals[cc] || 0) + count;
-                      });
-                    }
-                  });
-                  const sorted = Object.entries(countryTotals).sort(([,a],[,b]) => b - a).slice(0, 10);
-                  const max = sorted[0]?.[1] ?? 1;
-                  return sorted.map(([cc, count]) => (
-                    <div key={cc} className="flex items-center gap-2 py-1">
-                      <img src={`https://flagcdn.com/w20/${cc.toLowerCase()}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />
-                      <span className="text-[10px] font-mono text-slate-400 w-8 uppercase">{cc}</span>
-                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                        <div className="h-full rounded-full" style={{ width: `${(count / max) * 100}%`, background: '#ef4444' }} />
+                {displayAttackers.length > 0 ? (() => {
+                  const maxC = displayAttackers[0]?.count ?? 1;
+                  return displayAttackers.map(c => {
+                    const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
+                    return (
+                      <div key={c.cc} className="flex items-center gap-2 py-1">
+                        <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />
+                        <span className="text-[10px] font-mono text-slate-400 flex-1 truncate">{c.name}</span>
+                        <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <div className="h-full rounded-full" style={{ width: `${(c.count / maxC) * 100}%`, background: '#ef4444' }} />
+                        </div>
+                        <span className="text-[9px] font-mono text-slate-500 w-10 text-right">{formatCount(c.count)}</span>
                       </div>
-                      <span className="text-[9px] font-mono text-slate-500 w-10 text-right">{count.toLocaleString()}</span>
-                    </div>
-                  ));
+                    );
+                  });
                 })() : <p className="text-[10px] text-slate-600 font-mono">Waiting for data…</p>}
               </div>
 
@@ -365,7 +367,7 @@ const ThreatMapStandalone: React.FC = () => {
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: sub.color }} />
                       <span className="text-[10px] font-mono text-slate-300 w-7">{key}</span>
                       <span className="text-[9px] font-mono text-slate-500 flex-1 truncate">{sub.label}</span>
-                      <span className="text-[9px] font-mono text-slate-400">{sub.total.toLocaleString()}</span>
+                      <span className="text-[9px] font-mono text-slate-400">{formatCount(sub.total)}</span>
                     </div>
                   );
                 })}

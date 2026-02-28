@@ -222,6 +222,7 @@ export interface CanvasArc {
   phase:        'animating' | 'fading' | 'impact';
   fadeOpacity:  number;
   lastFrame:    number;
+  baseAlpha:    number;
 }
 
 // ── GeoJSON builders ─────────────────────────────────────────────────────────
