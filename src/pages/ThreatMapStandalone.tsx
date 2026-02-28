@@ -247,7 +247,7 @@ const ThreatMapStandalone: React.FC = () => {
 
               {/* Top countries */}
               <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP 10 COUNTRIES BY DETECTIONS</p>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP 10 COUNTRIES BY EVENTS</p>
                 {displayAttackers.length > 0 ? (() => {
                   const maxC = displayAttackers[0]?.count ?? 1;
                   return displayAttackers.map(c => {
@@ -269,17 +269,15 @@ const ThreatMapStandalone: React.FC = () => {
               {/* Top threats */}
               <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP THREATS</p>
-                {kaspersky?.top_threats?.length ? kaspersky.top_threats.slice(0, 10).map((t, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <span className="text-[9px] font-mono text-slate-600 w-4">{i + 1}</span>
-                    <span className="text-[10px] font-mono text-slate-300 flex-1 truncate">{t.name}</span>
-                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full ${
-                      t.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                      t.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
-                      'bg-yellow-500/20 text-yellow-400'
-                    }`}>{t.count}</span>
-                  </div>
-                )) : <p className="text-[10px] text-slate-600 font-mono">No threat data yet</p>}
+                {kaspersky?.top_threats?.length ? kaspersky.top_threats.slice(0, 10).map((t, i) => {
+                  const name = typeof t === 'string' ? t : (t as any).name ?? String(t);
+                  return (
+                    <div key={i} className="flex items-center gap-2 py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span className="text-[9px] font-mono text-slate-600 w-4">{i + 1}.</span>
+                      <span className="text-[10px] font-mono text-orange-400 flex-1 truncate">{name}</span>
+                    </div>
+                  );
+                }) : <p className="text-[10px] text-slate-600 font-mono">No threat data yet</p>}
               </div>
             </div>
 
