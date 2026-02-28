@@ -518,17 +518,20 @@ const ComplianceScan: React.FC = () => {
       try {
         const res = await fetch(proxyUrl('/compliance/scans'), { headers: apiHeaders() });
         if (res.ok) {
-          const data = await res.json();
-          setHistory(Array.isArray(data) ? data : data.scans || []);
-        } else {
-          const data = await res.json().catch(() => ({}));
-          const msg = data.detail || data.error || `API returned ${res.status}`;
-          console.warn('[ComplianceScan] History fetch failed:', res.status, data);
-          if (res.status === 404) {
-            setError('Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed.');
-          } else {
-            setError(msg);
+          const text = await res.text();
+          try {
+            const data = JSON.parse(text);
+            setHistory(Array.isArray(data) ? data : data.scans || []);
+          } catch {
+            console.warn('[ComplianceScan] Non-JSON response:', text.slice(0, 200));
           }
+        } else {
+          const text = await res.text();
+          let data: any = {};
+          try { data = JSON.parse(text); } catch { /* HTML or non-JSON */ }
+          const msg = data.detail || data.error || `Backend returned ${res.status}`;
+          console.warn('[ComplianceScan] History fetch failed:', res.status, msg);
+          // Don't crash — just show warning, history will be empty
         }
       } catch (err) {
         console.error('[ComplianceScan] History fetch error:', err);
@@ -543,8 +546,10 @@ const ComplianceScan: React.FC = () => {
       try {
         const res = await fetch(proxyUrl(`/compliance/scan/${scanId}`), { headers: apiHeaders() });
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          console.warn('[ComplianceScan] Poll error:', res.status, data);
+          const text = await res.text();
+          let parsed: any = {};
+          try { parsed = JSON.parse(text); } catch { /* HTML 502 etc */ }
+          console.warn('[ComplianceScan] Poll error:', res.status, parsed.detail || text.slice(0, 100));
           if (res.status === 404) {
             clearInterval(iv);
             setError('Compliance scanning API is not available.');
@@ -553,7 +558,9 @@ const ComplianceScan: React.FC = () => {
           }
           return;
         }
-        const data = await res.json();
+        const text = await res.text();
+        let data: any;
+        try { data = JSON.parse(text); } catch { return; /* non-JSON, skip tick */ }
         setPhase(data.compliance_phase || '');
         if (data.compliance_status === 'done') {
           clearInterval(iv);
@@ -598,17 +605,21 @@ const ComplianceScan: React.FC = () => {
         body: JSON.stringify({ target_url: targetUrl.trim(), organization_name: orgName.trim() }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg = data.detail || data.error || `API returned ${res.status}`;
-        console.error('[ComplianceScan] Start scan failed:', res.status, data);
+        const text = await res.text();
+        let data: any = {};
+        try { data = JSON.parse(text); } catch { /* HTML 502 etc */ }
+        const msg = data.detail || data.error || `Backend returned ${res.status}`;
+        console.error('[ComplianceScan] Start scan failed:', res.status, msg);
         setScanning(false);
         setPhase('');
-        setError(res.status === 404
-          ? 'Compliance scanning API is not available. Please verify the backend has compliance endpoints deployed.'
-          : msg);
+        setError(res.status === 502 ? 'Backend temporarily unavailable (502). Please try again in a moment.' : msg);
         return;
       }
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch {
+        setScanning(false); setPhase(''); setError('Invalid response from backend'); return;
+      }
       if (data.scan_id) {
         const iv = pollScan(data.scan_id);
         return () => clearInterval(iv);
