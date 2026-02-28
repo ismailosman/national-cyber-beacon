@@ -1,58 +1,57 @@
 
 
-## Update Global Threat Map for Worldwide Attack Flows
+## Make the Threat Map Feel Continuously Alive
 
-### Overview
-Update the threat map to visualize attacks between ANY source and target countries (not just targeting Somalia), and update sidebars to show both top attackers and top targets.
+### Problem
+The map has 30-second gaps between API polls where no new arcs appear, making it look static.
 
-### Changes
+### Solution: 3 changes across 2 files
 
-#### 1. `src/hooks/useLiveThreatAPI.ts` -- Add `topAttackers` and `topTargets`
+#### 1. Faster Polling + Arc Recycling (`src/hooks/useLiveThreatAPI.ts`)
 
-- Add new `TopCountry[]` state: `topAttackers` and `topTargets`
-- Read from `data.top_attackers` and `data.top_targets` in the API response
-- Keep `topCountries` as a fallback alias for `topAttackers` for backward compat
-- Export both from the hook's return type
+- Reduce poll interval from 30s to 8s (5s is too aggressive for the backend that already 504s)
+- Expose a new `onNewEvents` callback ref so the page can react to fresh arrivals
+- Keep the existing 25s AbortController timeout and 504 resilience
 
-#### 2. `src/pages/ThreatMapStandalone.tsx` -- UI Updates
+#### 2. Client-Side Arc Queue in `src/pages/ThreatMapStandalone.tsx`
 
-**Right sidebar changes:**
-- Rename "TOP ATTACKING COUNTRIES" section to use `topAttackers` array
-- Add a NEW "TOP TARGETED COUNTRIES" section below it using `topTargets` array with blue-tinted bars instead of red
-- Both sections: flag + country name + count + mini bar
+Add an arc queue system that keeps the map alive between polls:
 
-**Left sidebar live feed:**
-- Change event text format from `"{label} · {source.country}"` to `"{label} from {source.country} -> {target.country}"`
+- **Arc queue**: When new API events arrive, push them into a queue
+- **Ticker** (every 800ms): Pop the next event from the queue and feed it to `ThreatMapEngine` as a "display threat"
+- **Recycling**: When the queue is empty, recycle random existing events with new IDs so arcs keep flowing (the map never goes static)
+- **Display threats** = real API events drip-fed via the queue, so the engine's existing canvas animation handles everything -- no SVG overlay needed
+- Feed the `displayThreats` array (instead of raw `events`) to `ThreatMapEngine`
+- Cap at 30 active display threats; oldest auto-expire
 
-**Right sidebar recent events:**
-- Change from `"{label} from {source.country}"` to `"{label} from {source.country} -> {target.country}"`
+This keeps the existing high-performance canvas arc engine intact -- we just control the *timing* of when threats are fed into it.
 
-**Mobile bottom panel:**
-- Update event display similarly
+#### 3. Animated Counter + Feed Fade (`src/pages/ThreatMapStandalone.tsx`)
 
-#### 3. `src/components/cyber-map/ThreatMapEngine.tsx` -- Country Highlighting
-
-Add dynamic country highlighting based on top attackers and top targets:
-- Accept new optional props: `topAttackerCCs?: string[]` and `topTargetCCs?: string[]`
-- After the Somalia highlight layer is added, add two more layers:
-  - `top-attackers-fill`: red/orange tint (`rgba(239,68,68,0.2)`) for countries matching top 3 attacker CCs
-  - `top-targets-fill`: blue tint (`rgba(59,130,246,0.2)`) for countries matching top 3 target CCs
-- Update these layers' filters whenever the props change (via a `useEffect`)
-- Somalia keeps its existing teal highlight (always on top)
-
-The arc rendering already uses `threat.source` and `threat.target` coordinates from the data -- no changes needed to arc logic since `mapEvent` already maps `source.lat/lng` and `target.lat/lng` from the API correctly.
-
-#### 4. `src/pages/ThreatMapStandalone.tsx` -- Pass new props to engine
-
-- Derive `topAttackerCCs` = first 3 CCs from `topAttackers`
-- Derive `topTargetCCs` = first 3 CCs from `topTargets`
-- Pass both to `ThreatMapEngine`
+- **Animated total counter**: `displayCount` state that smoothly increments toward `stats.total` using a `setInterval` stepping by `ceil(diff/10)` every 50ms
+- **Attack rate**: Track timestamps of recently displayed arcs in a ref, count those within last 60s
+- **Feed fade animation**: Add a CSS `@keyframes fadeSlideIn` animation to new feed items
 
 ### What stays the same
-- All arc animation logic (canvas + Mapbox layers) -- already uses per-event source/target coords
-- Somalia teal glow highlight
-- Header with LIVE indicator, pause/resume, refresh
-- Attack type bar chart, data sources panel
-- Color coding per attack type
-- All existing routes and navigation
+- The entire `ThreatMapEngine` component (canvas arcs, Mapbox layers, country highlighting) -- unchanged
+- All sidebar panels, legend, header controls
+- The `api-proxy` edge function -- no backend changes
+- Mobile layout
+
+### Technical Details
+
+```text
+useLiveThreatAPI.ts:
+  - Change: setInterval 30000 -> 8000
+  - No other changes
+
+ThreatMapStandalone.tsx:
+  - Add state: arcQueue, displayThreats, displayCount
+  - Add ref: recentArcTimestamps (for rate calc)
+  - Add useEffect: ticker interval (800ms) that pops from queue or recycles
+  - Add useEffect: animated counter toward stats.total
+  - Add useEffect: when events change, push new ones to arcQueue
+  - Change: pass displayThreats to ThreatMapEngine instead of events
+  - Add CSS keyframe for feed item fade-in
+```
 
