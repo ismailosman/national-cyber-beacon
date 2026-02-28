@@ -54,6 +54,8 @@ export interface LiveThreatAPIState {
   events: (LiveThreat & { color?: string; source_ip?: string; source_api?: string; label?: string })[];
   stats: APIStats | null;
   topCountries: TopCountry[];
+  topAttackers: TopCountry[];
+  topTargets: TopCountry[];
   topTypes: TopType[];
   sourcesActive: SourcesActive;
   home: { lat: number; lng: number; city: string; country: string } | null;
@@ -87,6 +89,8 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const [events, setEvents] = useState<LiveThreatAPIState['events']>([]);
   const [stats, setStats] = useState<APIStats | null>(null);
   const [topCountries, setTopCountries] = useState<TopCountry[]>([]);
+  const [topAttackers, setTopAttackers] = useState<TopCountry[]>([]);
+  const [topTargets, setTopTargets] = useState<TopCountry[]>([]);
   const [topTypes, setTopTypes] = useState<TopType[]>([]);
   const [sourcesActive, setSourcesActive] = useState<SourcesActive>({ abuseipdb: false, alienvault: false, urlhaus: false, firewall: false });
   const [home, setHome] = useState<LiveThreatAPIState['home']>(null);
@@ -133,7 +137,14 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       }
 
       if (data.stats) setStats(data.stats);
-      if (data.top_countries) setTopCountries(data.top_countries);
+      if (data.top_attackers) {
+        setTopAttackers(data.top_attackers);
+        setTopCountries(data.top_attackers); // backward compat
+      } else if (data.top_countries) {
+        setTopCountries(data.top_countries);
+        setTopAttackers(data.top_countries);
+      }
+      if (data.top_targets) setTopTargets(data.top_targets);
       if (data.top_types) setTopTypes(data.top_types);
       if (data.sources_active) setSourcesActive(data.sources_active);
       if (data.home) setHome(data.home);
@@ -156,5 +167,5 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const togglePause = useCallback(() => setIsPaused(p => !p), []);
   const forceRefresh = useCallback(() => fetchData(true), [fetchData]);
 
-  return { events, stats, topCountries, topTypes, sourcesActive, home, refreshedAt, isPaused, togglePause, forceRefresh, loading, error };
+  return { events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive, home, refreshedAt, isPaused, togglePause, forceRefresh, loading, error };
 }

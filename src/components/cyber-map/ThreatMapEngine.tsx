@@ -29,11 +29,13 @@ interface ThreatMapEngineProps {
   liveOn: boolean;
   onCountryClick?: (country: string) => void;
   onSomaliaClick?: () => void;
+  topAttackerCCs?: string[];
+  topTargetCCs?: string[];
   className?: string;
 }
 
 const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
-  threats, liveOn, onCountryClick, onSomaliaClick, className,
+  threats, liveOn, onCountryClick, onSomaliaClick, topAttackerCCs, topTargetCCs, className,
 }) => {
   const [mapToken, setMapToken]   = useState<string | null>(null);
   const [mapError, setMapError]   = useState<string | null>(null);
@@ -299,6 +301,10 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
         map.addLayer({ id: 'somalia-fill', type: 'fill', source: 'country-boundaries', 'source-layer': 'country_boundaries', filter: ['==', ['get', 'iso_3166_1'], 'SO'], paint: { 'fill-color': 'rgba(56, 189, 248, 0.35)' } });
         map.addLayer({ id: 'somalia-border', type: 'line', source: 'country-boundaries', 'source-layer': 'country_boundaries', filter: ['==', ['get', 'iso_3166_1'], 'SO'], paint: { 'line-color': 'rgba(56, 189, 248, 0.8)', 'line-width': 2 } });
 
+        // Dynamic country highlighting — attackers (red) & targets (blue)
+        map.addLayer({ id: 'top-attackers-fill', type: 'fill', source: 'country-boundaries', 'source-layer': 'country_boundaries', filter: ['in', ['get', 'iso_3166_1'], ['literal', ['__NONE__']]], paint: { 'fill-color': 'rgba(239,68,68,0.2)' } }, 'somalia-fill');
+        map.addLayer({ id: 'top-targets-fill', type: 'fill', source: 'country-boundaries', 'source-layer': 'country_boundaries', filter: ['in', ['get', 'iso_3166_1'], ['literal', ['__NONE__']]], paint: { 'fill-color': 'rgba(59,130,246,0.2)' } }, 'somalia-fill');
+
         const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
         map.addSource('attack-arcs-source', { type: 'geojson', data: emptyFC });
         map.addSource('attack-full-arcs-source', { type: 'geojson', data: emptyFC });
@@ -369,6 +375,22 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; setMapLoaded(false); }
     };
   }, [mapToken, retryCount]);
+
+  // ── Update country highlight layers when top attackers/targets change ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    try {
+      if (map.getLayer('top-attackers-fill')) {
+        const ccs = topAttackerCCs?.length ? topAttackerCCs : ['__NONE__'];
+        map.setFilter('top-attackers-fill', ['in', ['get', 'iso_3166_1'], ['literal', ccs]]);
+      }
+      if (map.getLayer('top-targets-fill')) {
+        const ccs = topTargetCCs?.length ? topTargetCCs : ['__NONE__'];
+        map.setFilter('top-targets-fill', ['in', ['get', 'iso_3166_1'], ['literal', ccs]]);
+      }
+    } catch (_) {}
+  }, [topAttackerCCs, topTargetCCs, mapLoaded]);
 
   // ── Update map sources ────────────────────────────────────────────────
   const updateMapSources = useCallback((nowMs?: number) => {

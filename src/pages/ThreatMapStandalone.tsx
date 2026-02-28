@@ -26,7 +26,7 @@ const SourceDot: React.FC<{ name: string; active: boolean }> = ({ name, active }
 
 const ThreatMapStandalone: React.FC = () => {
   const {
-    events, stats, topCountries, topTypes, sourcesActive,
+    events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
     refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
   } = useLiveThreatAPI();
 
@@ -56,12 +56,15 @@ const ThreatMapStandalone: React.FC = () => {
 
   const maxTypeCount = Math.max(1, ...typeBarData.map(t => t.count));
 
-  // Top countries for right sidebar
-  const displayCountries = useMemo(() => {
-    if (topCountries.length > 0) return topCountries.slice(0, 10);
-    return [];
-  }, [topCountries]);
-  const maxCountryCount = Math.max(1, ...displayCountries.map(c => c.count));
+  // Top attackers and targets for right sidebar
+  const displayAttackers = useMemo(() => (topAttackers.length > 0 ? topAttackers : topCountries).slice(0, 10), [topAttackers, topCountries]);
+  const displayTargets = useMemo(() => topTargets.slice(0, 10), [topTargets]);
+  const maxAttackerCount = Math.max(1, ...displayAttackers.map(c => c.count));
+  const maxTargetCount = Math.max(1, ...displayTargets.map(c => c.count));
+
+  // Derive CCs for map highlighting
+  const topAttackerCCs = useMemo(() => displayAttackers.slice(0, 3).map(c => c.cc?.toUpperCase()).filter(Boolean), [displayAttackers]);
+  const topTargetCCs = useMemo(() => displayTargets.slice(0, 3).map(c => c.cc?.toUpperCase()).filter(Boolean), [displayTargets]);
 
   const handleCountryClick = (country: string) => {
     setSomaliaPanel(false);
@@ -177,7 +180,7 @@ const ThreatMapStandalone: React.FC = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] text-white font-mono truncate">{a.label || ATTACK_LABELS[a.attack_type]}</p>
                   <p className="text-[9px] text-slate-500 font-mono truncate">
-                    {timeAgo(a.timestamp)} · {a.source.country}
+                    {timeAgo(a.timestamp)} · {a.source.country} → {a.target.country}
                   </p>
                 </div>
               </div>
@@ -193,6 +196,8 @@ const ThreatMapStandalone: React.FC = () => {
             liveOn={!isPaused}
             onCountryClick={handleCountryClick}
             onSomaliaClick={handleSomaliaClick}
+            topAttackerCCs={topAttackerCCs}
+            topTargetCCs={topTargetCCs}
           />
 
           {/* Fallback overlay */}
@@ -234,7 +239,7 @@ const ThreatMapStandalone: React.FC = () => {
           <div className="p-3">
             <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP ATTACKING COUNTRIES</p>
             <p className="text-[9px] text-slate-600 mb-2">Highest rate of attacks in the last poll.</p>
-            {displayCountries.map((c) => {
+            {displayAttackers.map((c) => {
               const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
               return (
                 <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
@@ -242,18 +247,41 @@ const ThreatMapStandalone: React.FC = () => {
                   <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
                   <span className="text-xs text-slate-300 font-mono flex-1 truncate">{c.name}</span>
                   <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                    <div className="h-full rounded-full" style={{ width: `${(c.count / maxCountryCount) * 100}%`, background: '#ef4444' }} />
+                    <div className="h-full rounded-full" style={{ width: `${(c.count / maxAttackerCount) * 100}%`, background: '#ef4444' }} />
                   </div>
                   <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{c.count}</span>
                 </div>
               );
             })}
-            {displayCountries.length === 0 && (
+            {displayAttackers.length === 0 && (
               <p className="text-[10px] text-slate-600 font-mono py-2">Waiting for data…</p>
             )}
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* Top Targeted Countries */}
+          <div className="p-3">
+            <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-0.5 font-mono">TOP TARGETED COUNTRIES</p>
+            <p className="text-[9px] text-slate-600 mb-2">Most attacked destinations.</p>
+            {displayTargets.map((c) => {
+              const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
+              return (
+                <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
+                  onClick={() => handleCountryClick(c.name)}>
+                  <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                  <span className="text-xs text-slate-300 font-mono flex-1 truncate">{c.name}</span>
+                  <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                    <div className="h-full rounded-full" style={{ width: `${(c.count / maxTargetCount) * 100}%`, background: '#3b82f6' }} />
+                  </div>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}>{c.count}</span>
+                </div>
+              );
+            })}
+            {displayTargets.length === 0 && (
+              <p className="text-[10px] text-slate-600 font-mono py-2">Waiting for data…</p>
+            )}
+          </div>
 
           {/* Top Attack Types */}
           <div className="p-3">
@@ -279,7 +307,7 @@ const ThreatMapStandalone: React.FC = () => {
                   <span className="text-[10px] text-slate-500 font-mono">{timeAgo(e.timestamp)}</span>
                 </div>
                 <p className="text-[11px] text-slate-300 font-mono truncate mt-0.5">
-                  {e.label || ATTACK_LABELS[e.attack_type]} from {e.source.country}
+                  {e.label || ATTACK_LABELS[e.attack_type]} from {e.source.country} → {e.target.country}
                 </p>
                 {e.source_ip && (
                   <p className="text-[9px] text-slate-600 font-mono">{maskIP(e.source_ip)}</p>
@@ -322,7 +350,7 @@ const ThreatMapStandalone: React.FC = () => {
         </button>
         {mobileStatsOpen && (
           <div className="pt-1 pb-1 max-h-48 overflow-y-auto">
-            {displayCountries.slice(0, 5).map(c => {
+            {displayAttackers.slice(0, 5).map(c => {
               const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
               return (
                 <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1"
@@ -336,7 +364,9 @@ const ThreatMapStandalone: React.FC = () => {
             {events.slice(0, 3).map(e => (
               <div key={e.id} className="flex items-center gap-2 py-1 px-1">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
-                <span className="text-[10px] text-slate-400 font-mono truncate flex-1">{e.label || ATTACK_LABELS[e.attack_type]}</span>
+                <span className="text-[10px] text-slate-400 font-mono truncate flex-1">
+                  {e.label || ATTACK_LABELS[e.attack_type]} · {e.source.country} → {e.target.country}
+                </span>
                 <span className="text-[9px] text-slate-600 font-mono">{timeAgo(e.timestamp)}</span>
               </div>
             ))}
