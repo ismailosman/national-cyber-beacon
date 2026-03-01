@@ -1,62 +1,25 @@
 
 
-## Fix Threat Map Zoom and Mobile Data Parity
+## Fix Kaspersky Iframe Map Zoom
 
-### Problem 1: Cannot zoom in/out on the map
-The Mapbox map has `scrollZoom: false`, `boxZoom: false`, and `doubleClickZoom: false` on desktop. On mobile, `touchZoomRotate` is enabled but `dragPan` is the only desktop interaction. Users have no way to zoom on desktop at all.
+### Problem
+The embedded Kaspersky Cyberthreat Live Map (3D globe iframe) does not respond to scroll-to-zoom or touch-to-zoom gestures. The iframe loads from `cybermap.kaspersky.com/en/widget/dynamic/dark` and its internal controls require mouse wheel and touch events to pass through properly.
 
-**Fix in `src/components/cyber-map/ThreatMapEngine.tsx`:**
-- Enable `scrollZoom: true` on all devices
-- Enable `doubleClickZoom: true` on all devices
-- Enable `dragPan: true` on all devices (currently only mobile)
-- Keep `boxZoom: false` and `dragRotate: false` as they aren't needed
-- Enable `touchZoomRotate: true` on all devices (for trackpad pinch on desktop too)
-- Add zoom +/- buttons to the map via Mapbox's `NavigationControl` (compact style, no compass)
+### Root Cause
+The iframe container sits inside a scrollable panel, so scroll events are captured by the parent `overflow-y-auto` container instead of being forwarded to the iframe. Additionally, the iframe is missing key `allow` attributes for fullscreen and pointer-lock.
 
-### Problem 2: Mobile users cannot see the same data as PC users
-The left sidebar (`hidden lg:flex`) and right sidebar (`hidden lg:flex`) are completely hidden on mobile. The only mobile content is a tiny collapsible bottom bar showing 5 countries and 3 events. Mobile users miss:
-- Attack type breakdown
-- Data sources status
-- KSN subsystem stats
-- Top targeted countries
-- Top attack types
-- Recent events with details
-- Indicator lookup
-- Live statistics
+### Solution (File: `src/pages/ThreatMapStandalone.tsx`, lines 319-328)
 
-**Fix in `src/pages/ThreatMapStandalone.tsx`:**
-- Replace the minimal mobile bottom panel with a full-height slide-up drawer (similar to CyberMap.tsx pattern)
-- The drawer will have tabs/sections covering all the data from both sidebars:
-  - **Stats**: Attack counter, arcs/min, attack types chart
-  - **Countries**: Top attackers and targets with flags and bars
-  - **Feed**: Live feed with KSN/TIP prefixes
-  - **KSN**: Kaspersky subsystems, data sources, indicator lookup
-- A floating button at the bottom-right opens the drawer (like the existing CyberMap feed button)
-- The drawer uses 60vh height with a glassmorphic background so the map stays partially visible
-- The KSN Data tab content should also be scrollable and responsive on mobile (already works since it uses grid with `grid-cols-1 md:grid-cols-2`)
+1. **Add `overflow: hidden`** to the iframe wrapper `div` so the parent scroll container doesn't steal wheel events when the cursor is over the iframe area.
 
-### Technical Details
+2. **Add `sandbox` attribute** with `allow-scripts allow-same-origin allow-popups` to permit the Kaspersky widget's internal interactivity while keeping it secure.
 
-**ThreatMapEngine.tsx changes (lines 240-257):**
-```typescript
-scrollZoom: true,
-boxZoom: false,
-dragPan: true,
-dragRotate: false,
-doubleClickZoom: true,
-touchZoomRotate: true,
-touchPitch: false,
-```
-Add after map creation:
-```typescript
-map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-```
+3. **Set a taller default height** (600px instead of 500px) so the globe is more usable without needing to zoom as much.
 
-**ThreatMapStandalone.tsx changes:**
-- Add `mobileDrawerOpen` state and `mobileDrawerTab` state
-- Replace the minimal bottom bar (lines 620-654) with:
-  1. A floating "Data" button (bottom-right, only on mobile)
-  2. A slide-up drawer with horizontal tab buttons at the top (Stats / Countries / Feed / Sources)
-  3. Each tab renders the same data as the desktop sidebars, adapted for mobile touch
-- Keep the existing mobile bottom stats toggle for quick glance (attack count), but add the full drawer for deep data access
+4. **Add `pointer-events: auto`** explicitly and wrap the iframe in a container that uses `touch-action: none` to prevent the parent from intercepting pinch/scroll gestures meant for the iframe.
+
+5. **Add a subtle instruction label** below the iframe: "Scroll to zoom -- Drag to rotate" so users know the globe is interactive.
+
+### Technical Detail
+The key fix is wrapping the iframe in a div with `onWheel={(e) => e.stopPropagation()}` and `touch-action: none` CSS, which prevents the KSN tab's scrollable container from consuming wheel/touch events before they reach the iframe. The Kaspersky widget internally handles zoom via standard wheel events, so once they pass through, zoom will work.
 
