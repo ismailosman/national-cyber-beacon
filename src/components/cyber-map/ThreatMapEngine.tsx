@@ -247,18 +247,20 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
           pitchWithRotate: false,
           attributionControl: false,
           interactive: true,
-          scrollZoom: false,
+          scrollZoom: true,
           boxZoom: false,
-          dragPan: isMobile,
+          dragPan: true,
           dragRotate: false,
-          doubleClickZoom: false,
-          touchZoomRotate: isMobile,
+          doubleClickZoom: true,
+          touchZoomRotate: true,
           touchPitch: false,
         });
       } catch (e: any) {
         if (!cancelled) setMapError(e?.message?.includes('WebGL') ? 'Map requires WebGL.' : `Map init error: ${e?.message || 'Unknown'}`);
         return;
       }
+
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
 
       map.on('load', () => {
         if (cancelled) return;

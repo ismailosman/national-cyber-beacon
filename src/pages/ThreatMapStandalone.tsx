@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap, Search, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
+import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap, Search, ShieldCheck, ShieldAlert, ShieldX, Database, X } from 'lucide-react';
 import { useLiveThreatAPI, maskIP } from '@/hooks/useLiveThreatAPI';
 import type { LiveThreatEvent, KasperskySubsystem, IndicatorCheckResult } from '@/hooks/useLiveThreatAPI';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
@@ -51,6 +51,8 @@ const ThreatMapStandalone: React.FC = () => {
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<'stats' | 'countries' | 'feed' | 'sources'>('stats');
   const [activeTab, setActiveTab] = useState<'map' | 'ksn'>('map');
 
   /* ── Indicator lookup state ───────────────────────────────────────── */
@@ -617,41 +619,210 @@ const ThreatMapStandalone: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Mobile bottom panel ───────────────────────────────────────── */}
+      {/* ── Mobile bottom quick bar ─────────────────────────────────── */}
       <div className="lg:hidden flex-shrink-0 px-3 py-2"
         style={{ background: '#07070f', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-        <button onClick={() => setMobileStatsOpen(v => !v)}
-          className="w-full flex items-center justify-between py-1">
+        <div className="flex items-center justify-between">
           <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono">
-            LIVE STATS · {todayCount.toLocaleString()} attacks
+            ⚡ {todayCount.toLocaleString()} attacks · {rate} arcs/min
           </span>
-          {mobileStatsOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronUp className="w-3.5 h-3.5 text-slate-500" />}
-        </button>
-        {mobileStatsOpen && (
-          <div className="pt-1 pb-1 max-h-48 overflow-y-auto">
-            {displayAttackers.slice(0, 5).map(c => {
-              const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
-              return (
-                <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1"
-                  onClick={() => handleCountryClick(c.name)}>
-                  <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
-                  <span className="text-xs text-slate-300 font-mono">{c.name}</span>
-                  <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{c.count}</span>
-                </div>
-              );
-            })}
-            {events.slice(0, 3).map(e => (
-              <div key={e.id} className="flex items-center gap-2 py-1 px-1">
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: e.color || ATTACK_COLORS[e.attack_type] }} />
-                <span className="text-[10px] text-slate-400 font-mono truncate flex-1">
-                  {feedPrefix(e)}{e.label || ATTACK_LABELS[e.attack_type]} · {e.source.country} → {e.target.country}
-                </span>
-                <span className="text-[9px] text-slate-600 font-mono">{timeAgo(e.timestamp)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+          <button onClick={() => setMobileDrawerOpen(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold text-cyan-400 bg-cyan-500/15 hover:bg-cyan-500/25 transition-colors">
+            <Database className="w-3 h-3" /> Data
+          </button>
+        </div>
       </div>
+
+      {/* ── Mobile full data drawer ───────────────────────────────────── */}
+      {mobileDrawerOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileDrawerOpen(false)} />
+          <div className="relative flex flex-col" style={{
+            height: '65vh', background: 'rgba(7,7,15,0.97)', backdropFilter: 'blur(16px)',
+            borderTop: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px 16px 0 0',
+          }}>
+            {/* Drawer handle + close */}
+            <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
+              <div className="mx-auto w-10 h-1 rounded-full bg-slate-700" />
+              <button onClick={() => setMobileDrawerOpen(false)} className="absolute right-3 top-3 p-1 text-slate-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tab bar */}
+            <div className="flex gap-1 px-3 pb-2 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              {(['stats', 'countries', 'feed', 'sources'] as const).map(tab => (
+                <button key={tab} onClick={() => setMobileDrawerTab(tab)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider uppercase whitespace-nowrap transition-colors ${
+                    mobileDrawerTab === tab ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500 hover:text-slate-300 bg-white/5'
+                  }`}>{tab}</button>
+              ))}
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto px-4 pb-4" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
+
+              {/* ── Stats tab ── */}
+              {mobileDrawerTab === 'stats' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'Active Arcs', value: displayThreats.length, color: '#ff0066' },
+                      { label: 'Arcs/min', value: rate, color: '#f97316' },
+                      { label: 'Total', value: todayCount.toLocaleString(), color: '#a855f7' },
+                    ].map(s => (
+                      <div key={s.label} className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                        <p className="text-sm font-mono font-bold" style={{ color: s.color }}>{s.value}</p>
+                        <p className="text-[8px] text-slate-500 font-mono uppercase">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">ATTACKS BY TYPE</p>
+                    {typeBarData.map(t => (
+                      <div key={t.type} className="flex items-center gap-2 py-1.5">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
+                        <span className="text-[11px] text-slate-400 font-mono w-20 truncate">{t.label}</span>
+                        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <div className="h-full rounded-full" style={{ width: `${(t.count / maxTypeCount) * 100}%`, background: t.color }} />
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono w-10 text-right">{t.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Countries tab ── */}
+              {mobileDrawerTab === 'countries' && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">TOP ATTACKING COUNTRIES</p>
+                    {displayAttackers.map(c => {
+                      const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
+                      return (
+                        <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
+                          onClick={() => { handleCountryClick(c.name); setMobileDrawerOpen(false); }}>
+                          <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                          <span className="text-xs text-slate-300 font-mono flex-1 truncate">{c.name}</span>
+                          <div className="w-14 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${(c.count / maxAttackerCount) * 100}%`, background: '#ef4444' }} />
+                          </div>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{c.count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">TOP TARGETED COUNTRIES</p>
+                    {displayTargets.map(c => {
+                      const iso = COUNTRY_ISO[c.name] ?? c.cc?.toLowerCase() ?? 'un';
+                      return (
+                        <div key={c.cc} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1"
+                          onClick={() => { handleCountryClick(c.name); setMobileDrawerOpen(false); }}>
+                          <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" />
+                          <span className="text-xs text-slate-300 font-mono flex-1 truncate">{c.name}</span>
+                          <div className="w-14 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${(c.count / maxTargetCount) * 100}%`, background: '#3b82f6' }} />
+                          </div>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}>{c.count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Feed tab ── */}
+              {mobileDrawerTab === 'feed' && (
+                <div>
+                  <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">LIVE FEED</p>
+                  {events.slice(0, 30).map(a => (
+                    <div key={a.id} className="flex items-start gap-2 py-2 feed-item" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <div className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: a.color || ATTACK_COLORS[a.attack_type] }} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] text-white font-mono truncate">
+                          {feedPrefix(a)}{a.label || ATTACK_LABELS[a.attack_type]}
+                          {a.verified && <span className="text-amber-400 ml-1">✓</span>}
+                        </p>
+                        <p className="text-[9px] text-slate-500 font-mono truncate">
+                          {timeAgo(a.timestamp)} · {a.source.country} → {a.target.country}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Sources tab ── */}
+              {mobileDrawerTab === 'sources' && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">DATA SOURCES</p>
+                    <SourceDot name="AbuseIPDB" active={sourcesActive.abuseipdb} />
+                    <SourceDot name="URLhaus" active={sourcesActive.urlhaus} />
+                    <SourceDot name="AlienVault OTX" active={sourcesActive.alienvault} />
+                    <SourceDot name="Firewall Log" active={sourcesActive.firewall} />
+                    <SourceDot name="Kaspersky KSN" active={!!sourcesActive.kaspersky_ksn} />
+                    <SourceDot name="Kaspersky TIP" active={!!sourcesActive.kaspersky_tip} />
+                  </div>
+                  {kaspersky?.subsystems && (
+                    <div>
+                      <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-teal-400 mb-2 font-mono">━━━ KASPERSKY KSN ━━━</p>
+                      {SUBSYSTEM_ORDER.map(key => {
+                        const sub = kaspersky.subsystems[key];
+                        if (!sub) return null;
+                        return (
+                          <div key={key} className="flex items-center gap-1.5 py-1">
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: sub.color }} />
+                            <span className="text-[11px] font-mono text-slate-300 w-8">{key}</span>
+                            <span className="text-[10px] font-mono text-slate-500 flex-1 truncate">{sub.label}</span>
+                            <span className="text-[10px] font-mono text-slate-400">{formatCount(sub.total)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* Indicator lookup */}
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">CHECK INDICATOR</p>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        value={indicatorInput}
+                        onChange={e => setIndicatorInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleCheckIndicator()}
+                        placeholder="IP, domain, or hash…"
+                        className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-[11px] font-mono text-white placeholder:text-slate-600 outline-none focus:border-cyan-500/50"
+                      />
+                      <button onClick={handleCheckIndicator} disabled={indicatorLoading}
+                        className="px-3 py-1.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors disabled:opacity-50">
+                        {indicatorLoading ? '…' : <Search className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    {indicatorResult && (
+                      <div className="mt-2 p-2 rounded" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          {indicatorResult.zone === 'Red' ? (
+                            <><ShieldX className="w-3.5 h-3.5 text-red-400" /><span className="text-[10px] font-mono font-bold text-red-400">MALICIOUS</span></>
+                          ) : indicatorResult.zone === 'Yellow' ? (
+                            <><ShieldAlert className="w-3.5 h-3.5 text-yellow-400" /><span className="text-[10px] font-mono font-bold text-yellow-400">SUSPICIOUS</span></>
+                          ) : (
+                            <><ShieldCheck className="w-3.5 h-3.5 text-green-400" /><span className="text-[10px] font-mono font-bold text-green-400">CLEAN</span></>
+                          )}
+                        </div>
+                        {indicatorResult.threat_name && <p className="text-[10px] font-mono text-slate-300">{indicatorResult.threat_name}</p>}
+                        {indicatorResult.categories?.length > 0 && <p className="text-[10px] font-mono text-slate-400">{indicatorResult.categories[0]}</p>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </>
       )}
 
