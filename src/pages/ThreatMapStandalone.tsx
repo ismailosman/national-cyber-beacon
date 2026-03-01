@@ -317,14 +317,22 @@ const ThreatMapStandalone: React.FC = () => {
             )}
 
             {/* Kaspersky iframe widget */}
-            <div className="mt-6">
+            <div
+              className="mt-6 overflow-hidden"
+              style={{ touchAction: 'none' }}
+              onWheel={(e) => e.stopPropagation()}
+            >
               <iframe
                 src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
                 width="100%"
-                style={{ border: 'none', borderRadius: 8, height: 500 }}
+                style={{ border: 'none', borderRadius: 8, height: 600, pointerEvents: 'auto' }}
                 title="Kaspersky Cyberthreat Live Map"
                 allowFullScreen
+                sandbox="allow-scripts allow-same-origin allow-popups"
               />
+              <p className="text-center text-xs text-muted-foreground mt-2 opacity-60">
+                Scroll to zoom · Drag to rotate
+              </p>
             </div>
           </div>
         </div>
