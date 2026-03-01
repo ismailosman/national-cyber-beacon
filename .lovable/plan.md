@@ -1,25 +1,26 @@
 
 
-## Fix Kaspersky Iframe Map Zoom
+## Show Kaspersky Globe on Mobile
 
 ### Problem
-The embedded Kaspersky Cyberthreat Live Map (3D globe iframe) does not respond to scroll-to-zoom or touch-to-zoom gestures. The iframe loads from `cybermap.kaspersky.com/en/widget/dynamic/dark` and its internal controls require mouse wheel and touch events to pass through properly.
+Mobile users can switch to the "KSN Data" tab and see the subsystem charts, but the Kaspersky 3D globe iframe is too tall (600px) and may not render well. More importantly, mobile users accessing data through the mobile drawer's "Sources" tab only see data source indicators and subsystem stats -- they never see the Kaspersky globe widget itself.
 
-### Root Cause
-The iframe container sits inside a scrollable panel, so scroll events are captured by the parent `overflow-y-auto` container instead of being forwarded to the iframe. Additionally, the iframe is missing key `allow` attributes for fullscreen and pointer-lock.
+### Solution
 
-### Solution (File: `src/pages/ThreatMapStandalone.tsx`, lines 319-328)
+**File: `src/pages/ThreatMapStandalone.tsx`**
 
-1. **Add `overflow: hidden`** to the iframe wrapper `div` so the parent scroll container doesn't steal wheel events when the cursor is over the iframe area.
+1. **Add a "KSN Map" tab to the mobile drawer** -- extend the mobile drawer tab options from `['stats', 'countries', 'feed', 'sources']` to include a 5th tab `'ksn-map'`.
 
-2. **Add `sandbox` attribute** with `allow-scripts allow-same-origin allow-popups` to permit the Kaspersky widget's internal interactivity while keeping it secure.
+2. **Render the Kaspersky iframe in the new tab** with mobile-friendly sizing:
+   - Height set to ~350px (fits within the 65vh drawer)
+   - Same `onWheel` stop-propagation and `touch-action: none` wrapper
+   - Include the "Scroll to zoom / Drag to rotate" hint
 
-3. **Set a taller default height** (600px instead of 500px) so the globe is more usable without needing to zoom as much.
+3. **Make the KSN Data tab's iframe responsive** -- change the fixed 600px height to use a responsive value: `height: min(600px, 50vh)` so it fits better when mobile users switch to the KSN Data tab directly via the top tab bar.
 
-4. **Add `pointer-events: auto`** explicitly and wrap the iframe in a container that uses `touch-action: none` to prevent the parent from intercepting pinch/scroll gestures meant for the iframe.
+### Technical Details
 
-5. **Add a subtle instruction label** below the iframe: "Scroll to zoom -- Drag to rotate" so users know the globe is interactive.
-
-### Technical Detail
-The key fix is wrapping the iframe in a div with `onWheel={(e) => e.stopPropagation()}` and `touch-action: none` CSS, which prevents the KSN tab's scrollable container from consuming wheel/touch events before they reach the iframe. The Kaspersky widget internally handles zoom via standard wheel events, so once they pass through, zoom will work.
-
+- Update `mobileDrawerTab` type to `'stats' | 'countries' | 'feed' | 'sources' | 'ksn-map'`
+- Add `'ksn-map'` to the tab button array in the mobile drawer
+- Add a new conditional block rendering the Kaspersky iframe inside the drawer's scrollable content area
+- Update the KSN tab's iframe `style.height` to be viewport-aware
