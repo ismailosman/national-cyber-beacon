@@ -52,7 +52,7 @@ const ThreatMapStandalone: React.FC = () => {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [mobileDrawerTab, setMobileDrawerTab] = useState<'stats' | 'countries' | 'feed' | 'sources'>('stats');
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<'stats' | 'countries' | 'feed' | 'sources' | 'ksn-map'>('stats');
   const [activeTab, setActiveTab] = useState<'map' | 'ksn'>('map');
 
   /* ── Indicator lookup state ───────────────────────────────────────── */
@@ -325,7 +325,7 @@ const ThreatMapStandalone: React.FC = () => {
               <iframe
                 src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
                 width="100%"
-                style={{ border: 'none', borderRadius: 8, height: 600, pointerEvents: 'auto' }}
+                style={{ border: 'none', borderRadius: 8, height: 'min(600px, 50vh)', pointerEvents: 'auto' }}
                 title="Kaspersky Cyberthreat Live Map"
                 allowFullScreen
                 sandbox="allow-scripts allow-same-origin allow-popups"
@@ -659,7 +659,7 @@ const ThreatMapStandalone: React.FC = () => {
 
             {/* Tab bar */}
             <div className="flex gap-1 px-3 pb-2 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-              {(['stats', 'countries', 'feed', 'sources'] as const).map(tab => (
+              {(['stats', 'countries', 'feed', 'sources', 'ksn-map'] as const).map(tab => (
                 <button key={tab} onClick={() => setMobileDrawerTab(tab)}
                   className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider uppercase whitespace-nowrap transition-colors ${
                     mobileDrawerTab === tab ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500 hover:text-slate-300 bg-white/5'
@@ -824,6 +824,30 @@ const ThreatMapStandalone: React.FC = () => {
                         {indicatorResult.categories?.length > 0 && <p className="text-[10px] font-mono text-slate-400">{indicatorResult.categories[0]}</p>}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── KSN Map tab ── */}
+              {mobileDrawerTab === 'ksn-map' && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-teal-400 font-mono">KASPERSKY LIVE THREAT MAP</p>
+                  <div
+                    className="overflow-hidden rounded-lg"
+                    style={{ touchAction: 'none' }}
+                    onWheel={(e) => e.stopPropagation()}
+                  >
+                    <iframe
+                      src="https://cybermap.kaspersky.com/en/widget/dynamic/dark"
+                      width="100%"
+                      style={{ border: 'none', borderRadius: 8, height: 350, pointerEvents: 'auto' }}
+                      title="Kaspersky Cyberthreat Live Map"
+                      allowFullScreen
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    />
+                    <p className="text-center text-[9px] text-slate-500 mt-1.5 opacity-60 font-mono">
+                      Pinch to zoom · Drag to rotate
+                    </p>
                   </div>
                 </div>
               )}
