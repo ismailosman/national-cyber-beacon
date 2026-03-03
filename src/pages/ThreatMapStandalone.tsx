@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Globe, Pause, Play, RefreshCw, ChevronUp, ChevronDown, Zap, Search, ShieldCheck, ShieldAlert, ShieldX, Database, X } from 'lucide-react';
 import { useLiveThreatAPI, maskIP } from '@/hooks/useLiveThreatAPI';
-import type { LiveThreatEvent, KasperskySubsystem, IndicatorCheckResult } from '@/hooks/useLiveThreatAPI';
+import type { LiveThreatEvent, KasperskySubsystem, IndicatorCheckResult, RansomwareData } from '@/hooks/useLiveThreatAPI';
 import ThreatMapEngine from '@/components/cyber-map/ThreatMapEngine';
 import SomaliaPanel from '@/components/cyber-map/SomaliaPanel';
 import CountryPanel from '@/components/cyber-map/CountryPanel';
@@ -29,6 +29,7 @@ const SourceDot: React.FC<{ name: string; active: boolean }> = ({ name, active }
 function feedPrefix(e: LiveThreatEvent): React.ReactNode {
   if (e.source_api === 'Kaspersky KSN Stats') return <span className="text-teal-400 font-bold">[KSN] </span>;
   if (e.source_api === 'Kaspersky TIP') return <span className="text-amber-400 font-bold">[TIP] </span>;
+  if (e.source_api === 'Ransomware.live') return <span style={{ color: '#9900ff' }} className="font-bold">[RMW] </span>;
   return null;
 }
 
@@ -45,15 +46,15 @@ const ThreatMapStandalone: React.FC = () => {
   const {
     events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
     refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
-    kaspersky, checkIndicator,
+    kaspersky, checkIndicator, ransomware,
   } = useLiveThreatAPI();
 
   const [somaliaPanel, setSomaliaPanel] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mobileStatsOpen, setMobileStatsOpen] = useState(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [mobileDrawerTab, setMobileDrawerTab] = useState<'stats' | 'countries' | 'feed' | 'sources' | 'ksn-map'>('stats');
-  const [activeTab, setActiveTab] = useState<'map' | 'ksn'>('map');
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<'stats' | 'countries' | 'feed' | 'sources' | 'ksn-map' | 'ransomware'>('stats');
+  const [activeTab, setActiveTab] = useState<'map' | 'ksn' | 'ransomware'>('map');
 
   /* ── Indicator lookup state ───────────────────────────────────────── */
   const [indicatorInput, setIndicatorInput] = useState('');
@@ -195,12 +196,13 @@ const ThreatMapStandalone: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-1 mx-4">
-          {(['map', 'ksn'] as const).map(tab => (
+          {(['map', 'ksn', 'ransomware'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`px-3 py-1.5 text-[10px] font-mono font-bold tracking-widest uppercase rounded-t transition-colors ${
                 activeTab === tab ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500 hover:text-slate-300'
               }`}
-            >{tab === 'map' ? 'Live Map' : 'KSN Data'}</button>
+              style={tab === 'ransomware' && activeTab === tab ? { color: '#9900ff', borderColor: '#9900ff' } : undefined}
+            >{tab === 'map' ? 'Live Map' : tab === 'ksn' ? 'KSN Data' : '💀 Ransomware'}</button>
           ))}
         </div>
         <div className="flex items-center gap-3">
@@ -336,6 +338,108 @@ const ThreatMapStandalone: React.FC = () => {
             </div>
           </div>
         </div>
+      ) : activeTab === 'ransomware' ? (
+        /* ── Ransomware Feed Tab ─────────────────────────────────────────── */
+        <div className="flex-1 flex flex-col overflow-y-auto" style={{ background: '#0a0a14' }}>
+          <div className="p-6">
+            <h2 className="text-xl font-bold text-white font-mono mb-1">💀 Ransomware Feed</h2>
+            <p className="text-sm text-slate-400 font-mono mb-6">Live ransomware victim intelligence from Ransomware.live</p>
+
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              {[
+                { icon: '💀', label: 'Recent Victims', value: ransomware?.stats?.total_victims ?? 0, color: '#9900ff' },
+                { icon: '🏴‍☠️', label: 'Active Groups', value: ransomware?.stats?.total_groups ?? 0, color: '#ff3300' },
+                { icon: '🏥', label: 'Most Targeted', value: ransomware?.stats?.by_sector?.[0]?.[0] ?? '—', color: '#ff6600' },
+                { icon: '🌍', label: 'Most Hit Country', value: ransomware?.stats?.by_country?.[0]?.[0] ?? '—', color: '#22d3ee' },
+              ].map(s => (
+                <div key={s.label} className="rounded-xl p-3 text-center" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <span className="text-lg">{s.icon}</span>
+                  <p className="text-lg font-mono font-bold mt-1" style={{ color: s.color }}>{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</p>
+                  <p className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              {/* Recent Victims */}
+              <div className="rounded-xl p-4 max-h-[400px] overflow-y-auto" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">RECENT VICTIMS</p>
+                {ransomware?.recent_victims?.length ? ransomware.recent_victims.slice(0, 20).map((v, i) => {
+                  const iso = (v.country || '').toLowerCase().slice(0, 2);
+                  return (
+                    <div key={i} className="py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono font-bold" style={{ color: '#ff4400' }}>{v.group}</span>
+                        {iso && <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />}
+                      </div>
+                      <p className="text-[11px] font-mono text-white truncate mt-0.5">{v.victim}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[9px] font-mono text-slate-500">🏢 {v.activity || 'Unknown'}</span>
+                        <span className="text-[9px] font-mono text-slate-600">📅 {v.attackdate}</span>
+                      </div>
+                    </div>
+                  );
+                }) : <p className="text-[10px] text-slate-600 font-mono">Waiting for ransomware data…</p>}
+              </div>
+
+              {/* Top Ransomware Groups */}
+              <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">TOP RANSOMWARE GROUPS</p>
+                {(() => {
+                  const groups = ransomware?.stats?.by_group ?? [];
+                  const maxG = groups[0]?.[1] ?? 1;
+                  return groups.length ? groups.slice(0, 10).map(([name, count]) => (
+                    <div key={name} className="flex items-center gap-2 py-1.5">
+                      <span className="text-[10px] font-mono text-slate-300 w-24 truncate">{name}</span>
+                      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${(count / maxG) * 100}%`, background: '#9900ff' }} />
+                      </div>
+                      <span className="text-[10px] font-mono text-white w-8 text-right">{count}</span>
+                    </div>
+                  )) : <p className="text-[10px] text-slate-600 font-mono">No group data yet</p>;
+                })()}
+              </div>
+
+              {/* Victims by Sector */}
+              <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">VICTIMS BY SECTOR</p>
+                {(() => {
+                  const sectors = ransomware?.stats?.by_sector ?? [];
+                  const maxS = sectors[0]?.[1] ?? 1;
+                  return sectors.length ? sectors.slice(0, 10).map(([name, count]) => (
+                    <div key={name} className="flex items-center gap-2 py-1.5">
+                      <span className="text-[10px] font-mono text-slate-300 w-28 truncate">{name}</span>
+                      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${(count / maxS) * 100}%`, background: '#ff6600' }} />
+                      </div>
+                      <span className="text-[10px] font-mono text-white w-8 text-right">{count}</span>
+                    </div>
+                  )) : <p className="text-[10px] text-slate-600 font-mono">No sector data yet</p>;
+                })()}
+              </div>
+            </div>
+
+            {/* Victims by Country */}
+            <div className="rounded-xl p-4" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">VICTIMS BY COUNTRY</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {(ransomware?.stats?.by_country ?? []).slice(0, 20).map(([cc, count], i) => {
+                  const iso = cc.toLowerCase();
+                  return (
+                    <div key={cc} className="flex items-center gap-2 py-1.5 px-2 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <span className="text-[9px] font-mono text-slate-600 w-4">{i + 1}.</span>
+                      <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />
+                      <span className="text-[10px] font-mono text-slate-300 flex-1 uppercase">{cc}</span>
+                      <span className="text-[10px] font-mono font-bold" style={{ color: '#9900ff' }}>{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {(!ransomware?.stats?.by_country?.length) && <p className="text-[10px] text-slate-600 font-mono">No country data yet</p>}
+            </div>
+          </div>
+        </div>
       ) : (
       <>
       {/* ── Body: Three columns ───────────────────────────────────────── */}
@@ -380,6 +484,7 @@ const ThreatMapStandalone: React.FC = () => {
             <SourceDot name="Firewall Log" active={sourcesActive.firewall} />
             <SourceDot name="Kaspersky KSN" active={!!sourcesActive.kaspersky_ksn} />
             <SourceDot name="Kaspersky TIP" active={!!sourcesActive.kaspersky_tip} />
+            <SourceDot name="Ransomware.live" active={!!sourcesActive.ransomware_live} />
           </div>
 
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
@@ -659,7 +764,7 @@ const ThreatMapStandalone: React.FC = () => {
 
             {/* Tab bar */}
             <div className="flex gap-1 px-3 pb-2 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-              {(['stats', 'countries', 'feed', 'sources', 'ksn-map'] as const).map(tab => (
+              {(['stats', 'countries', 'feed', 'sources', 'ksn-map', 'ransomware'] as const).map(tab => (
                 <button key={tab} onClick={() => setMobileDrawerTab(tab)}
                   className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider uppercase whitespace-nowrap transition-colors ${
                     mobileDrawerTab === tab ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500 hover:text-slate-300 bg-white/5'
@@ -774,6 +879,7 @@ const ThreatMapStandalone: React.FC = () => {
                     <SourceDot name="Firewall Log" active={sourcesActive.firewall} />
                     <SourceDot name="Kaspersky KSN" active={!!sourcesActive.kaspersky_ksn} />
                     <SourceDot name="Kaspersky TIP" active={!!sourcesActive.kaspersky_tip} />
+                    <SourceDot name="Ransomware.live" active={!!sourcesActive.ransomware_live} />
                   </div>
                   {kaspersky?.subsystems && (
                     <div>
@@ -848,6 +954,62 @@ const ThreatMapStandalone: React.FC = () => {
                     <p className="text-center text-[9px] text-slate-500 mt-1.5 opacity-60 font-mono">
                       Pinch to zoom · Drag to rotate
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Ransomware tab ── */}
+              {mobileDrawerTab === 'ransomware' && (
+                <div className="space-y-4">
+                  {/* Mini stat cards */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: '💀', label: 'Victims', value: ransomware?.stats?.total_victims ?? 0, color: '#9900ff' },
+                      { icon: '🏴‍☠️', label: 'Groups', value: ransomware?.stats?.total_groups ?? 0, color: '#ff3300' },
+                    ].map(s => (
+                      <div key={s.label} className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <span>{s.icon}</span>
+                        <p className="text-sm font-mono font-bold" style={{ color: s.color }}>{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</p>
+                        <p className="text-[8px] font-mono text-slate-500 uppercase">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Recent victims */}
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">RECENT VICTIMS</p>
+                    {ransomware?.recent_victims?.slice(0, 15).map((v, i) => {
+                      const iso = (v.country || '').toLowerCase().slice(0, 2);
+                      return (
+                        <div key={i} className="py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold" style={{ color: '#ff4400' }}>{v.group}</span>
+                            {iso && <img src={`https://flagcdn.com/w20/${iso}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" onError={e => (e.currentTarget.style.display = 'none')} />}
+                          </div>
+                          <p className="text-[11px] font-mono text-white truncate">{v.victim}</p>
+                          <span className="text-[9px] font-mono text-slate-500">🏢 {v.activity || 'Unknown'} · 📅 {v.attackdate}</span>
+                        </div>
+                      );
+                    })}
+                    {!ransomware?.recent_victims?.length && <p className="text-[10px] text-slate-600 font-mono">Waiting for data…</p>}
+                  </div>
+
+                  {/* Top groups */}
+                  <div>
+                    <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">TOP GROUPS</p>
+                    {(() => {
+                      const groups = ransomware?.stats?.by_group ?? [];
+                      const maxG = groups[0]?.[1] ?? 1;
+                      return groups.slice(0, 8).map(([name, count]) => (
+                        <div key={name} className="flex items-center gap-2 py-1">
+                          <span className="text-[10px] font-mono text-slate-300 w-20 truncate">{name}</span>
+                          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${(count / maxG) * 100}%`, background: '#9900ff' }} />
+                          </div>
+                          <span className="text-[9px] font-mono text-white w-6 text-right">{count}</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
