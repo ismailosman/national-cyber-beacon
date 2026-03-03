@@ -7,14 +7,6 @@ const corsHeaders = {
 const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
 const API_KEY = Deno.env.get("SECURITY_API_KEY") ?? "";
 
-const ALLOWED_PREFIXES = [
-  "/health", "/scan", "/scans",
-  "/compliance/", "/darkweb/",
-  "/ddos/", "/threat/",
-  "/clients", "/engagements",
-  "/kaspersky/", "/ransomware",
-];
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -23,14 +15,6 @@ Deno.serve(async (req: Request) => {
   try {
     const url = new URL(req.url);
     const path = url.searchParams.get("path") || "/health";
-
-    const allowed = ALLOWED_PREFIXES.some((p) => path.startsWith(p));
-    if (!allowed) {
-      return new Response(
-        JSON.stringify({ detail: "Not found", path }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
 
     const targetUrl = `${API_BASE}${path}`;
     console.log(`[api-proxy] ${req.method} ${path} → ${targetUrl}`);
