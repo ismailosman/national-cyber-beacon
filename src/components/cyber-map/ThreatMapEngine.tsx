@@ -88,12 +88,13 @@ const ThreatMapEngine: React.FC<ThreatMapEngineProps> = ({
       canvasSeenRef.current.add(threat.id);
       if (canvasArcsRef.current.length >= 60) canvasArcsRef.current.splice(0, canvasArcsRef.current.length - 59);
       const isKaspersky = (threat as any).source_api?.startsWith('Kaspersky');
+      const isRansomware = (threat as any).source_api === 'Ransomware.live';
       canvasArcsRef.current.push({
         id: threat.id, srcLng: threat.source.lng, srcLat: threat.source.lat,
         dstLng: threat.target.lng, dstLat: threat.target.lat,
         color: (threat as any).color || ATTACK_COLORS[threat.attack_type],
         progress: 0, phase: 'animating', fadeOpacity: 1, lastFrame: performance.now(),
-        baseAlpha: isKaspersky ? 0.85 : 0.6,
+        baseAlpha: (isKaspersky || isRansomware) ? 0.85 : 0.6,
       });
     }
   }, [threats, liveOn]);

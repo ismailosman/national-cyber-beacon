@@ -41,7 +41,7 @@ export function maskIP(ip: string): string {
 const TYPE_MAP: Record<string, AttackType> = {
   ssh: 'intrusion', exploit: 'intrusion', recon: 'intrusion',
   http: 'exploit', scanner: 'exploit',
-  malware: 'malware', botnet: 'malware',
+  malware: 'malware', botnet: 'malware', ransomware: 'malware',
   phishing: 'phishing', spam: 'phishing',
   ddos: 'ddos',
 };
@@ -72,6 +72,29 @@ export interface IndicatorCheckResult {
   threat_name: string;
   cc: string;
   isp: string;
+}
+
+/* ── Ransomware types ───────────────────────────────────────────────── */
+export interface RansomwareVictim {
+  victim: string;
+  group: string;
+  country: string;
+  activity: string;
+  attackdate: string;
+  website?: string;
+  description?: string;
+}
+
+export interface RansomwareData {
+  recent_victims: RansomwareVictim[];
+  groups: any[];
+  stats: {
+    total_victims: number;
+    total_groups: number;
+    by_group: [string, number][];
+    by_country: [string, number][];
+    by_sector: [string, number][];
+  };
 }
 
 /* ── API event shape ────────────────────────────────────────────────── */
@@ -112,6 +135,7 @@ interface SourcesActive {
   firewall: boolean;
   kaspersky_ksn?: boolean;
   kaspersky_tip?: boolean;
+  ransomware_live?: boolean;
 }
 
 export interface LiveThreatEvent extends LiveThreat {
@@ -143,6 +167,7 @@ export interface LiveThreatAPIState {
   error: string | null;
   kaspersky: KasperskyData | null;
   checkIndicator: (indicator: string) => Promise<IndicatorCheckResult | null>;
+  ransomware: RansomwareData | null;
 }
 
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
@@ -182,6 +207,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [kaspersky, setKaspersky] = useState<KasperskyData | null>(null);
+  const [ransomware, setRansomware] = useState<RansomwareData | null>(null);
   const seenIds = useRef(new Set<string>());
   const consecutiveFailsRef = useRef(0);
 
@@ -255,6 +281,45 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     }
   }, []);
 
+  /* ── Ransomware polling (every 30 min) ─────────────────────────────── */
+  const fetchRansomware = useCallback(async () => {
+    try {
+      const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent('/ransomware/live')}`, {
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data._not_found) return;
+
+      // Merge ransomware arc events into the main events
+      if (data.events?.length) {
+        const apiEvents: APIEvent[] = data.events;
+        const newMapped = apiEvents
+          .filter(e => !seenIds.current.has(e.id))
+          .map(mapEvent);
+        for (const e of apiEvents) seenIds.current.add(e.id);
+        if (newMapped.length > 0) {
+          setEvents(prev => [...newMapped, ...prev].slice(0, 100));
+        }
+      }
+
+      // Store ransomware-specific data
+      setRansomware({
+        recent_victims: data.recent_victims ?? [],
+        groups: data.groups ?? [],
+        stats: data.stats ?? { total_victims: 0, total_groups: 0, by_group: [], by_country: [], by_sector: [] },
+      });
+
+      // Update sources
+      setSourcesActive(prev => ({ ...prev, ransomware_live: true }));
+    } catch {
+      // Silent fail — ransomware is a supplementary feed
+    }
+  }, []);
+
   useEffect(() => {
     if (isPaused) return;
     fetchData();
@@ -269,8 +334,16 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     return () => clearTimeout(timer);
   }, [isPaused, fetchData]);
 
+  // Ransomware independent polling
+  useEffect(() => {
+    if (isPaused) return;
+    fetchRansomware();
+    const iv = setInterval(fetchRansomware, 1_800_000); // 30 min
+    return () => clearInterval(iv);
+  }, [isPaused, fetchRansomware]);
+
   const togglePause = useCallback(() => setIsPaused(p => !p), []);
-  const forceRefresh = useCallback(() => fetchData(true), [fetchData]);
+  const forceRefresh = useCallback(() => { fetchData(true); fetchRansomware(); }, [fetchData, fetchRansomware]);
 
   const checkIndicator = useCallback(async (indicator: string): Promise<IndicatorCheckResult | null> => {
     try {
@@ -294,6 +367,6 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   return {
     events, stats, topCountries, topAttackers, topTargets, topTypes, sourcesActive,
     home, refreshedAt, isPaused, togglePause, forceRefresh, loading, error,
-    kaspersky, checkIndicator,
+    kaspersky, checkIndicator, ransomware,
   };
 }
