@@ -81,8 +81,9 @@ export interface RansomwareVictim {
   country: string;
   activity: string;
   attackdate: string;
-  website?: string;
+  domain?: string;
   description?: string;
+  discovered?: string;
 }
 
 export interface RansomwareData {
