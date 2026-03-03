@@ -8,6 +8,7 @@ import CountryPanel from '@/components/cyber-map/CountryPanel';
 import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS } from '@/components/cyber-map/shared';
 import type { AttackType } from '@/hooks/useLiveAttacks';
 import logoSrc from '@/assets/logo.png';
+import RansomwareSearch from '@/components/ransomware/RansomwareSearch';
 
 /* ── Relative time helper ─────────────────────────────────────────── */
 function timeAgo(ts: number): string {
@@ -360,6 +361,8 @@ const ThreatMapStandalone: React.FC = () => {
                 </div>
               ))}
             </div>
+
+            <RansomwareSearch />
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
               {/* Recent Victims */}
@@ -976,6 +979,8 @@ const ThreatMapStandalone: React.FC = () => {
                       </div>
                     ))}
                   </div>
+
+                  <RansomwareSearch compact />
 
                   {/* Recent victims */}
                   <div>
