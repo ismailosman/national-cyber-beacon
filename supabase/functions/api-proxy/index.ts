@@ -12,7 +12,7 @@ const ALLOWED_PREFIXES = [
   "/compliance/", "/darkweb/",
   "/ddos/", "/threat/",
   "/clients", "/engagements",
-  "/kaspersky/", "/ransomware/",
+  "/kaspersky/", "/ransomware",
 ];
 
 Deno.serve(async (req: Request) => {
