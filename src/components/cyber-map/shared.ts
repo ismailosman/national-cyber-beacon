@@ -103,6 +103,21 @@ export function seededRand(seed: number): () => number {
   };
 }
 
+// ── Coordinate jitter (spread arcs within a country) ─────────────────────────
+
+function hashString(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return Math.abs(h) || 0x9e3779b9;
+}
+
+export function jitterCoords(lat: number, lng: number, seed: string): { lat: number; lng: number } {
+  const rand = seededRand(hashString(seed));
+  const jLat = (rand() - 0.5) * 3;   // ±1.5°
+  const jLng = (rand() - 0.5) * 3;
+  return { lat: Math.max(-85, Math.min(85, lat + jLat)), lng: lng + jLng };
+}
+
 // ── Data generators ──────────────────────────────────────────────────────────
 
 export function genCountryDefaultPercentages(country: string): Record<AttackType, number> {
