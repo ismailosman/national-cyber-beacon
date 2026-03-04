@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LiveThreat, AttackType, Severity } from '@/hooks/useLiveAttacks';
+import { jitterCoords } from '@/components/cyber-map/shared';
 
 /* ── Fallback KSN data (used when API key is inactive) ─────────────── */
 const FALLBACK_KASPERSKY: KasperskyData = {
@@ -174,11 +175,13 @@ export interface LiveThreatAPIState {
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
 function mapEvent(e: APIEvent): LiveThreatEvent {
+  const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src');
+  const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst');
   return {
     id: e.id,
     name: e.label,
-    source: { lat: e.source.lat, lng: e.source.lng, country: e.source.country, state: e.source.city },
-    target: { lat: e.target.lat, lng: e.target.lng, country: e.target.country, state: e.target.city },
+    source: { lat: src.lat, lng: src.lng, country: e.source.country, state: e.source.city },
+    target: { lat: dst.lat, lng: dst.lng, country: e.target.country, state: e.target.city },
     attack_type: mapType(e.type),
     severity: (e.severity?.toLowerCase() ?? 'medium') as Severity,
     timestamp: new Date(e.timestamp).getTime(),
