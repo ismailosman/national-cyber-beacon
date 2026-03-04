@@ -111,10 +111,23 @@ function hashString(str: string): number {
   return Math.abs(h) || 0x9e3779b9;
 }
 
-export function jitterCoords(lat: number, lng: number, seed: string): { lat: number; lng: number } {
+const LARGE_COUNTRY_JITTER: Record<string, { latRange: number; lngRange: number }> = {
+  'USA':           { latRange: 15, lngRange: 40 },
+  'United States': { latRange: 15, lngRange: 40 },
+  'United States of America': { latRange: 15, lngRange: 40 },
+  'Canada':        { latRange: 12, lngRange: 40 },
+  'Russia':        { latRange: 15, lngRange: 60 },
+  'China':         { latRange: 15, lngRange: 25 },
+  'Brazil':        { latRange: 18, lngRange: 18 },
+  'India':         { latRange: 12, lngRange: 10 },
+  'Australia':     { latRange: 12, lngRange: 20 },
+};
+
+export function jitterCoords(lat: number, lng: number, seed: string, country?: string): { lat: number; lng: number } {
   const rand = seededRand(hashString(seed));
-  const jLat = (rand() - 0.5) * 3;   // ±1.5°
-  const jLng = (rand() - 0.5) * 3;
+  const range = (country && LARGE_COUNTRY_JITTER[country]) ?? { latRange: 3, lngRange: 3 };
+  const jLat = (rand() - 0.5) * range.latRange;
+  const jLng = (rand() - 0.5) * range.lngRange;
   return { lat: Math.max(-85, Math.min(85, lat + jLat)), lng: lng + jLng };
 }
 

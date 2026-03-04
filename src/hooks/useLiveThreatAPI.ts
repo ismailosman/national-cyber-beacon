@@ -175,8 +175,8 @@ export interface LiveThreatAPIState {
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
 function mapEvent(e: APIEvent): LiveThreatEvent {
-  const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src');
-  const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst');
+  const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src', e.source.country);
+  const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst', e.target.country);
   return {
     id: e.id,
     name: e.label,
