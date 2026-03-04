@@ -1,53 +1,25 @@
 
 
-## Add Ransomware Country/Keyword Search
+## Spread Attack Arcs Across Country Locations
 
-### Overview
-Add a search section between the stat cards and the Recent Victims list in the Ransomware Feed tab (both desktop and mobile). It calls `/ransomware/country/{CC}` or `/ransomware/search/{keyword}` via the existing `api-proxy`.
+### Problem
+All attack arcs targeting or originating from the same country hit the exact same lat/lng point (the country centroid from the API), making them visually stack on one spot.
+
+### Solution
+Add a coordinate jitter function in `shared.ts` that applies a deterministic, per-event random offset (±1–3° depending on country size) to both source and target coordinates. Apply this jitter in `mapEvent()` in `useLiveThreatAPI.ts` so every event gets unique coordinates while staying within the country's general area.
 
 ### Changes
 
-**File: `src/pages/ThreatMapStandalone.tsx`**
+**`src/components/cyber-map/shared.ts`** — Add a `jitterCoords` function:
+- Takes `lat`, `lng`, and a string seed (the event `id`)
+- Uses the existing `seededRand` to generate a deterministic offset (so the same event always renders the same way)
+- Applies ±1.5° jitter (enough to spread within a country, not so much it crosses borders for most countries)
+- Clamps latitude to [-85, 85]
 
-1. **Add state variables** (near existing state declarations):
-   - `ransomwareSearchMode: 'country' | 'keyword'`
-   - `ransomwareCountry: string` (ISO2 code, default `''`)
-   - `ransomwareKeyword: string`
-   - `ransomwareSearchResults: { victims: RansomwareVictim[], total: number, country?: string, message?: string } | null`
-   - `ransomwareSearchLoading: boolean`
+**`src/hooks/useLiveThreatAPI.ts`** — Apply jitter in `mapEvent()`:
+- Import `jitterCoords` from shared
+- Jitter both `source` and `target` coordinates using `e.id + '-src'` and `e.id + '-dst'` as seeds
+- No other changes to the data flow
 
-2. **Add search function** that calls the proxy:
-   - Country mode: `GET /ransomware/country/{CC}`
-   - Keyword mode: `GET /ransomware/search/{keyword}`
-   - Uses `fetch(PROXY_BASE + '?path=...')` with the supabase anon key header
-
-3. **Insert search UI between stat cards (line 362) and the 3-column grid (line 364)** on desktop:
-   - Mode toggle: Country / Keyword tabs
-   - Country mode: dropdown `<select>` with the 18 specified countries + custom text input for other ISO2 codes, plus a pinned "Check Somalia" button
-   - Keyword mode: text input
-   - Search button triggers the fetch
-   - Results panel below: victim cards with group (red), flag, org name, sector, date, domain, description (120 chars)
-   - Zero results: green message "No ransomware victims recorded for [Country]"
-   - Somalia special note when SO is searched
-
-4. **Insert simplified search UI in mobile tab** (line 965, after stat cards):
-   - Same functionality, compact layout
-
-5. **Country list constant**:
-```
-const RANSOMWARE_COUNTRIES = [
-  { code: 'SO', name: 'Somalia' }, { code: 'KE', name: 'Kenya' },
-  { code: 'ET', name: 'Ethiopia' }, { code: 'NG', name: 'Nigeria' },
-  { code: 'EG', name: 'Egypt' }, { code: 'ZA', name: 'South Africa' },
-  { code: 'MA', name: 'Morocco' }, { code: 'US', name: 'United States' },
-  { code: 'GB', name: 'United Kingdom' }, { code: 'DE', name: 'Germany' },
-  { code: 'FR', name: 'France' }, { code: 'CA', name: 'Canada' },
-  { code: 'AU', name: 'Australia' }, { code: 'IN', name: 'India' },
-  { code: 'BR', name: 'Brazil' }, { code: 'JP', name: 'Japan' },
-  { code: 'SA', name: 'Saudi Arabia' }, { code: 'AE', name: 'UAE' },
-];
-```
-
-### No backend changes needed
-The `api-proxy` already forwards all paths unrestricted.
+This keeps the approach lightweight — no country bounding-box data needed — and produces visually spread arcs with zero API changes.
 
