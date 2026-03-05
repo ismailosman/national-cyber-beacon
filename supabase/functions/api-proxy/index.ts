@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 };
 
-const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
+const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "http://187.77.222.249:8000";
 const API_KEY = Deno.env.get("SECURITY_API_KEY") ?? "";
 
 Deno.serve(async (req: Request) => {
