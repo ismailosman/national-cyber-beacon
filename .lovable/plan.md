@@ -1,21 +1,24 @@
 
 
-## Plan: Switch API proxy backend URL to direct IP
+## Problem Analysis
 
-The `api-proxy` edge function currently uses `https://cybersomalia.com` as its upstream URL, which is failing due to TLS errors. The fix is to update the default fallback URL to `http://187.77.222.249:8000` so the proxy bypasses DNS and TLS negotiation entirely.
+The threat map shows "Threat feed temporarily unavailable" because requests to `/threat/map/combined` are timing out. Network logs confirm: both requests failed with **"signal is aborted without reason"**.
 
-### Change
+**Root cause chain:**
+1. The client (`useLiveThreatAPI.ts` line 222) sets a **25-second** `AbortController` timeout
+2. The edge function (`api-proxy`) now has a 55s timeout for `/threat/map` paths (good)
+3. But the **client aborts at 25s** before the edge function can finish its upstream request
 
-**File: `supabase/functions/api-proxy/index.ts`** (line 7)
+The backend server at `187.77.222.249:8000` is responding slowly to `/threat/map/combined`, exceeding 25 seconds.
 
-Replace the default value for `API_BASE`:
-```typescript
-// Before
-const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
+## Plan
 
-// After
-const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "http://187.77.222.249:8000";
-```
+### 1. Increase client-side timeout in `useLiveThreatAPI.ts`
+- Change the `AbortController` timeout from **25,000ms → 50,000ms** (line 222)
+- This aligns with the edge function's 55s timeout for slow paths
 
-Single line change. No other files affected — the client-side code already points at the proxy, not the upstream URL directly.
+### 2. Add `/threat/map/combined` to edge function slow-path detection (safety fix)
+- In `api-proxy/index.ts`, the current check is `path.startsWith('/threat/map')` which already matches `/threat/map/combined` — no change needed here
+
+**Single file change:** `src/hooks/useLiveThreatAPI.ts` line 222, timeout `25000` → `50000`.
 
