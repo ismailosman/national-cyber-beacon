@@ -174,7 +174,6 @@ export interface LiveThreatAPIState {
 
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
-
 function mapEvent(e: APIEvent): LiveThreatEvent {
   const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src', e.source.country);
   const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst', e.target.country);
@@ -219,7 +218,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const fetchData = useCallback(async (force = false) => {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 50000);
+      const timeout = setTimeout(() => controller.abort(), 25000);
       const primaryPath = force ? '/threat/map/combined?force=true' : '/threat/map/combined';
       const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(primaryPath)}`, {
         headers: {
@@ -338,9 +337,6 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     schedule();
     return () => clearTimeout(timer);
   }, [isPaused, fetchData]);
-
-
-
 
   // Ransomware independent polling
   useEffect(() => {

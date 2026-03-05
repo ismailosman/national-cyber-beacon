@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 };
 
-const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "http://187.77.222.249:8000";
+const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
 const API_KEY = Deno.env.get("SECURITY_API_KEY") ?? "";
 
 Deno.serve(async (req: Request) => {
@@ -24,41 +24,29 @@ Deno.serve(async (req: Request) => {
       : undefined;
 
     const controller = new AbortController();
-    const isSlowPath = path.startsWith('/ransomware') || path.startsWith('/threat/map');
-    const timeout = setTimeout(() => controller.abort(), isSlowPath ? 55000 : 30000);
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
-    let response: Response | null = null;
-    let lastErr = "";
-    const MAX_RETRIES = 3;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        response = await fetch(targetUrl, {
-          method: req.method,
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": API_KEY,
-          },
-          body: attempt === 0 ? body : (req.method !== "GET" && req.method !== "HEAD" ? body : undefined),
-          signal: controller.signal,
-        });
-        break; // success
-      } catch (fetchErr: unknown) {
-        lastErr = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-        console.warn(`[api-proxy] attempt ${attempt + 1}/${MAX_RETRIES} failed: ${lastErr}`);
-        if (attempt < MAX_RETRIES - 1) {
-          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
-        }
-      }
-    }
-    clearTimeout(timeout);
-
-    if (!response) {
-      console.error(`[api-proxy] all ${MAX_RETRIES} attempts failed: ${lastErr}`);
+    let response: Response;
+    try {
+      response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (fetchErr: unknown) {
+      clearTimeout(timeout);
+      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      console.error(`[api-proxy] fetch failed: ${msg}`);
       return new Response(
-        JSON.stringify({ error: "Upstream fetch failed", detail: lastErr }),
+        JSON.stringify({ error: "Upstream fetch failed", detail: msg }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+    clearTimeout(timeout);
 
     console.log(`[api-proxy] upstream status=${response.status} content-type=${response.headers.get("content-type")}`);
     const responseText = await response.text();
