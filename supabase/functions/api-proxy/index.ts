@@ -24,7 +24,8 @@ Deno.serve(async (req: Request) => {
       : undefined;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const isSlowPath = path.startsWith('/ransomware') || path.startsWith('/threat/map');
+    const timeout = setTimeout(() => controller.abort(), isSlowPath ? 55000 : 30000);
 
     let response: Response | null = null;
     let lastErr = "";
