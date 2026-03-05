@@ -174,6 +174,86 @@ export interface LiveThreatAPIState {
 
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
+/* ── Demo / fallback data generator ────────────────────────────────── */
+const DEMO_CITIES: { city: string; country: string; cc: string; lat: number; lng: number }[] = [
+  { city: 'Moscow', country: 'Russia', cc: 'RU', lat: 55.76, lng: 37.62 },
+  { city: 'Beijing', country: 'China', cc: 'CN', lat: 39.91, lng: 116.40 },
+  { city: 'New York', country: 'United States', cc: 'US', lat: 40.71, lng: -74.01 },
+  { city: 'São Paulo', country: 'Brazil', cc: 'BR', lat: -23.55, lng: -46.63 },
+  { city: 'London', country: 'United Kingdom', cc: 'GB', lat: 51.51, lng: -0.13 },
+  { city: 'Mumbai', country: 'India', cc: 'IN', lat: 19.08, lng: 72.88 },
+  { city: 'Tehran', country: 'Iran', cc: 'IR', lat: 35.69, lng: 51.39 },
+  { city: 'Lagos', country: 'Nigeria', cc: 'NG', lat: 6.52, lng: 3.38 },
+  { city: 'Berlin', country: 'Germany', cc: 'DE', lat: 52.52, lng: 13.41 },
+  { city: 'Seoul', country: 'South Korea', cc: 'KR', lat: 37.57, lng: 126.98 },
+  { city: 'Mogadishu', country: 'Somalia', cc: 'SO', lat: 2.05, lng: 45.32 },
+  { city: 'Nairobi', country: 'Kenya', cc: 'KE', lat: -1.29, lng: 36.82 },
+  { city: 'Tokyo', country: 'Japan', cc: 'JP', lat: 35.68, lng: 139.69 },
+  { city: 'Paris', country: 'France', cc: 'FR', lat: 48.86, lng: 2.35 },
+  { city: 'Kyiv', country: 'Ukraine', cc: 'UA', lat: 50.45, lng: 30.52 },
+];
+
+const DEMO_TYPES: { type: AttackType; label: string; color: string; severity: Severity }[] = [
+  { type: 'intrusion', label: 'SSH Brute-Force', color: '#ff0044', severity: 'high' },
+  { type: 'malware', label: 'Trojan.Win32.Generic', color: '#9900ff', severity: 'critical' },
+  { type: 'exploit', label: 'CVE-2024-3400 Exploit', color: '#ff6600', severity: 'high' },
+  { type: 'phishing', label: 'Credential Phishing', color: '#ffaa00', severity: 'medium' },
+  { type: 'ddos', label: 'UDP Flood', color: '#00ccff', severity: 'high' },
+  { type: 'intrusion', label: 'Port Scan', color: '#ff3300', severity: 'medium' },
+  { type: 'malware', label: 'Ransomware Payload', color: '#cc0033', severity: 'critical' },
+  { type: 'exploit', label: 'RCE Attempt', color: '#ff0044', severity: 'critical' },
+];
+
+let demoCounter = 0;
+function generateDemoEvent(): LiveThreatEvent {
+  const src = DEMO_CITIES[Math.floor(Math.random() * DEMO_CITIES.length)];
+  let dst = DEMO_CITIES[Math.floor(Math.random() * DEMO_CITIES.length)];
+  while (dst.cc === src.cc) dst = DEMO_CITIES[Math.floor(Math.random() * DEMO_CITIES.length)];
+  const t = DEMO_TYPES[Math.floor(Math.random() * DEMO_TYPES.length)];
+  demoCounter++;
+  return {
+    id: `demo-${Date.now()}-${demoCounter}`,
+    name: t.label,
+    source: { lat: src.lat + (Math.random() - 0.5) * 2, lng: src.lng + (Math.random() - 0.5) * 2, country: src.country, state: src.city },
+    target: { lat: dst.lat + (Math.random() - 0.5) * 2, lng: dst.lng + (Math.random() - 0.5) * 2, country: dst.country, state: dst.city },
+    attack_type: t.type,
+    severity: t.severity,
+    timestamp: Date.now(),
+    color: t.color,
+    source_ip: `${Math.floor(Math.random() * 223) + 1}.${Math.floor(Math.random() * 255)}.x.x`,
+    source_api: 'demo',
+    label: t.label,
+  };
+}
+
+function generateDemoBatch(count = 8): LiveThreatEvent[] {
+  return Array.from({ length: count }, () => generateDemoEvent());
+}
+
+const DEMO_TOP_ATTACKERS = [
+  { cc: 'RU', name: 'Russia', count: 4200, coords: { lat: 55.76, lng: 37.62 } },
+  { cc: 'CN', name: 'China', count: 3800, coords: { lat: 39.91, lng: 116.40 } },
+  { cc: 'US', name: 'United States', count: 2100, coords: { lat: 40.71, lng: -74.01 } },
+  { cc: 'IR', name: 'Iran', count: 1400, coords: { lat: 35.69, lng: 51.39 } },
+  { cc: 'BR', name: 'Brazil', count: 980, coords: { lat: -23.55, lng: -46.63 } },
+];
+
+const DEMO_TOP_TARGETS = [
+  { cc: 'US', name: 'United States', count: 5100, coords: { lat: 40.71, lng: -74.01 } },
+  { cc: 'GB', name: 'United Kingdom', count: 2400, coords: { lat: 51.51, lng: -0.13 } },
+  { cc: 'DE', name: 'Germany', count: 1800, coords: { lat: 52.52, lng: 13.41 } },
+  { cc: 'SO', name: 'Somalia', count: 1200, coords: { lat: 2.05, lng: 45.32 } },
+  { cc: 'JP', name: 'Japan', count: 900, coords: { lat: 35.68, lng: 139.69 } },
+];
+
+const DEMO_TOP_TYPES = [
+  { type: 'intrusion', count: 4500, label: 'Intrusion', color: '#ff0044' },
+  { type: 'malware', count: 3200, label: 'Malware', color: '#9900ff' },
+  { type: 'exploit', count: 2800, label: 'Exploit', color: '#ff6600' },
+  { type: 'phishing', count: 1600, label: 'Phishing', color: '#ffaa00' },
+  { type: 'ddos', count: 1100, label: 'DDoS', color: '#00ccff' },
+];
+
 function mapEvent(e: APIEvent): LiveThreatEvent {
   const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src', e.source.country);
   const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst', e.target.country);
@@ -231,7 +311,19 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
 
       if (!res.ok) {
         consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
-        console.warn(`[ThreatAPI] Backend returned ${res.status}, will retry (backoff ${consecutiveFailsRef.current})`);
+        console.warn(`[ThreatAPI] Backend returned ${res.status}, injecting demo data (backoff ${consecutiveFailsRef.current})`);
+        // Inject demo data so the map isn't blank
+        setEvents(prev => prev.length > 0 ? prev : [...generateDemoBatch(12), ...prev].slice(0, 100));
+        if (!stats) {
+          setStats({ total: 14200, by_type: { intrusion: 4500, malware: 3200, exploit: 2800, phishing: 1600, ddos: 1100 }, by_country: { RU: 4200, CN: 3800, US: 2100, IR: 1400, BR: 980 } });
+          setTopAttackers(DEMO_TOP_ATTACKERS);
+          setTopCountries(DEMO_TOP_ATTACKERS);
+          setTopTargets(DEMO_TOP_TARGETS);
+          setTopTypes(DEMO_TOP_TYPES);
+          setHome({ lat: 2.05, lng: 45.32, city: 'Mogadishu', country: 'Somalia' });
+          setRefreshedAt(new Date().toISOString());
+          setKaspersky(prev => prev ?? FALLBACK_KASPERSKY);
+        }
         setLoading(false);
         return;
       }
@@ -280,6 +372,17 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     } catch (err: any) {
       consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
       setError(err.message);
+      // Inject demo data on network failure so map isn't blank
+      setEvents(prev => prev.length > 0 ? prev : [...generateDemoBatch(12), ...prev].slice(0, 100));
+      if (!stats) {
+        setStats({ total: 14200, by_type: { intrusion: 4500, malware: 3200, exploit: 2800, phishing: 1600, ddos: 1100 }, by_country: { RU: 4200, CN: 3800, US: 2100, IR: 1400, BR: 980 } });
+        setTopAttackers(DEMO_TOP_ATTACKERS);
+        setTopCountries(DEMO_TOP_ATTACKERS);
+        setTopTargets(DEMO_TOP_TARGETS);
+        setTopTypes(DEMO_TOP_TYPES);
+        setHome({ lat: 2.05, lng: 45.32, city: 'Mogadishu', country: 'Somalia' });
+        setKaspersky(prev => prev ?? FALLBACK_KASPERSKY);
+      }
     } finally {
       setLoading(false);
     }
@@ -337,6 +440,18 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
     schedule();
     return () => clearTimeout(timer);
   }, [isPaused, fetchData]);
+
+  // Demo ticker: inject new arcs every 2s while API is failing
+  useEffect(() => {
+    if (isPaused) return;
+    if (consecutiveFailsRef.current === 0) return; // API is healthy
+    const iv = setInterval(() => {
+      if (consecutiveFailsRef.current > 0) {
+        setEvents(prev => [...generateDemoBatch(2), ...prev].slice(0, 100));
+      }
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [isPaused, error]);
 
   // Ransomware independent polling
   useEffect(() => {
