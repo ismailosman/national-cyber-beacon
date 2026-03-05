@@ -557,12 +557,30 @@ const ThreatMapStandalone: React.FC = () => {
             topTargetCCs={topTargetCCs}
           />
 
-          {!hasData && !loading && (
-            <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-              <div className="text-center px-6 py-4 rounded-xl" style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <Zap className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
-                <p className="text-sm text-slate-300 font-mono">Collecting threat intelligence...</p>
-                <p className="text-[10px] text-slate-500 mt-1">Waiting for live feed data</p>
+          {!hasData && (
+            <div className="absolute inset-0 flex items-center justify-center z-20">
+              <div className="text-center px-8 py-6 rounded-xl" style={{ background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {loading ? (
+                  <>
+                    <RefreshCw className="w-8 h-8 text-cyan-400 mx-auto mb-3 animate-spin" />
+                    <p className="text-sm text-slate-300 font-mono">Connecting to threat feed…</p>
+                  </>
+                ) : error ? (
+                  <>
+                    <ShieldAlert className="w-8 h-8 text-amber-400 mx-auto mb-3" />
+                    <p className="text-sm text-slate-300 font-mono">Threat feed temporarily unavailable</p>
+                    <p className="text-[10px] text-slate-500 mt-1 max-w-[260px]">The upstream server is experiencing issues. Retrying automatically…</p>
+                    <button onClick={forceRefresh} className="mt-3 px-4 py-1.5 rounded text-[11px] font-mono text-cyan-300 hover:text-white transition" style={{ background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)' }}>
+                      <RefreshCw className="w-3 h-3 inline mr-1.5 -mt-0.5" />Retry Now
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
+                    <p className="text-sm text-slate-300 font-mono">Collecting threat intelligence…</p>
+                    <p className="text-[10px] text-slate-500 mt-1">Waiting for live feed data</p>
+                  </>
+                )}
               </div>
             </div>
           )}
