@@ -26,27 +26,38 @@ Deno.serve(async (req: Request) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    let response: Response;
-    try {
-      response = await fetch(targetUrl, {
-        method: req.method,
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-        },
-        body,
-        signal: controller.signal,
-      });
-    } catch (fetchErr: unknown) {
-      clearTimeout(timeout);
-      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      console.error(`[api-proxy] fetch failed: ${msg}`);
+    let response: Response | null = null;
+    let lastErr = "";
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        response = await fetch(targetUrl, {
+          method: req.method,
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": API_KEY,
+          },
+          body: attempt === 0 ? body : (req.method !== "GET" && req.method !== "HEAD" ? body : undefined),
+          signal: controller.signal,
+        });
+        break; // success
+      } catch (fetchErr: unknown) {
+        lastErr = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.warn(`[api-proxy] attempt ${attempt + 1}/${MAX_RETRIES} failed: ${lastErr}`);
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        }
+      }
+    }
+    clearTimeout(timeout);
+
+    if (!response) {
+      console.error(`[api-proxy] all ${MAX_RETRIES} attempts failed: ${lastErr}`);
       return new Response(
-        JSON.stringify({ error: "Upstream fetch failed", detail: msg }),
+        JSON.stringify({ error: "Upstream fetch failed", detail: lastErr }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    clearTimeout(timeout);
 
     console.log(`[api-proxy] upstream status=${response.status} content-type=${response.headers.get("content-type")}`);
     const responseText = await response.text();
