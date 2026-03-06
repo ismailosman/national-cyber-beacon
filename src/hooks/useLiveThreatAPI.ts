@@ -279,7 +279,8 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       setError(null);
     } catch (err: any) {
       consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
-      setError(err.message);
+      console.warn('[ThreatAPI] fetch error (silent):', err.message);
+      // Don't set error state — keeps the map usable with stale/fallback data
     } finally {
       setLoading(false);
     }
