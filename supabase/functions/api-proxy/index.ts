@@ -6,6 +6,27 @@ const corsHeaders = {
 
 const API_BASE = Deno.env.get("SECURITY_API_URL") ?? "https://cybersomalia.com";
 const API_KEY = Deno.env.get("SECURITY_API_KEY") ?? "";
+const MAX_RETRIES = 3;
+const TIMEOUT_MS = 55000;
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout);
+      return res;
+    } catch (err) {
+      clearTimeout(timeout);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[api-proxy] attempt ${attempt}/${retries} failed: ${msg}`);
+      if (attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
+  throw new Error("unreachable");
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -15,7 +36,6 @@ Deno.serve(async (req: Request) => {
   try {
     const url = new URL(req.url);
     const path = url.searchParams.get("path") || "/health";
-
     const targetUrl = `${API_BASE}${path}`;
     console.log(`[api-proxy] ${req.method} ${path} → ${targetUrl}`);
 
@@ -23,36 +43,29 @@ Deno.serve(async (req: Request) => {
       ? await req.text()
       : undefined;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-
     let response: Response;
     try {
-      response = await fetch(targetUrl, {
+      response = await fetchWithRetry(targetUrl, {
         method: req.method,
         headers: {
           "Content-Type": "application/json",
           "x-api-key": API_KEY,
         },
         body,
-        signal: controller.signal,
       });
     } catch (fetchErr: unknown) {
-      clearTimeout(timeout);
       const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      console.error(`[api-proxy] fetch failed: ${msg}`);
+      console.error(`[api-proxy] all retries failed: ${msg}`);
       return new Response(
         JSON.stringify({ error: "Upstream fetch failed", detail: msg }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    clearTimeout(timeout);
 
     console.log(`[api-proxy] upstream status=${response.status} content-type=${response.headers.get("content-type")}`);
     const responseText = await response.text();
     console.log(`[api-proxy] response length=${responseText.length}`);
 
-    // Wrap 404s and 500s so the edge function itself always returns 200/502 JSON
     if (response.status === 404) {
       return new Response(
         JSON.stringify({ _not_found: true, _status: 404, detail: "Not found" }),
