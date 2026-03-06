@@ -8,7 +8,6 @@ import CountryPanel from '@/components/cyber-map/CountryPanel';
 import { COUNTRY_ISO, ATTACK_COLORS, ATTACK_LABELS } from '@/components/cyber-map/shared';
 import type { AttackType } from '@/hooks/useLiveAttacks';
 import logoSrc from '@/assets/logo.png';
-import RansomwareSearch from '@/components/ransomware/RansomwareSearch';
 
 /* ── Relative time helper ─────────────────────────────────────────── */
 function timeAgo(ts: number): string {
@@ -362,13 +361,11 @@ const ThreatMapStandalone: React.FC = () => {
               ))}
             </div>
 
-            <RansomwareSearch />
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
               {/* Recent Victims */}
               <div className="rounded-xl p-4 max-h-[400px] overflow-y-auto" style={{ background: '#0d0d1a', border: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
                 <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 font-mono mb-3">RECENT VICTIMS</p>
-                {ransomware === null ? <p className="text-[10px] text-slate-600 font-mono">Loading ransomware data…</p> : ransomware.recent_victims?.length ? [...ransomware.recent_victims].sort((a, b) => new Date(b.attackdate).getTime() - new Date(a.attackdate).getTime()).slice(0, 20).map((v, i) => {
+                {ransomware?.recent_victims?.length ? ransomware.recent_victims.slice(0, 20).map((v, i) => {
                   const iso = (v.country || '').toLowerCase().slice(0, 2);
                   return (
                     <div key={i} className="py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -383,7 +380,7 @@ const ThreatMapStandalone: React.FC = () => {
                       </div>
                     </div>
                   );
-                }) : <p className="text-[10px] text-slate-600 font-mono">No victims reported</p>}
+                }) : <p className="text-[10px] text-slate-600 font-mono">Waiting for ransomware data…</p>}
               </div>
 
               {/* Top Ransomware Groups */}
@@ -392,7 +389,6 @@ const ThreatMapStandalone: React.FC = () => {
                 {(() => {
                   const groups = ransomware?.stats?.by_group ?? [];
                   const maxG = groups[0]?.[1] ?? 1;
-                  if (ransomware === null) return <p className="text-[10px] text-slate-600 font-mono">Loading group data…</p>;
                   return groups.length ? groups.slice(0, 10).map(([name, count]) => (
                     <div key={name} className="flex items-center gap-2 py-1.5">
                       <span className="text-[10px] font-mono text-slate-300 w-24 truncate">{name}</span>
@@ -411,7 +407,6 @@ const ThreatMapStandalone: React.FC = () => {
                 {(() => {
                   const sectors = ransomware?.stats?.by_sector ?? [];
                   const maxS = sectors[0]?.[1] ?? 1;
-                  if (ransomware === null) return <p className="text-[10px] text-slate-600 font-mono">Loading sector data…</p>;
                   return sectors.length ? sectors.slice(0, 10).map(([name, count]) => (
                     <div key={name} className="flex items-center gap-2 py-1.5">
                       <span className="text-[10px] font-mono text-slate-300 w-28 truncate">{name}</span>
@@ -980,12 +975,10 @@ const ThreatMapStandalone: React.FC = () => {
                     ))}
                   </div>
 
-                  <RansomwareSearch compact />
-
                   {/* Recent victims */}
                   <div>
                     <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400 mb-2 font-mono">RECENT VICTIMS</p>
-                    {ransomware === null ? <p className="text-[10px] text-slate-600 font-mono">Loading…</p> : ransomware.recent_victims?.length ? [...ransomware.recent_victims].sort((a, b) => new Date(b.attackdate).getTime() - new Date(a.attackdate).getTime()).slice(0, 15).map((v, i) => {
+                    {ransomware?.recent_victims?.slice(0, 15).map((v, i) => {
                       const iso = (v.country || '').toLowerCase().slice(0, 2);
                       return (
                         <div key={i} className="py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -997,7 +990,8 @@ const ThreatMapStandalone: React.FC = () => {
                           <span className="text-[9px] font-mono text-slate-500">🏢 {v.activity || 'Unknown'} · 📅 {v.attackdate}</span>
                         </div>
                       );
-                    }) : <p className="text-[10px] text-slate-600 font-mono">No victims reported</p>}
+                    })}
+                    {!ransomware?.recent_victims?.length && <p className="text-[10px] text-slate-600 font-mono">Waiting for data…</p>}
                   </div>
 
                   {/* Top groups */}

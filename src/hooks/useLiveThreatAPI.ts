@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LiveThreat, AttackType, Severity } from '@/hooks/useLiveAttacks';
-import { jitterCoords } from '@/components/cyber-map/shared';
 
 /* ── Fallback KSN data (used when API key is inactive) ─────────────── */
 const FALLBACK_KASPERSKY: KasperskyData = {
@@ -82,9 +81,8 @@ export interface RansomwareVictim {
   country: string;
   activity: string;
   attackdate: string;
-  domain?: string;
+  website?: string;
   description?: string;
-  discovered?: string;
 }
 
 export interface RansomwareData {
@@ -175,13 +173,11 @@ export interface LiveThreatAPIState {
 const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-proxy`;
 
 function mapEvent(e: APIEvent): LiveThreatEvent {
-  const src = jitterCoords(e.source.lat, e.source.lng, e.id + '-src', e.source.country);
-  const dst = jitterCoords(e.target.lat, e.target.lng, e.id + '-dst', e.target.country);
   return {
     id: e.id,
     name: e.label,
-    source: { lat: src.lat, lng: src.lng, country: e.source.country, state: e.source.city },
-    target: { lat: dst.lat, lng: dst.lng, country: e.target.country, state: e.target.city },
+    source: { lat: e.source.lat, lng: e.source.lng, country: e.source.country, state: e.source.city },
+    target: { lat: e.target.lat, lng: e.target.lng, country: e.target.country, state: e.target.city },
     attack_type: mapType(e.type),
     severity: (e.severity?.toLowerCase() ?? 'medium') as Severity,
     timestamp: new Date(e.timestamp).getTime(),
@@ -218,7 +214,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
   const fetchData = useCallback(async (force = false) => {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 50000);
+      const timeout = setTimeout(() => controller.abort(), 25000);
       const primaryPath = force ? '/threat/map/combined?force=true' : '/threat/map/combined';
       const res = await fetch(`${PROXY_BASE}?path=${encodeURIComponent(primaryPath)}`, {
         headers: {
@@ -279,8 +275,7 @@ export function useLiveThreatAPI(): LiveThreatAPIState {
       setError(null);
     } catch (err: any) {
       consecutiveFailsRef.current = Math.min(consecutiveFailsRef.current + 1, 6);
-      console.warn('[ThreatAPI] fetch error (silent):', err.message);
-      // Don't set error state — keeps the map usable with stale/fallback data
+      setError(err.message);
     } finally {
       setLoading(false);
     }
